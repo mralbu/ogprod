@@ -45,6 +45,56 @@ def test_parse_daily_rate_and_periodo_column(data_dir):
     assert row["volume"] == pytest.approx(1000 * 29 * 0.158987294928)
 
 
+def test_parse_slash_period_format(tmp_path):
+    # Real bulk files write the period as "2023/01", not "2023-01".
+    file = tmp_path / "poco.csv"
+    file.write_text("Poço;Período;Petróleo (m³)\n7-X-1-BA;2023/01;10,0\n", encoding="utf-8")
+    frame = ogprod.load("anp", file)
+    assert frame.iloc[0]["period"] == pd.Timestamp("2023-01-01")
+
+
+def test_oleo_preferred_over_petroleo_total(tmp_path):
+    # In files carrying both, "Petróleo" is the óleo+condensado total; counting
+    # it alongside "Óleo" would double-count oil.
+    file = tmp_path / "poco.csv"
+    file.write_text(
+        "Poço;Período;Óleo (m³);Condensado (m³);Petróleo (m³)\n7-X-1-BA;2023/01;100,0;20,0;120,0\n",
+        encoding="utf-8",
+    )
+    frame = ogprod.load("anp", file)
+    oil = frame[frame["product"] == "oil"].iloc[0]
+    assert oil["volume"] == pytest.approx(100.0)
+    condensate = frame[frame["product"] == "condensate"].iloc[0]
+    assert condensate["volume"] == pytest.approx(20.0)
+
+
+def test_parse_bulk_file_multirow_header(tmp_path):
+    # Bulk files (2021+) use a three-row header: main labels, sub-labels
+    # ("ANP"/"Operador" under "Nome Poço", "Associado"/"Não Associado"/"Gás
+    # Total" under "Gás Natural"), and a third sub-sub row.
+    file = tmp_path / "producao_mar.csv"
+    file.write_text(
+        "Estado;Bacia;Nome Poço;;Campo;Operador;Período;Óleo (bbl/dia);"
+        "Condensado (bbl/dia);Petróleo (bbl/dia);Gás Natural (Mm³/dia);;;Água (bbl/dia)\n"
+        ";;ANP;Operador;;;;;;;Associado;Não Associado;Gás Total;\n"
+        ";;;;;;;;;;;;;\n"
+        "Bahia;Recôncavo;7-FMO-1-BA;FMO-0001;FAZENDA MODELO;Petrobras;2023/01;"
+        "1.100,0;20,0;1.120,0;1,0;2,0;3,0;50,0\n",  # 1.100,0 = thousands separator
+        encoding="utf-8",
+    )
+    frame = ogprod.load("anp", file)
+
+    assert set(frame["entity_id"]) == {"7-FMO-1-BA"}  # ANP name, not operator's
+    assert set(frame["period"]) == {pd.Timestamp("2023-01-01")}
+
+    oil = frame[frame["product"] == "oil"].iloc[0]
+    assert oil["volume"] == pytest.approx(1100.0 * 31 * 0.158987294928)
+
+    # gas comes from "Gás Total" alone, not total + components triple-counted
+    gas = frame[frame["product"] == "gas"].iloc[0]
+    assert gas["volume"] == pytest.approx(3.0 * 1000 * 31)
+
+
 def test_rejects_file_without_well_column(tmp_path):
     bogus = tmp_path / "bogus.csv"
     bogus.write_text("a;b\n1;2\n")

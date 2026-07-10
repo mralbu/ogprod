@@ -14,7 +14,7 @@ from ogprod.schema import (
     canonical_id,
     validate,
 )
-from ogprod.sources import available, get, load
+from ogprod.sources import available, fetch, get, load
 from ogprod.units import convert, to_m3
 
 __version__ = "0.1.0"
@@ -28,6 +28,7 @@ __all__ = [
     "available",
     "canonical_id",
     "convert",
+    "fetch",
     "get",
     "load",
     "to_m3",

@@ -11,14 +11,42 @@ loaded directly.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import IO, ClassVar
+from typing import IO, Any, ClassVar
 
+import httpx
 import pandas as pd
 
 from ogprod import schema
 
 RawFile = str | Path | IO[str] | IO[bytes]
+
+_USER_AGENT = "ogprod/0.1"
+_TIMEOUT = httpx.Timeout(120.0)
+
+
+@contextmanager
+def open_client(client: httpx.Client | None) -> Iterator[httpx.Client]:
+    """Yield ``client`` as-is, or a temporary one with ogprod defaults."""
+    if client is not None:
+        yield client
+        return
+    with httpx.Client(
+        follow_redirects=True, timeout=_TIMEOUT, headers={"User-Agent": _USER_AGENT}
+    ) as owned:
+        yield owned
+
+
+def download(client: httpx.Client, url: str, dest: Path) -> Path:
+    """Stream ``url`` into ``dest`` and return ``dest``."""
+    with client.stream("GET", url) as response:
+        response.raise_for_status()
+        with dest.open("wb") as sink:
+            for chunk in response.iter_bytes():
+                sink.write(chunk)
+    return dest
 
 
 class Source(ABC):
@@ -35,11 +63,17 @@ class Source(ABC):
     def parse(self, raw: RawFile) -> pd.DataFrame:
         """Parse a raw file from this source into a canonical DataFrame."""
 
-    def fetch(self, dest_dir: str | Path, **kwargs: object) -> Path:
-        """Download a raw file into ``dest_dir`` and return its path.
+    def fetch(
+        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
+    ) -> list[Path]:
+        """Download raw file(s) into ``dest_dir`` and return their paths.
 
-        Optional: connectors without a stable download URL only implement
-        ``parse`` and document where to fetch files manually.
+        Returns a list because some publishers split one period across several
+        files (ANP's terra/mar/pré-sal). Each returned path can be passed to
+        ``parse``. Connectors without a stable download URL leave this
+        unimplemented and document where to fetch files manually; ``client``
+        lets callers inject a configured ``httpx.Client`` (tests use a mock
+        transport).
         """
         raise NotImplementedError(f"{self.name} has no automated fetch; see {self.docs_url}")
 
@@ -69,6 +103,11 @@ def available() -> list[str]:
 def load(name: str, raw: RawFile) -> pd.DataFrame:
     """Parse ``raw`` with the connector registered under ``name``."""
     return get(name).parse(raw)
+
+
+def fetch(name: str, dest_dir: str | Path, **kwargs: Any) -> list[Path]:
+    """Download raw file(s) with the connector registered under ``name``."""
+    return get(name).fetch(dest_dir, **kwargs)
 
 
 def build_frame(

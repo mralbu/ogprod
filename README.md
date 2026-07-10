@@ -18,8 +18,12 @@ import ogprod
 ogprod.available()
 # ['anp', 'argentina', 'sodir']
 
-# Parse a file downloaded from a source into the canonical schema
-frame = ogprod.load("anp", "producao-por-poco-2024-01-mar.csv")
+# Download a source's raw file(s)...
+paths = ogprod.fetch("anp", "data/", year=2023, month=1)
+
+# ...and parse them into the canonical schema (or parse files you
+# downloaded yourself)
+frame = ogprod.load("anp", paths[0])
 
 frame.columns
 # source, entity_type, entity_id, entity_name, field, basin, region,
@@ -43,10 +47,12 @@ documented in [docs/design.md](docs/design.md).
 | `argentina` | Secretaría de Energía (Argentina) | well, monthly | "Capítulo IV" CSVs, incl. the unconventional (Vaca Muerta) dataset |
 | `sodir` | Sodir (Norway) | field, monthly | FactPages `field_production_monthly` table, back to 1971 |
 
-Connectors parse files you download from the publisher (`ogprod.load(name,
-path)`); automated `fetch()` is planned once URL stability per source is
-verified. The survey of ~15 further candidate sources is in
-[docs/data-sources.md](docs/data-sources.md).
+Each connector separates `fetch` (network: download the publisher's raw files)
+from `parse` (pure: normalize a raw file, works on files downloaded by any
+means). See [docs/downloading.md](docs/downloading.md) for each source's
+download options and caveats — e.g. ANP bulk files stop at 2023; newer Brazil
+data is only in ANP's interactive CDP app. The survey of ~15 further candidate
+sources is in [docs/data-sources.md](docs/data-sources.md).
 
 ## Development
 
@@ -75,6 +81,7 @@ src/ogprod/
     sodir.py       # Norway, field-level
 tests/             # pytest suite with fixture files mirroring real formats
 docs/
+  downloading.md   # where to download each source's files, and how to load them
   data-sources.md  # research: who publishes production data worldwide
   design.md        # architecture and how to add a connector
 ```

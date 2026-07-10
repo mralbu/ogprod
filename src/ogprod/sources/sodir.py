@@ -12,6 +12,10 @@ https://www.sodir.no/en/facts/data-and-analyses/open-data/
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
+import httpx
 import pandas as pd
 
 from ogprod import units
@@ -28,12 +32,29 @@ _VOLUME_COLUMNS: dict[str, tuple[Product, str]] = {
 
 _REQUIRED = ("prfInformationCarrier", "prfYear", "prfMonth")
 
+# FactPages report-server export of the full table (1971→today). The report
+# server requires an IpAddress parameter but accepts any value.
+_CSV_URL = (
+    "https://factpages.sodir.no/public?/Factpages/external/tableview/field_production_monthly"
+    "&rs:Command=Render&rc:Toolbar=false&rc:Parameters=f&rs:Format=CSV&Top100=false"
+    "&IpAddress=1.2.3.4&CultureCode=en"
+)
+
 
 @base.register
 class Sodir(base.Source):
     name = "sodir"
     entity_type = EntityType.FIELD
     docs_url = "https://factpages.sodir.no/"
+
+    def fetch(
+        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
+    ) -> list[Path]:
+        """Download the full ``field_production_monthly`` table (one CSV)."""
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with base.open_client(client) as http:
+            return [base.download(http, _CSV_URL, dest_dir / "field_production_monthly.csv")]
 
     def parse(self, raw: base.RawFile) -> pd.DataFrame:
         frame = pd.read_csv(raw)

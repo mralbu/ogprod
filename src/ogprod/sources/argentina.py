@@ -10,6 +10,11 @@ Downloads: http://datos.energia.gob.ar/dataset/produccion-de-petroleo-y-gas-por-
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+from typing import Any
+
+import httpx
 import pandas as pd
 
 from ogprod import units
@@ -24,6 +29,11 @@ _VOLUME_COLUMNS: dict[str, tuple[Product, str]] = {
 
 _REQUIRED = ("idpozo", "anio", "mes")
 
+# The portal is a stock CKAN instance; package_show lists one CSV resource per
+# year (e.g. "Producción de Pozos de Gas y Petróleo – 2025").
+_PACKAGE_SHOW_URL = "http://datos.energia.gob.ar/api/3/action/package_show"
+_DATASET_ID = "produccion-de-petroleo-y-gas-por-pozo"
+
 
 @base.register
 class Argentina(base.Source):
@@ -31,8 +41,43 @@ class Argentina(base.Source):
     entity_type = EntityType.WELL
     docs_url = "http://datos.energia.gob.ar/dataset/produccion-de-petroleo-y-gas-por-pozo"
 
+    def fetch(
+        self,
+        dest_dir: str | Path,
+        *,
+        year: int | None = None,
+        client: httpx.Client | None = None,
+        **kwargs: Any,
+    ) -> list[Path]:
+        """Download the per-year Capítulo IV CSV for ``year``."""
+        if year is None:
+            raise TypeError("argentina fetch requires a year, e.g. fetch(dest, year=2024)")
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with base.open_client(client) as http:
+            response = http.get(_PACKAGE_SHOW_URL, params={"id": _DATASET_ID})
+            response.raise_for_status()
+            resources = [
+                resource
+                for resource in response.json()["result"]["resources"]
+                if resource.get("format") == "CSV"
+            ]
+            matches = [r for r in resources if str(year) in (r.get("name") or "")]
+            if not matches:
+                years = sorted(
+                    match.group()
+                    for resource in resources
+                    if (match := re.search(r"\b(19|20)\d\d\b", resource.get("name") or ""))
+                )
+                raise ValueError(f"no Capítulo IV CSV for {year}; years available: {years}")
+            url = matches[0]["url"]
+            dest = dest_dir / httpx.URL(url).path.rsplit("/", 1)[-1]
+            return [base.download(http, url, dest)]
+
     def parse(self, raw: base.RawFile) -> pd.DataFrame:
-        frame = pd.read_csv(raw)
+        # low_memory=False: real files are >100 MB and chunked type inference
+        # emits DtypeWarning on sparse text columns.
+        frame = pd.read_csv(raw, low_memory=False)
         missing = [column for column in _REQUIRED if column not in frame.columns]
         if missing:
             raise ValueError(f"not a Capítulo IV well production file; missing {missing}")
