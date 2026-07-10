@@ -6,6 +6,10 @@ default:
 sync:
     uv sync
 
+# Download a source's raw files into data/ (e.g. `just fetch sodir`, `just fetch anp --year 2023 --month 1`)
+fetch *args:
+    uv run python -m ogprod fetch {{args}}
+
 # Run the test suite
 test *args:
     uv run pytest {{args}}

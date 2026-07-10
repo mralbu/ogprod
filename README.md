@@ -20,6 +20,8 @@ ogprod.available()
 
 # Download a source's raw file(s)...
 paths = ogprod.fetch("anp", "data/", year=2023, month=1)
+# ...or from the shell: `python -m ogprod fetch anp --year 2023 --month 1`
+# (`just fetch ...` in this repo)
 
 # ...and parse them into the canonical schema (or parse files you
 # downloaded yourself)
@@ -61,6 +63,7 @@ Requires [uv](https://docs.astral.sh/uv/) and [just](https://just.systems/)
 
 ```sh
 just sync        # install dependencies
+just fetch ...   # download raw files into data/, e.g. `just fetch sodir`
 just test        # pytest
 just lint        # ruff check + format check
 just fmt         # auto-format

@@ -33,6 +33,17 @@ frame = ogprod.load("anp", "2023_01_producao_Mar.csv")
 rows with no volume, and runs `schema.validate` before returning. The result
 has the canonical columns documented in [design.md](design.md#canonical-schema).
 
+There is also a CLI wrapper for downloading without opening Python
+(`just fetch ...` inside this repo runs the same thing):
+
+```sh
+python -m ogprod fetch sodir                      # into data/ by default
+python -m ogprod fetch argentina --year 2024
+python -m ogprod fetch anp --year 2023 --month 1 --dest raw/
+```
+
+It prints the downloaded paths, one per line.
+
 All three fetch implementations were verified against live downloads in July
 2026, with parsed totals cross-checked against published country figures.
 
