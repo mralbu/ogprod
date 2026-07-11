@@ -14,8 +14,10 @@ Publishers restate history, so production writes upsert on
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
 
+import duckdb
 import geopandas as gpd
 import pandas as pd
 
@@ -118,3 +120,122 @@ def load_entities(
     if entity_type is not None:
         entities = entities[entities["entity_type"] == entity_type].reset_index(drop=True)
     return entities
+
+
+def _production_files(
+    root: Path, source: str | None, start: pd.Timestamp | None, end: pd.Timestamp | None
+) -> list[Path]:
+    """Partition files matching the source/year pruning implied by the filters."""
+    base = root / "production"
+    if not base.exists():
+        return []
+    source_dirs = [base / f"source={source}"] if source else sorted(base.glob("source=*"))
+    files = []
+    for source_dir in source_dirs:
+        for year_dir in sorted(source_dir.glob("year=*")):
+            year = int(year_dir.name.split("=", 1)[1])
+            if start is not None and year < start.year:
+                continue
+            if end is not None and year > end.year:
+                continue
+            path = year_dir / "data.parquet"
+            if path.exists():
+                files.append(path)
+    return files
+
+
+def _files_literal(files: list[Path]) -> str:
+    quoted = ", ".join("'" + str(f).replace("'", "''") + "'" for f in files)
+    return f"[{quoted}]"
+
+
+def load_production(
+    *,
+    source: str | Iterable[str] | None = None,
+    entity_type: str | Iterable[str] | None = None,
+    entity_id: str | Iterable[str] | None = None,
+    field: str | Iterable[str] | None = None,
+    basin: str | Iterable[str] | None = None,
+    region: str | Iterable[str] | None = None,
+    operator: str | Iterable[str] | None = None,
+    product: str | Iterable[str] | None = None,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    root: str | Path | None = None,
+) -> pd.DataFrame:
+    """Load canonical production rows, filtered with DuckDB pushdown.
+
+    String filters accept one value or an iterable; ``start``/``end`` bound
+    ``period`` inclusively. Filters combine with AND. Source and year filters
+    additionally prune which partition files are read at all.
+    """
+    start_ts: pd.Timestamp | None = None if start is None else pd.Timestamp(start)  # type: ignore
+    end_ts: pd.Timestamp | None = None if end is None else pd.Timestamp(end)  # type: ignore
+    single_source = source if isinstance(source, str) else None
+    files = _production_files(resolve_root(root), single_source, start_ts, end_ts)
+    if not files:
+        return schema.empty_frame()
+
+    conditions, params = [], []
+    string_filters = {
+        "source": source,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "field": field,
+        "basin": basin,
+        "region": region,
+        "operator": operator,
+        "product": product,
+    }
+    for column, value in string_filters.items():
+        if value is None:
+            continue
+        values = [value] if isinstance(value, str) else [str(v) for v in value]
+        conditions.append(f"{column} IN ({', '.join('?' for _ in values)})")
+        params.extend(values)
+    if start_ts is not None:
+        conditions.append("period >= ?")
+        params.append(start_ts.to_pydatetime())
+    if end_ts is not None:
+        conditions.append("period <= ?")
+        params.append(end_ts.to_pydatetime())
+
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    query = (
+        f"SELECT * FROM read_parquet({_files_literal(files)}){where} "
+        "ORDER BY source, entity_id, period, product"
+    )
+    frame = duckdb.execute(query, params).df()
+    frame["period"] = frame["period"].astype("datetime64[ns]")
+    # canonical string columns; shared with schema by design
+    frame = frame.astype({column: "string" for column in schema._STRING_COLUMNS})
+    return frame[list(schema.CANONICAL_COLUMNS)]
+
+
+def sql(query: str, root: str | Path | None = None) -> pd.DataFrame:
+    """Run a DuckDB query over the store.
+
+    Two views are available: ``production`` (canonical columns) and
+    ``entities`` (entity columns; ``geometry`` arrives as WKB bytes — use
+    :func:`load_entities` when you want real geometries).
+    """
+    base = resolve_root(root)
+    con = duckdb.connect()
+    production_files = _production_files(base, None, None, None)
+    if production_files:
+        con.execute(
+            "CREATE VIEW production AS SELECT * FROM "
+            f"read_parquet({_files_literal(production_files)})"
+        )
+    else:
+        con.register("production", schema.empty_frame())
+    entities_dir = base / "entities"
+    entity_files = sorted(entities_dir.glob("*.parquet")) if entities_dir.exists() else []
+    if entity_files:
+        con.execute(
+            "CREATE VIEW entities AS SELECT * FROM "
+            f"read_parquet({_files_literal(entity_files)}, union_by_name=true)"
+        )
+    else:
+        con.register("entities", pd.DataFrame(schema.empty_entities().drop(columns="geometry")))
+    return con.execute(query).df()

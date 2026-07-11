@@ -155,3 +155,67 @@ def test_load_entities_empty_store(root):
     loaded = store.load_entities(root=root)
     assert loaded.empty
     assert list(loaded.columns) == list(schema.ENTITY_COLUMNS)
+
+
+def test_load_production_round_trip(root):
+    frame = production_frame(
+        [
+            {"entity_id": "W-1", "product": "oil", "volume": 1.0},
+            {"entity_id": "W-1", "product": "gas", "volume": 2.0},
+            {"entity_id": "W-2", "product": "oil", "volume": 3.0},
+        ]
+    )
+    store.write_production(frame, root=root)
+    loaded = store.load_production(root=root)
+    schema.validate(loaded)
+    expected = frame.sort_values(["source", "entity_id", "period", "product"], ignore_index=True)
+    pd.testing.assert_frame_equal(
+        loaded.reset_index(drop=True), expected, check_dtype=False, check_exact=False
+    )
+
+
+def test_load_production_filters(root):
+    store.write_production(
+        production_frame(
+            [
+                {"entity_id": "W-1", "product": "oil", "period": pd.Timestamp("2022-06-01")},
+                {"entity_id": "W-1", "product": "oil", "period": pd.Timestamp("2023-06-01")},
+                {"entity_id": "W-2", "product": "gas", "period": pd.Timestamp("2023-06-01")},
+            ]
+        ),
+        root=root,
+    )
+    by_product = store.load_production(product="gas", root=root)
+    assert set(by_product["entity_id"]) == {"W-2"}
+
+    by_period = store.load_production(start="2023-01-01", root=root)
+    assert set(by_period["period"]) == {pd.Timestamp("2023-06-01")}
+
+    by_list = store.load_production(entity_id=["W-1", "W-2"], end="2022-12-31", root=root)
+    assert len(by_list) == 1
+
+    assert store.load_production(source="missing", root=root).empty
+
+
+def test_load_production_empty_store(root):
+    loaded = store.load_production(root=root)
+    assert loaded.empty
+    assert list(loaded.columns) == list(schema.CANONICAL_COLUMNS)
+
+
+def test_sql_joins_production_and_entities(root):
+    store.write_production(production_frame([{"entity_id": "W-1", "volume": 42.0}]), root=root)
+    store.write_entities(entities_frame(), root=root)
+    result = store.sql(
+        """
+        SELECT p.entity_id, p.volume, e.status
+        FROM production p JOIN entities e
+          ON p.source = e.source AND p.entity_id = e.entity_id
+        """,
+        root=root,
+    )
+    assert result.iloc[0].to_dict() == {"entity_id": "W-1", "volume": 42.0, "status": "Producing"}
+
+
+def test_sql_on_empty_store(root):
+    assert store.sql("SELECT count(*) AS n FROM production", root=root)["n"].iloc[0] == 0
