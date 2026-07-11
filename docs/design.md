@@ -192,6 +192,11 @@ publisher drifts a header again, extend the alias tables at the top of the
 connector (`_META_ALIASES`, `_VOLUME_COLUMNS`) — that's the designated
 extension point.
 
+Endpoint drift is watched automatically: `tests/test_live_smoke.py` runs one
+small live fetch+parse per source, deselected from the normal suite
+(`pytest -m live` to run by hand) and scheduled weekly in CI
+(`.github/workflows/smoke.yml`).
+
 ## Adding a connector
 
 1. Create `src/ogprod/sources/<name>.py` with a `Source` subclass; decorate it

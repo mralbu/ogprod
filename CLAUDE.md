@@ -31,7 +31,7 @@ Key cross-cutting facts:
 
 ## Testing conventions
 
-Fixtures in `tests/data/` mirror publishers' *real* formats (a few rows each); every connector has a rejection test for foreign files. Parsing must work offline — network code is only tested via injected `httpx.MockTransport`. When touching a connector's format handling, the repo's practice is to also verify against a live download and cross-check totals (see the "Format caveat" in docs/design.md).
+Fixtures in `tests/data/` mirror publishers' *real* formats (a few rows each); every connector has a rejection test for foreign files. Parsing must work offline — network code is only tested via injected `httpx.MockTransport`. The one exception is `tests/test_live_smoke.py` (`@pytest.mark.live`, deselected by default, run weekly in CI): small real fetches that watch for publisher endpoint drift. When touching a connector's format handling, the repo's practice is to also verify against a live download and cross-check totals (see the "Format caveat" in docs/design.md).
 
 ## Docs
 
