@@ -44,6 +44,18 @@ Also fixed: coordinate-bounds validation (|lon| ≤ 180, |lat| ≤ 90) in
 base class directly; the empty-store `entities` SQL view types `geometry`
 as BLOB to match a populated store; `_UPSERT_KEY`/`_SORT_KEY` merged.
 
+## Fixed later (2026-07-11, notebook refresh)
+
+- **Upsert key dropped multi-field wells (~55% of ANP offshore oil).** ANP
+  reports one well's month split across several fields (e.g. `1-BRSA-1146-RJS`
+  under ATAPU / ATAPU_ECO / OESTE DE ATAPU), so upserting on
+  `(source, entity_id, period, product)` collapsed those rows keep-last. Found
+  while rewriting notebook 02 onto the store (store total 1.46 M bbl/d vs
+  3.36 from the raw files). The key now includes `field` (NA-safe); pré-sal
+  restates mar rows identically down to the field, so keep-last dedup still
+  removes exactly the restatements (commit `2ca1ba9`, regression-tested).
+  Anyone with a store written before that commit should re-ingest ANP.
+
 ## Open watch items
 
 - **ANP duplicate well names.** The live cadastre (31,273 rows, checked

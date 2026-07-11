@@ -7,21 +7,19 @@ longer view.
 
 ## Engineering foundations (cheap, high leverage)
 
-- **CI.** There is none — `just check` only runs when someone remembers to.
-  A single GitHub Actions workflow (`uv sync` + `just check`, maybe a
-  3.11/3.14 matrix) would catch regressions and lock in the offline-test
-  guarantee (the suite needs no network, so CI is trivial).
-- **License + packaging metadata.** `pyproject.toml` has no `license`,
-  `classifiers`, or `project.urls`. Required before anyone else can use or
-  cite this; a PyPI release (`ogprod` appears unclaimed) would make
-  `pip install ogprod`/`uv add ogprod` work.
-- **Scheduled live smoke test.** Every publisher has already drifted off
-  its documented endpoint once. A weekly CI job that runs one small
-  `fetch`+`parse` per source (sodir is 2 MB) would surface drift when it
-  happens instead of when a user hits it.
-- **Notebook freshness.** The three example notebooks predate the store;
-  they fetch+parse manually. Rewriting them on `just ingest` + `store.load_*`
-  would halve their code and demo the intended workflow.
+All done 2026-07-11:
+
+- **CI** — `.github/workflows/ci.yml` runs `just check` on Python 3.11 and
+  3.14 for every push/PR to main.
+- **License + packaging metadata** — MIT license, classifiers, and
+  `project.urls` in `pyproject.toml`. Still open: an actual PyPI release
+  (`ogprod` appears unclaimed), which would make `uv add ogprod` work.
+- **Scheduled live smoke test** — `tests/test_live_smoke.py`
+  (`pytest -m live`) does one small fetch+parse per source, weekly via
+  `.github/workflows/smoke.yml`.
+- **Notebook freshness** — the three notebooks now run on
+  ingest + `store.load_*` (and finding a real store bug in the process —
+  see follow-ups.md, multi-field wells).
 
 ## Data breadth (the core value)
 
