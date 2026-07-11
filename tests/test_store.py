@@ -89,6 +89,26 @@ def test_duplicate_keys_within_one_write_keep_last(root):
     assert stored["volume"].iloc[0] == 7.0
 
 
+def test_one_well_split_across_fields_keeps_both_rows(root):
+    # ANP reports a single well's month under several fields (e.g. ATAPU and
+    # ATAPU_ECO); those are distinct volumes, so field is part of the key.
+    frame = production_frame(
+        [{"field": "ATAPU", "volume": 3.0}, {"field": "ATAPU_ECO", "volume": 4.0}]
+    )
+    store.write_production(frame, root=root)
+    store.write_production(production_frame([{"field": "ATAPU", "volume": 5.0}]), root=root)
+    stored = pd.read_parquet(root / "production/source=testsrc/year=2023/data.parquet")
+    assert stored.set_index("field")["volume"].to_dict() == {"ATAPU": 5.0, "ATAPU_ECO": 4.0}
+
+
+def test_null_field_rows_still_upsert(root):
+    store.write_production(production_frame([{"field": None, "volume": 1.0}]), root=root)
+    store.write_production(production_frame([{"field": None, "volume": 2.0}]), root=root)
+    stored = pd.read_parquet(root / "production/source=testsrc/year=2023/data.parquet")
+    assert len(stored) == 1
+    assert stored["volume"].iloc[0] == 2.0
+
+
 def test_write_rejects_invalid_frame(root):
     with pytest.raises(schema.SchemaError):
         store.write_production(pd.DataFrame({"nope": [1]}), root=root)

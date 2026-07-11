@@ -7,7 +7,7 @@ source). DuckDB is only the query engine (see ``load_production`` /
 with pandas/geopandas and servable from static hosting.
 
 Publishers restate history, so production writes upsert on
-``(source, entity_id, period, product)`` by rewriting the affected
+``(source, entity_id, period, product, field)`` by rewriting the affected
 ``(source, year)`` partitions — never by appending.
 """
 
@@ -27,8 +27,19 @@ from ogprod import schema
 DEFAULT_ROOT = Path("data/store")
 _ENV_VAR = "OGPROD_STORE"
 
-#: Upsert key within a partition; rows are also kept sorted by it.
-_KEY = ["entity_id", "period", "product"]
+#: Upsert key within a partition; rows are also kept sorted by it. ``field``
+#: is part of the key because ANP reports a well's month split across several
+#: fields (e.g. ATAPU and ATAPU_ECO) — distinct volumes that must all be
+#: kept — while ANP's pré-sal file restates mar rows identically (same field),
+#: so keep-last dedup still removes exactly the restatements.
+_KEY = ["entity_id", "period", "product", "field"]
+
+
+def _key_index(frame: pd.DataFrame) -> pd.MultiIndex:
+    """The upsert-key index of ``frame``; null fields compare equal."""
+    key = frame[_KEY].copy()
+    key["field"] = key["field"].fillna("")
+    return pd.MultiIndex.from_frame(key)
 
 
 def resolve_root(root: str | Path | None = None) -> Path:
@@ -53,9 +64,9 @@ def write_production(frame: pd.DataFrame, root: str | Path | None = None) -> lis
     """Upsert a canonical frame into the store; returns rewritten partition paths.
 
     Incoming rows replace stored rows with the same
-    ``(source, entity_id, period, product)``; duplicate keys within ``frame``
-    itself keep the last occurrence (matters for ANP, whose pré-sal file
-    restates a subset of the mar file).
+    ``(source, entity_id, period, product, field)``; duplicate keys within
+    ``frame`` itself keep the last occurrence (matters for ANP, whose pré-sal
+    file restates a subset of the mar file).
     """
     schema.validate(frame)
     frame = frame.drop_duplicates(subset=["source", *_KEY], keep="last")
@@ -68,8 +79,7 @@ def write_production(frame: pd.DataFrame, root: str | Path | None = None) -> lis
         merged = group
         if path.exists():
             existing = pd.read_parquet(path)
-            incoming_keys = pd.MultiIndex.from_frame(group[_KEY])
-            kept = existing[~pd.MultiIndex.from_frame(existing[_KEY]).isin(incoming_keys)]
+            kept = existing[~_key_index(existing).isin(_key_index(group))]
             merged = pd.concat([kept, group], ignore_index=True)
         merged = merged.sort_values(_KEY, ignore_index=True)[list(schema.CANONICAL_COLUMNS)]
         _atomic_write_parquet(merged, path)

@@ -1,9 +1,11 @@
 """Canonical data model.
 
 Every source is normalized into a long-format :class:`pandas.DataFrame` with
-one row per ``(entity, period, product)``. Volumes are always stored in cubic
-metres (see :mod:`ogprod.units`); identifiers stay source-native, with
-:func:`canonical_id` providing a namespaced global identifier.
+one row per ``(entity, period, product, field)`` — usually one row per
+``(entity, period, product)``, but ANP splits a well's month across several
+fields. Volumes are always stored in cubic metres (see :mod:`ogprod.units`);
+identifiers stay source-native, with :func:`canonical_id` providing a
+namespaced global identifier.
 """
 
 from __future__ import annotations

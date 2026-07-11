@@ -15,7 +15,9 @@ How `ogprod` is structured and why. For *which* data exists in the world, see
 ## Canonical schema
 
 Every connector returns a long-format `pandas.DataFrame`, one row per
-`(entity, period, product)`:
+`(entity, period, product, field)` — usually one row per
+`(entity, period, product)`, but ANP splits a well's month across several
+fields (e.g. ATAPU and ATAPU_ECO), each with its own volume:
 
 | Column | Meaning |
 |---|---|
@@ -227,7 +229,7 @@ BSEE OGOR-A (well, bulk delimited), Petrinex Alberta (well, CSV), NSTA PPRS
 Publishers restate history: Petrinex ships amendments, Texas revises months
 after the fact, ANP republishes. `ogprod.store` (`src/ogprod/store.py`) is a
 persistent local store built on top of canonical frames, upserting on
-`(source, entity_id, period, product)` rather than appending. It's plain
+`(source, entity_id, period, product, field)` rather than appending. It's plain
 files, not a database server:
 
 ```
@@ -241,10 +243,12 @@ data/store/
   every file is a plain Parquet file readable directly with pandas, and the
   same layout could be served statically. `write_production(frame)` groups
   incoming rows by `(source, year)`; for each affected partition it reads the
-  existing file, drops stored rows whose `(entity_id, period, product)`
-  appears in the incoming batch, concatenates, and rewrites the partition
-  atomically (temp file + `os.replace`). Partitions outside the incoming
-  batch are untouched.
+  existing file, drops stored rows whose `(entity_id, period, product,
+  field)` appears in the incoming batch, concatenates, and rewrites the
+  partition atomically (temp file + `os.replace`). Partitions outside the
+  incoming batch are untouched. `field` is part of the key because ANP
+  reports a well's month split across several fields (e.g. ATAPU and
+  ATAPU_ECO) — distinct volumes that must all survive an upsert.
 - **Entities** are GeoParquet, one file per source, whole-file replaced by
   `write_entities` — entity tables are small (10³–10⁴ rows), so merge logic
   isn't worth having.
@@ -265,9 +269,9 @@ data/store/
   batches (each `(source, year)` partition rewritten once per batch, not
   once per raw file); duplicate keys within a batch keep the last
   occurrence, so ANP's terra/mar/pré-sal split upserts correctly instead of
-  double-counting — the pré-sal file's rows (a subset of mar's) replace the
-  corresponding mar rows for the same `(entity_id, period, product)` rather
-  than being summed with them.
+  double-counting — the pré-sal file's rows (a subset of mar's, identical
+  down to the field) replace the corresponding mar rows for the same
+  `(entity_id, period, product, field)` rather than being summed with them.
 
 ### Website data contract (future work)
 
