@@ -119,6 +119,23 @@ def test_validate_entities_allows_missing_geometry():
     schema.validate_entities(entities)
 
 
+def test_validate_entities_rejects_duplicate_source_entity_id():
+    entities = _entities(
+        source=["anp", "anp"],
+        entity_type=["well", "well"],
+        entity_id=["7-TPI-1-RJS", "7-TPI-1-RJS"],
+        entity_name=["7-TPI-1-RJS", "7-TPI-1-RJS"],
+        field=["TARTARUGA", "TARTARUGA"],
+        basin=["Campos", "Campos"],
+        region=["Rio de Janeiro", "Rio de Janeiro"],
+        operator=["PETROBRAS", "PETROBRAS"],
+        status=["Producing", "Producing"],
+        geometry=[Point(-40.05, -22.38), Point(-40.06, -22.39)],
+    )
+    with pytest.raises(schema.SchemaError, match="duplicate"):
+        schema.validate_entities(entities)
+
+
 def test_empty_entities_is_valid():
     empty = schema.empty_entities()
     assert list(empty.columns) == list(schema.ENTITY_COLUMNS)

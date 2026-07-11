@@ -172,6 +172,11 @@ def validate_entities(entities: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if entities.crs is None or entities.crs.to_epsg() != 4326:
         raise SchemaError(f"entities must be in {ENTITY_CRS}, got {entities.crs}")
 
+    duplicated = entities.duplicated(subset=["source", "entity_id"])
+    if duplicated.any():
+        dupes = sorted(entities.loc[duplicated, "entity_id"].unique()[:5].tolist())
+        raise SchemaError(f"duplicate (source, entity_id) rows in entities: {dupes}")
+
     for entity_type, allowed in _GEOMETRY_TYPES.items():
         geoms = entities.loc[entities["entity_type"] == entity_type, "geometry"].dropna()
         bad_geoms = set(geoms.geom_type.unique()) - allowed
