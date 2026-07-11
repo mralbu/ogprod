@@ -110,6 +110,9 @@ def validate(frame: pd.DataFrame) -> pd.DataFrame:
     if frame["source"].isna().any():
         raise SchemaError("'source' must not contain null values")
 
+    if frame["entity_id"].isna().any():
+        raise SchemaError("'entity_id' must not contain null values")
+
     if not pd.api.types.is_datetime64_any_dtype(frame["period"]):
         raise SchemaError("'period' must be a datetime column")
     if frame["period"].isna().any():
@@ -177,9 +180,12 @@ def validate_entities(entities: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if entities.crs is None or entities.crs.to_epsg() != 4326:
         raise SchemaError(f"entities must be in {ENTITY_CRS}, got {entities.crs}")
 
+    if entities["entity_id"].isna().any():
+        raise SchemaError("'entity_id' must not contain null values")
+
     duplicated = entities.duplicated(subset=["source", "entity_id"])
     if duplicated.any():
-        dupes = sorted(entities.loc[duplicated, "entity_id"].unique()[:5].tolist())
+        dupes = sorted(entities.loc[duplicated, "entity_id"].unique().tolist())[:5]
         raise SchemaError(f"duplicate (source, entity_id) rows in entities: {dupes}")
 
     for entity_type, allowed in _GEOMETRY_TYPES.items():
@@ -189,4 +195,17 @@ def validate_entities(entities: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             raise SchemaError(
                 f"{entity_type} geometry must be {sorted(allowed)}, got {sorted(bad_geoms)}"
             )
+
+    bounds = entities.geometry.bounds  # NaN rows (missing geometry) compare False
+    out_of_range = (
+        (bounds["minx"] < -180)
+        | (bounds["maxx"] > 180)
+        | (bounds["miny"] < -90)
+        | (bounds["maxy"] > 90)
+    )
+    if out_of_range.any():
+        bad_ids = entities.loc[out_of_range, "entity_id"].tolist()[:5]
+        raise SchemaError(
+            f"geometry outside lon/lat bounds (are these projected coordinates?): {bad_ids}"
+        )
     return entities

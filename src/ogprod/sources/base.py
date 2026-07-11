@@ -153,14 +153,15 @@ def build_frame(
 
     All series must share an index; ``volumes_m3`` values must already be in
     cubic metres. Rows with missing volume are dropped (a product a source
-    does not report simply does not appear).
+    does not report simply does not appear), and so are rows with a missing
+    entity id or period — publisher dirt that can't be keyed in the store.
     """
     na = pd.Series(pd.NA, index=entity_id.index, dtype="string")
     meta = pd.DataFrame(
         {
             "source": source,
             "entity_type": entity_type.value,
-            "entity_id": entity_id.astype("string"),
+            "entity_id": id_string(entity_id),
             "entity_name": entity_name.astype("string"),
             "field": na if field is None else field.astype("string"),
             "basin": na if basin is None else basin.astype("string"),
@@ -168,7 +169,7 @@ def build_frame(
             "operator": na if operator is None else operator.astype("string"),
             "period": pd.to_datetime(period),
         }
-    )
+    ).dropna(subset=["entity_id", "period"])
     parts = []
     for product, volume in volumes_m3.items():
         part = meta.copy()
@@ -179,6 +180,22 @@ def build_frame(
         return schema.empty_frame()
     frame = pd.concat(parts, ignore_index=True)[list(schema.CANONICAL_COLUMNS)]
     return schema.validate(frame)
+
+
+def id_string(series: pd.Series) -> pd.Series:
+    """Render an entity-id column as clean strings.
+
+    Numeric id columns (Sodir NPDIDs, Argentina ``idpozo``) arrive
+    float-typed whenever a null elsewhere promotes them, and a bare
+    ``.astype("string")`` on float64 yields "50136.0" instead of "50136" —
+    silently breaking the (source, entity_id) join between production and
+    entities. Integral float columns are routed through nullable Int64;
+    anything else (including string ids with leading zeros) passes through
+    unchanged.
+    """
+    if pd.api.types.is_float_dtype(series) and (series.dropna() % 1 == 0).all():
+        return series.astype("Int64").astype("string")
+    return series.astype("string")
 
 
 def build_entities(
@@ -198,7 +215,10 @@ def build_entities(
     """Assemble a canonical entities frame; reprojects to EPSG:4326 and validates.
 
     All series must share an index. ``crs`` describes the *incoming* geometry;
-    pass the publisher's CRS and the frame is reprojected.
+    pass the publisher's CRS and the frame is reprojected. Rows with a
+    missing entity id are dropped (they can't join anything); rows with
+    missing geometry are kept — an entity without coordinates still carries
+    joinable metadata.
     """
     na = pd.Series(pd.NA, index=entity_id.index, dtype="string")
 
@@ -209,7 +229,7 @@ def build_entities(
         {
             "source": source,
             "entity_type": entity_type.value,
-            "entity_id": entity_id.astype("string"),
+            "entity_id": id_string(entity_id),
             "entity_name": entity_name.astype("string"),
             "field": text(field),
             "basin": text(basin),
@@ -223,5 +243,6 @@ def build_entities(
     )
     if entities.crs is None or entities.crs.to_epsg() != 4326:
         entities = entities.to_crs(schema.ENTITY_CRS)
+    entities = entities[entities["entity_id"].notna()]
     entities = entities[list(schema.ENTITY_COLUMNS)].reset_index(drop=True)
     return schema.validate_entities(entities)

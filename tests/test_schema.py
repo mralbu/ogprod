@@ -76,6 +76,12 @@ def test_canonical_id():
     assert schema.canonical_id("anp", "7-TPI-1-RJS") == "anp:7-TPI-1-RJS"
 
 
+def test_entity_id_rejects_null():
+    frame = _valid_frame().assign(entity_id=pd.Series([pd.NA], dtype="string"))
+    with pytest.raises(schema.SchemaError, match="entity_id"):
+        schema.validate(frame)
+
+
 def _entities(**overrides) -> gpd.GeoDataFrame:
     """A minimal valid entities frame (one well, one field)."""
     base = {
@@ -146,6 +152,58 @@ def test_validate_entities_rejects_duplicate_source_entity_id():
     )
     with pytest.raises(schema.SchemaError, match="duplicate"):
         schema.validate_entities(entities)
+
+
+def test_validate_entities_rejects_null_entity_id():
+    entities = _entities(entity_id=[None, "43765"])
+    with pytest.raises(schema.SchemaError, match="entity_id.*null"):
+        schema.validate_entities(entities)
+
+
+def test_validate_entities_null_ids_reported_as_null_not_duplicate():
+    entities = _entities(entity_id=[None, None])
+    with pytest.raises(schema.SchemaError, match="null"):
+        schema.validate_entities(entities)
+
+
+def test_duplicate_error_samples_smallest_ids():
+    ids = ["z1", "z2", "z3", "z4", "z5", "z6", "a1"]
+    doubled = [i for i in ids for _ in range(2)]
+    entities = _entities(
+        source=["anp"] * len(doubled),
+        entity_type=["well"] * len(doubled),
+        entity_id=doubled,
+        entity_name=doubled,
+        field=[None] * len(doubled),
+        basin=[None] * len(doubled),
+        region=[None] * len(doubled),
+        operator=[None] * len(doubled),
+        status=[None] * len(doubled),
+        geometry=[Point(-40.0, -22.0)] * len(doubled),
+    )
+    with pytest.raises(schema.SchemaError, match="a1"):
+        schema.validate_entities(entities)
+
+
+def test_validate_entities_rejects_out_of_range_coordinates():
+    entities = _entities(
+        geometry=[
+            Point(500000.0, -22.38),  # projected easting mislabeled as a longitude
+            Polygon([(3.2, 56.5), (3.3, 56.5), (3.3, 56.6), (3.2, 56.6)]),
+        ]
+    )
+    with pytest.raises(schema.SchemaError, match="lon/lat"):
+        schema.validate_entities(entities)
+
+
+def test_validate_entities_allows_extreme_valid_coordinates():
+    entities = _entities(
+        geometry=[
+            Point(-180.0, 90.0),
+            Polygon([(179.8, -89.9), (180.0, -89.9), (180.0, -89.8), (179.8, -89.8)]),
+        ]
+    )
+    schema.validate_entities(entities)
 
 
 def test_empty_entities_is_valid():
