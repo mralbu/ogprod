@@ -60,6 +60,18 @@ def test_period_must_be_month_start():
         schema.validate(frame)
 
 
+def test_period_rejects_null():
+    frame = _valid_frame().assign(period=pd.Series([pd.NaT]))
+    with pytest.raises(schema.SchemaError, match="period"):
+        schema.validate(frame)
+
+
+def test_source_rejects_null():
+    frame = _valid_frame().assign(source=pd.Series([None], dtype="object"))
+    with pytest.raises(schema.SchemaError, match="source"):
+        schema.validate(frame)
+
+
 def test_canonical_id():
     assert schema.canonical_id("anp", "7-TPI-1-RJS") == "anp:7-TPI-1-RJS"
 

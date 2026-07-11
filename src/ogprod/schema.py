@@ -107,9 +107,14 @@ def validate(frame: pd.DataFrame) -> pd.DataFrame:
     if bad_products:
         raise SchemaError(f"invalid product values: {sorted(bad_products)}")
 
+    if frame["source"].isna().any():
+        raise SchemaError("'source' must not contain null values")
+
     if not pd.api.types.is_datetime64_any_dtype(frame["period"]):
         raise SchemaError("'period' must be a datetime column")
-    periods = frame["period"].dropna()
+    if frame["period"].isna().any():
+        raise SchemaError("'period' must not contain null values")
+    periods = frame["period"]
     if not ((periods.dt.day == 1).all() and (periods.dt.normalize() == periods).all()):
         raise SchemaError("'period' values must be normalized to the first day of the month")
 
