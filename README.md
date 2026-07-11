@@ -1,5 +1,7 @@
 # ogprod
 
+[![CI](https://github.com/mralbu/ogprod/actions/workflows/ci.yml/badge.svg)](https://github.com/mralbu/ogprod/actions/workflows/ci.yml)
+
 Organize public oil & gas production data.
 
 Regulators around the world publish well- and field-level production — Brazil's
