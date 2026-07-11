@@ -91,8 +91,10 @@ and `Petróleo` (= óleo + condensado) is ignored when an `Óleo` column is also
 present, to avoid double counting. Accepts either `Ano`/`Mês` columns or a
 single `Período` column (`2023/01` or `2023-01`). `fetch` scrapes the gov.br
 open-data page for bulk zips (yearly 2005–2020, monthly 2021–2023, filename
-conventions drift) and extracts the CSVs; 2024+ exists only in the interactive
-CDP app, so `fetch` raises a pointed error for those years. Note the pré-sal
+conventions drift) and extracts the CSVs; omitting `month` downloads a whole
+year, omitting `year` downloads the whole archive (multi-zip fetches extract
+into per-period subdirectories). 2024+ exists only in the interactive CDP app,
+so `fetch` raises a pointed error for those years. Note the pré-sal
 file is a subset of the mar file — concatenating all three double-counts.
 
 **`argentina` (well-level).** "Capítulo IV" CSVs: comma-separated, dot

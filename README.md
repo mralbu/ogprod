@@ -38,8 +38,10 @@ frame[frame["product"] == "oil"].groupby("field")["volume"].sum()
 ogprod.convert(1.0, "m3", "bbl")
 ```
 
-The canonical schema, unit handling, and how to add a new source connector are
-documented in [docs/design.md](docs/design.md).
+Worked examples live in [notebooks/](notebooks/) — one per source, from fetch
+to charts (`uv run --group notebooks jupyter lab` to run them). The canonical
+schema, unit handling, and how to add a new source connector are documented in
+[docs/design.md](docs/design.md).
 
 ## Built-in sources
 
@@ -83,6 +85,7 @@ src/ogprod/
     argentina.py   # Argentina, well-level
     sodir.py       # Norway, field-level
 tests/             # pytest suite with fixture files mirroring real formats
+notebooks/         # executed example notebooks, one per source
 docs/
   downloading.md   # where to download each source's files, and how to load them
   data-sources.md  # research: who publishes production data worldwide

@@ -53,13 +53,17 @@ All three fetch implementations were verified against live downloads in July
 
 ```python
 paths = ogprod.fetch("anp", "data/", year=2023, month=1)   # monthly, 2021-2023
+paths = ogprod.fetch("anp", "data/", year=2021)            # every month of a year
 paths = ogprod.fetch("anp", "data/", year=2019)            # yearly,  2005-2020
+paths = ogprod.fetch("anp", "data/")                       # everything, 2005-2023 (~70 MB)
 ```
 
 `fetch` scrapes the [gov.br open-data page](https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/producao-de-petroleo-e-gas-natural-por-poco)
 for the bulk zip links (the filename convention has drifted year to year, so
 links are matched by the numbers in them, not by a fixed pattern), downloads
-the zip, and extracts its CSVs.
+the zip(s), and extracts their CSVs. A single-period fetch extracts flat into
+`dest_dir`; multi-zip fetches (whole year, or everything) extract each period
+into its own `<year>` / `<year>-<month>` subdirectory.
 
 Caveats:
 
@@ -71,6 +75,10 @@ Caveats:
   (offshore) and **pré-sal** CSVs. The pré-sal file is a *subset* of the mar
   file: analyze it separately, but sum only terra + mar for country totals —
   concatenating all three double-counts pre-salt production.
+- **Yearly archives can overlap themselves too.** Some yearly zips (e.g. 2012)
+  contain per-month CSVs *and* whole-year aggregate CSVs (`2012_06_producao_mar.csv`
+  alongside `2012_producao_mar.csv`). Load one granularity, not both, or every
+  volume counts twice.
 
 The files are semicolon-separated with comma decimals and dot thousands
 separators, and bulk files use a stacked multi-row header — `parse` handles

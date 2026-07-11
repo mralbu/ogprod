@@ -93,6 +93,21 @@ def _link_period(url: str) -> tuple[int, int | None] | None:
     return year, month
 
 
+def _extract_csvs(zip_path: Path, target_dir: Path) -> list[Path]:
+    """Extract the CSV members of ``zip_path`` (flattened) into ``target_dir``."""
+    extracted = []
+    with zipfile.ZipFile(zip_path) as archive:
+        for member in archive.namelist():
+            name = Path(member).name
+            if not name.lower().endswith(".csv"):
+                continue
+            target = target_dir / name
+            with archive.open(member) as source, target.open("wb") as sink:
+                shutil.copyfileobj(source, sink)
+            extracted.append(target)
+    return extracted
+
+
 def _normalize(header: str) -> str:
     text = unicodedata.normalize("NFKD", header).encode("ascii", "ignore").decode()
     return re.sub(r"\s+", " ", text).strip().lower()
@@ -117,18 +132,30 @@ def _parse_volume_header(header: str) -> tuple[Product, str, bool, str] | None:
     return None
 
 
-def _header_row_count(head: pd.DataFrame) -> int:
-    """Number of header rows: 1 plus sub-header rows (empty period cell)."""
-    period_column = next(
-        (i for i, cell in enumerate(head.iloc[0]) if _normalize(str(cell)) in ("periodo", "ano")),
-        None,
-    )
-    if period_column is None:
-        return 1
-    rows = 1
-    while rows < len(head) and pd.isna(head.iloc[rows, period_column]):
-        rows += 1
-    return rows
+def _find_header(head: pd.DataFrame) -> tuple[int, int]:
+    """Locate the header block: (rows to skip before it, rows it spans).
+
+    The 2005-2020 yearly archives open with a SIGEP report banner, so the main
+    header is the first row containing a period-ish cell ("Período"/"Ano"),
+    not necessarily row 0. Sub-header rows below it (empty period cell) belong
+    to the header too.
+    """
+    for start in range(len(head)):
+        period_column = next(
+            (
+                i
+                for i, cell in enumerate(head.iloc[start])
+                if _normalize(str(cell)) in ("periodo", "ano")
+            ),
+            None,
+        )
+        if period_column is None:
+            continue
+        rows = 1
+        while start + rows < len(head) and pd.isna(head.iloc[start + rows, period_column]):
+            rows += 1
+        return start, rows
+    return 0, 1
 
 
 def _combine_headers(head: pd.DataFrame) -> list[str]:
@@ -154,21 +181,75 @@ def _combine_headers(head: pd.DataFrame) -> list[str]:
     return unique
 
 
+# A month period cell as written in bulk files ("2023/01") or newer exports
+# ("2023-01").
+_PERIOD_PATTERN = r"\s*\d{4}\s*[/-]\s*\d{1,2}\s*$"
+
+
 def _read(raw: base.RawFile) -> pd.DataFrame:
-    """Read an ANP CSV, flattening the bulk files' multi-row header."""
-    head = pd.read_csv(raw, sep=";", encoding="utf-8-sig", dtype=str, header=None, nrows=4)
+    """Read an ANP CSV, flattening the bulk files' multi-row header.
+
+    Most files are utf-8 with a BOM, but some vintages (late 2023) are
+    cp1252-encoded.
+    """
+    try:
+        return _read_encoded(raw, "utf-8-sig")
+    except UnicodeDecodeError:
+        if not isinstance(raw, str | Path):
+            raw.seek(0)
+        return _read_encoded(raw, "cp1252")
+
+
+def _read_encoded(raw: base.RawFile, encoding: str) -> pd.DataFrame:
+    # names=range(...) pads the sniff to a fixed width so a preamble row
+    # narrower than the header doesn't derail pandas' width inference.
+    head = pd.read_csv(
+        raw, sep=";", encoding=encoding, dtype=str, header=None, nrows=10, names=range(128)
+    )
     if not isinstance(raw, str | Path):
         raw.seek(0)  # rewind an open file for the second, full read
-    header_rows = _header_row_count(head)
-    return pd.read_csv(
+    start, header_rows = _find_header(head)
+    block = head.iloc[start : start + header_rows]
+    width = max(i for i in range(len(block.columns)) if block.iloc[:, i].notna().any()) + 1
+    frame = pd.read_csv(
         raw,
         sep=";",
         decimal=",",
         thousands=".",
-        encoding="utf-8-sig",
-        skiprows=header_rows,
-        names=_combine_headers(head.iloc[:header_rows]),
+        encoding=encoding,
+        skiprows=start + header_rows,
+        names=_combine_headers(block.iloc[:, :width]),
+        low_memory=False,
     )
+    return _realign(frame)
+
+
+def _realign(frame: pd.DataFrame) -> pd.DataFrame:
+    """Fix files whose data rows sit left of their header.
+
+    2010-2011 "terra" files carry an Estado header column that the data rows
+    omit, shifting every value one column left of its name. Detected by the
+    period pattern living in a different column than the "Período" header;
+    fixed by dropping the leading header name(s) and trailing empty column(s).
+    """
+    names = list(frame.columns)
+    header_index = next((i for i, c in enumerate(names) if _normalize(c) == "periodo"), None)
+    if header_index is None:
+        return frame
+
+    def period_ratio(index: int) -> float:
+        values = frame.iloc[:500, index].dropna().astype(str)
+        return values.str.match(_PERIOD_PATTERN).mean() if len(values) else 0.0
+
+    if period_ratio(header_index) >= 0.5:
+        return frame
+    data_index = next((i for i in range(len(names)) if period_ratio(i) >= 0.5), None)
+    if data_index is None or data_index >= header_index:
+        return frame
+    delta = header_index - data_index
+    realigned = frame.iloc[:, : len(names) - delta].copy()
+    realigned.columns = names[delta:]
+    return realigned
 
 
 def _period(frame: pd.DataFrame, columns: dict[str, str]) -> pd.Series:
@@ -198,16 +279,18 @@ class ANP(base.Source):
         client: httpx.Client | None = None,
         **kwargs: Any,
     ) -> list[Path]:
-        """Download the bulk zip for a period and extract its CSVs.
+        """Download bulk zip(s) and extract their CSVs.
 
-        Monthly zips exist for 2021-2023 (pass ``month``), yearly zips for
-        2005-2020 (omit ``month``). One zip bundles several CSVs (terra, mar,
-        pré-sal); every extracted CSV path is returned.
+        Yearly zips exist for 2005-2020, monthly zips for 2021-2023. Omitting
+        ``month`` for a monthly-only year downloads that whole year; omitting
+        ``year`` downloads everything. One zip bundles several CSVs (terra,
+        mar, pré-sal) and every extracted CSV path is returned; when more than
+        one zip is fetched, each extracts into a ``<year>``/``<year>-<month>``
+        subdirectory of ``dest_dir``.
         """
-        if year is None:
-            raise TypeError("anp fetch requires a year, e.g. fetch(dest, year=2023, month=1)")
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
+        extracted = []
         with base.open_client(client) as http:
             response = http.get(_PAGE_URL)
             response.raise_for_status()
@@ -217,40 +300,55 @@ class ANP(base.Source):
                 period = _link_period(url)
                 if period is not None:
                     periods.setdefault(period, url)
-            url = periods.get((year, month))
-            if url is None:
-                latest = max((y for y, _ in periods), default=None)
-                if latest is not None and year > latest:
-                    raise ValueError(
-                        f"ANP publishes bulk files on gov.br only through {latest}; "
-                        f"data for {year} is only queryable in the CDP application "
-                        f"({_CDP_URL})"
-                    )
-                wanted = f"{year}" if month is None else f"{year}-{month:02d}"
-                raise ValueError(
-                    f"no ANP bulk file for {wanted}; "
-                    f"periods available: {sorted(periods)} (see {self.docs_url})"
-                )
-            zip_path = base.download(http, url, dest_dir / url.rsplit("/", 1)[-1])
 
-        extracted = []
-        with zipfile.ZipFile(zip_path) as archive:
-            for member in archive.namelist():
-                name = Path(member).name
-                if not name.lower().endswith(".csv"):
-                    continue
-                target = dest_dir / name
-                with archive.open(member) as source, target.open("wb") as sink:
-                    shutil.copyfileobj(source, sink)
-                extracted.append(target)
-        zip_path.unlink()
+            if year is None:
+                selected = sorted(periods.items())
+            elif month is None and (year, None) not in periods:
+                selected = sorted(item for item in periods.items() if item[0][0] == year)
+            else:
+                selected = (
+                    [((year, month), periods[(year, month)])] if (year, month) in periods else []
+                )
+            if not selected:
+                self._raise_no_bulk_file(year, month, periods)
+
+            for (zip_year, zip_month), url in selected:
+                if len(selected) == 1:
+                    target_dir = dest_dir
+                else:
+                    label = f"{zip_year}" if zip_month is None else f"{zip_year}-{zip_month:02d}"
+                    target_dir = dest_dir / label
+                    target_dir.mkdir(exist_ok=True)
+                zip_path = base.download(http, url, dest_dir / url.rsplit("/", 1)[-1])
+                extracted += _extract_csvs(zip_path, target_dir)
+                zip_path.unlink()
         if not extracted:
-            raise ValueError(f"ANP bulk file {url} contained no CSVs")
+            raise ValueError("ANP bulk file(s) contained no CSVs")
         return sorted(extracted)
+
+    def _raise_no_bulk_file(
+        self, year: int | None, month: int | None, periods: dict[tuple[int, int | None], str]
+    ) -> None:
+        latest = max((y for y, _ in periods), default=None)
+        if year is not None and latest is not None and year > latest:
+            raise ValueError(
+                f"ANP publishes bulk files on gov.br only through {latest}; "
+                f"data for {year} is only queryable in the CDP application ({_CDP_URL})"
+            )
+        wanted = f"{year}" if month is None else f"{year}-{month:02d}"
+        raise ValueError(
+            f"no ANP bulk file for {wanted}; "
+            f"periods available: {sorted(periods)} (see {self.docs_url})"
+        )
 
     def parse(self, raw: base.RawFile) -> pd.DataFrame:
         frame = _read(raw)
         normalized = {_normalize(column): column for column in frame.columns}
+        if "periodo" in normalized:
+            # Some files concatenate report sections, repeating the banner and
+            # header mid-file; keep only rows with a real period cell.
+            period_text = frame[normalized["periodo"]].astype(str)
+            frame = frame[period_text.str.match(_PERIOD_PATTERN, na=False)].reset_index(drop=True)
 
         meta: dict[str, pd.Series] = {}
         for alias, role in _META_ALIASES.items():
@@ -285,7 +383,16 @@ class ANP(base.Source):
                 continue
             if product in products_with_total and "total" not in _normalize(column).split():
                 continue
-            values = pd.to_numeric(frame[column], errors="coerce")
+            raw_values = frame[column]
+            if not pd.api.types.is_numeric_dtype(raw_values):
+                # Stray header rows keep the column textual, so the read's
+                # decimal/thousands handling didn't apply; redo it here.
+                raw_values = (
+                    raw_values.astype(str)
+                    .str.replace(".", "", regex=False)
+                    .str.replace(",", ".", regex=False)
+                )
+            values = pd.to_numeric(raw_values, errors="coerce")
             if is_rate:
                 values = values * days_in_month
             values = values.map(lambda v, u=unit: units.to_m3(v, u))

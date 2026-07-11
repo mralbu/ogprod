@@ -95,6 +95,77 @@ def test_parse_bulk_file_multirow_header(tmp_path):
     assert gas["volume"] == pytest.approx(3.0 * 1000 * 31)
 
 
+def test_parse_yearly_archive_with_report_preamble(tmp_path):
+    # Files in the 2005-2020 yearly archives open with a SIGEP report banner
+    # before the (also multi-row) header.
+    file = tmp_path / "2005_producao_mar.csv"
+    file.write_text(
+        "ANP - Agência Nacional do Petroleo, Gás Natural e Biocombustíveis;;;;\n"
+        "SIGEP Produção - Versão 9.19, build 37 (Oracle 11g);;;;\n"
+        "BMP - Produção de Petróleo, Gás Natural e Água (Poço) por Campo;;;;\n"
+        ";;;;\n"
+        "Estado;Bacia;Nome Poço;;Período;Óleo (bbl/dia)\n"
+        ";;ANP;Operador;;\n"
+        "Sergipe;Sergipe;7-GA-7D-SES;7GA 0007D SES;2005/01;76,5937\n",
+        encoding="utf-8",
+    )
+    frame = ogprod.load("anp", file)
+
+    assert set(frame["entity_id"]) == {"7-GA-7D-SES"}
+    assert frame.iloc[0]["period"] == pd.Timestamp("2005-01-01")
+    assert frame.iloc[0]["volume"] == pytest.approx(76.5937 * 31 * 0.158987294928)
+
+
+def test_parse_cp1252_encoded_file(tmp_path):
+    # Late-2023 bulk files are cp1252-encoded, with the sub-labels inlined
+    # into a single header row.
+    file = tmp_path / "2023_12_producao_Mar.csv"
+    file.write_text(
+        "Estado;Bacia;Nome Poço ANP;Nome Poço Operador;Campo;Operador;Período;Óleo (bbl/dia)\n"
+        "Rio de Janeiro;Campos;7-MRL-10-RJS;MRL-10;MARLIM;Petrobras;2023/12;500,0\n",
+        encoding="cp1252",
+    )
+    frame = ogprod.load("anp", file)
+    assert set(frame["entity_id"]) == {"7-MRL-10-RJS"}
+    assert frame.iloc[0]["period"] == pd.Timestamp("2023-12-01")
+
+
+def test_parse_data_rows_shifted_left_of_header(tmp_path):
+    # In 2010-2011 "terra" files the header carries an Estado column that the
+    # data rows omit, so every data row sits one column left of its header.
+    file = tmp_path / "2010_02_producao_terra.csv"
+    file.write_text(
+        "Estado;Bacia;Nome Poço;;Campo;Operador;Período;Óleo (bbl/dia);Água (bbl/dia)\n"
+        ";;ANP;Operador;;;;;\n"
+        "Recôncavo;7-C-10-BA;7C 0010 BA;CANDEIAS;Petrobras;2010/02;3,0;9,0\n",
+        encoding="utf-8",
+    )
+    frame = ogprod.load("anp", file)
+
+    assert set(frame["entity_id"]) == {"7-C-10-BA"}
+    assert set(frame["field"]) == {"CANDEIAS"}
+    assert frame.iloc[0]["period"] == pd.Timestamp("2010-02-01")
+    oil = frame[frame["product"] == "oil"].iloc[0]
+    assert oil["volume"] == pytest.approx(3.0 * 28 * 0.158987294928)
+
+
+def test_parse_drops_repeated_header_blocks(tmp_path):
+    # Some files concatenate several report sections, repeating the banner and
+    # header mid-file; those rows carry no period and must be dropped.
+    file = tmp_path / "2020_06_producao_mar.csv"
+    file.write_text(
+        "Poço;Período;Petróleo (m³)\n"
+        "7-A-1-BA;2020/06;10,0\n"
+        "ANP - Agência Nacional do Petroleo;;\n"
+        "Poço;Período;Petróleo (m³)\n"
+        "7-B-2-BA;2020/06;20,0\n",
+        encoding="utf-8",
+    )
+    frame = ogprod.load("anp", file)
+    assert set(frame["entity_id"]) == {"7-A-1-BA", "7-B-2-BA"}
+    assert frame["volume"].sum() == pytest.approx(30.0)
+
+
 def test_rejects_file_without_well_column(tmp_path):
     bogus = tmp_path / "bogus.csv"
     bogus.write_text("a;b\n1;2\n")

@@ -147,6 +147,29 @@ def test_anp_fetch_matches_all_link_conventions(tmp_path, anp_client, year, mont
 def test_anp_fetch_yearly_archive_without_month(tmp_path, anp_client):
     paths = ogprod.get("anp").fetch(tmp_path, year=2019, client=anp_client)
     assert len(paths) == 2
+    assert all(p.parent == tmp_path for p in paths)  # single zip extracts flat
+
+
+def test_anp_fetch_monthly_year_without_month_gets_all_months(tmp_path, anp_client):
+    # 2021 has no yearly zip, only monthly ones (01 and 08 in the fixture page);
+    # each period lands in its own subdirectory.
+    paths = ogprod.get("anp").fetch(tmp_path, year=2021, client=anp_client)
+    assert len(paths) == 4
+    assert {p.parent.name for p in paths} == {"2021-01", "2021-08"}
+
+
+def test_anp_fetch_without_year_downloads_everything(tmp_path, anp_client):
+    # 6 zips on the fixture page x 2 CSVs each
+    paths = ogprod.get("anp").fetch(tmp_path, client=anp_client)
+    assert len(paths) == 12
+    assert {p.parent.name for p in paths} == {
+        "2019",
+        "2021-01",
+        "2021-08",
+        "2022-02",
+        "2022-05",
+        "2023-01",
+    }
 
 
 def test_anp_fetch_recent_year_points_at_cdp(tmp_path, anp_client):

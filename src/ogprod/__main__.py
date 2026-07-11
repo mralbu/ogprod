@@ -24,7 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Download a source's raw production files and print their paths.",
         epilog=(
             "Per-source options: sodir takes none (whole history); "
-            "argentina takes --year; anp takes --year plus --month for 2021-2023."
+            "argentina takes --year; anp takes --year (plus --month for 2021-2023) "
+            "or no flags to download the whole 2005-2023 archive."
         ),
     )
     fetch.add_argument("source", choices=ogprod.available())
