@@ -219,3 +219,15 @@ def test_sql_joins_production_and_entities(root):
 
 def test_sql_on_empty_store(root):
     assert store.sql("SELECT count(*) AS n FROM production", root=root)["n"].iloc[0] == 0
+
+
+def test_load_production_empty_filter_list(root):
+    store.write_production(production_frame([{}]), root=root)
+    loaded = store.load_production(entity_id=[], root=root)
+    assert loaded.empty
+    assert list(loaded.columns) == list(schema.CANONICAL_COLUMNS)
+
+
+def test_sql_empty_store_entities_has_geometry_column(root):
+    result = store.sql("SELECT geometry FROM entities", root=root)
+    assert len(result) == 0

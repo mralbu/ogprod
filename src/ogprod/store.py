@@ -191,6 +191,9 @@ def load_production(
         if value is None:
             continue
         values = [value] if isinstance(value, str) else [str(v) for v in value]
+        if not values:
+            # An empty filter list matches nothing.
+            return schema.empty_frame()
         conditions.append(f"{column} IN ({', '.join('?' for _ in values)})")
         params.extend(values)
     if start_ts is not None:
@@ -237,5 +240,7 @@ def sql(query: str, root: str | Path | None = None) -> pd.DataFrame:
             f"read_parquet({_files_literal(entity_files)}, union_by_name=true)"
         )
     else:
-        con.register("entities", pd.DataFrame(schema.empty_entities().drop(columns="geometry")))
+        empty = pd.DataFrame(schema.empty_entities().drop(columns="geometry"))
+        empty["geometry"] = pd.Series(dtype=object)
+        con.register("entities", empty)
     return con.execute(query).df()
