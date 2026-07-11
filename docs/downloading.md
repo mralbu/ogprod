@@ -186,10 +186,10 @@ entities = ogprod.load_entities("sodir", paths[0])
 There is no public zipped shapefile — the documented
 `/downloads/shape/fldArea.zip` 404s. `fetch_entities` instead queries
 FactMaps' ArcGIS DataService directly (layer 7100, "field") for GeoJSON
-polygons in EPSG:4326. `parse_entities` drops fields with no geometry yet
-(newly approved, not delineated), repairs self-intersecting rings with
-`make_valid`, and dissolves each field's several polygons into one;
-`entity_id` is the field NPDID.
+polygons in EPSG:4326. `parse_entities` keeps fields with no geometry yet
+(newly approved, not delineated) as null-geometry rows, repairs
+self-intersecting rings with `make_valid`, and dissolves each field's
+several polygons into one; `entity_id` is the field NPDID.
 
 Manual alternative: [FactMaps](https://factmaps.sodir.no/) lets you query
 and export layer 7100 by hand if the API URL above ever moves.

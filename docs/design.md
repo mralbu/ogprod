@@ -82,6 +82,13 @@ Design rules, enforced by `schema.validate_entities`:
 - **Missing geometry is allowed.** A publisher that hasn't delineated a
   field yet, or a well with no recorded coordinates, is a row with
   `geometry = None`, not an error.
+- **Ids are unique and non-null.** A duplicated `(source, entity_id)` would
+  silently fan out (and double-count) every production join, so it is
+  rejected; so are null ids. `build_entities` drops null-id rows up front —
+  they can't join anything.
+- **Coordinates are sanity-checked.** Geometry outside lon/lat bounds
+  (|lon| ≤ 180, |lat| ≤ 90) is rejected — the usual cause is projected
+  coordinates mislabeled as degrees.
 
 `Source` splits entities the same way it splits production:
 
@@ -170,9 +177,11 @@ fixed URL returns the whole table (~2 MB). Field ring fences are *not* a
 downloadable shapefile — the documented `fldArea.zip` 404s — so
 `fetch_entities` queries FactMaps' ArcGIS DataService directly (layer 7100,
 `MapServer/7100/query`) for GeoJSON polygons in EPSG:4326. `parse_entities`
-drops fields with null/empty geometry (not yet delineated), repairs
-self-intersecting rings with `make_valid` before dissolving, and dissolves
-each field's several polygons into one; `entity_id` is the field NPDID.
+keeps fields with null/empty geometry as null-geometry rows (not yet
+delineated fields still join for metadata), repairs self-intersecting rings
+with `make_valid` before dissolving, and dissolves each field's several
+polygons into one; `entity_id` is the field NPDID. Features without an NPDID
+are dropped — nothing can join them.
 
 ### Format caveat
 
@@ -199,9 +208,10 @@ extension point.
    coordinates, field ring fences), implement `parse_entities`/
    `fetch_entities` the same way — pure parse into `base.build_entities(...)`,
    separate network fetch — and add a fixture/test pair mirroring step 4.
-   Missing geometry for individual entities is fine (drop or leave `None`);
-   an entirely missing geometry dataset means leaving both methods
-   unimplemented.
+   Missing geometry for individual entities is fine (leave it `None` — the
+   row still joins for metadata); rows without an entity id are dropped by
+   `build_entities`. An entirely missing geometry dataset means leaving both
+   methods unimplemented.
 
 Good next candidates, roughly in order of effort (see data-sources.md):
 BSEE OGOR-A (well, bulk delimited), Petrinex Alberta (well, CSV), NSTA PPRS
@@ -239,11 +249,18 @@ data/store/
   is a DuckDB escape hatch over `production`/`entities` views.
 - **Root resolution.** Every function takes `root=...`; when omitted it falls
   back to the `OGPROD_STORE` environment variable, then `data/store/`.
+- **Single writer, idempotent.** Each partition write is atomic, but a
+  multi-partition write interrupted midway leaves some partitions updated
+  and others not — re-running the same ingest heals the store (upserts are
+  idempotent). Two concurrent writers to the same partition race
+  read-modify-write; the store assumes one writer at a time.
 - **CLI:** `python -m ogprod ingest <source> [--year ... --month ...]
   [--entities]` chains fetch → parse → write against the resolved store
-  root. It writes one raw file at a time, in fetch order, so ANP's
-  terra/mar/pré-sal split upserts correctly instead of double-counting: the
-  pré-sal file is written after mar and its rows (a subset of mar's) replace the
+  root. Parsed frames are concatenated in fetch order and written in large
+  batches (each `(source, year)` partition rewritten once per batch, not
+  once per raw file); duplicate keys within a batch keep the last
+  occurrence, so ANP's terra/mar/pré-sal split upserts correctly instead of
+  double-counting — the pré-sal file's rows (a subset of mar's) replace the
   corresponding mar rows for the same `(entity_id, period, product)` rather
   than being summed with them.
 
