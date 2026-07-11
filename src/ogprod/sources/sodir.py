@@ -57,6 +57,7 @@ _AREA_URL = (
     "?where=1%3D1&outFields=*&f=geojson"
 )
 
+
 def _npdid_string(series: pd.Series) -> pd.Series:
     """Render an NPDID column as clean integer strings.
 
