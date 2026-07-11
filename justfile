@@ -2,9 +2,9 @@
 default:
     @just --list
 
-# Install/sync all dependencies (including dev tools)
+# Install/sync all dependencies (including dev tools and notebook deps, which ty needs)
 sync:
-    uv sync
+    uv sync --all-groups
 
 # Download a source's raw files into data/ (`just fetch sodir`, `just fetch anp` = whole archive, `just fetch anp --year 2023 --month 1`)
 fetch *args:
