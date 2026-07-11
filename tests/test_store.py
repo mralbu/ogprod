@@ -1,5 +1,7 @@
+import geopandas as gpd
 import pandas as pd
 import pytest
+from shapely.geometry import Point, Polygon
 
 from ogprod import schema, store
 
@@ -100,3 +102,56 @@ def test_resolve_root_env_var(tmp_path, monkeypatch):
     assert store.resolve_root(None) == tmp_path / "env-store"
     monkeypatch.delenv("OGPROD_STORE")
     assert store.resolve_root(None) == store.DEFAULT_ROOT
+
+
+def entities_frame() -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        {
+            "source": ["testsrc", "testsrc", "othersrc"],
+            "entity_type": ["well", "well", "field"],
+            "entity_id": ["W-1", "W-2", "F-1"],
+            "entity_name": ["W-1", "W-2", "FIELD ONE"],
+            "field": ["F", "F", "FIELD ONE"],
+            "basin": [None, None, None],
+            "region": ["R", "R", "R"],
+            "operator": ["OP", "OP", "OP"],
+            "status": ["Producing", "Abandoned", "Producing"],
+            "geometry": [
+                Point(-40.0, -22.0),
+                Point(-40.1, -22.1),
+                Polygon([(3.2, 56.5), (3.3, 56.5), (3.3, 56.6)]),
+            ],
+        },
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+
+
+def test_entities_round_trip(root):
+    written = store.write_entities(entities_frame(), root=root)
+    assert sorted(p.name for p in written) == ["othersrc.parquet", "testsrc.parquet"]
+    loaded = store.load_entities(root=root)
+    schema.validate_entities(loaded)
+    assert len(loaded) == 3
+    assert set(loaded["source"]) == {"testsrc", "othersrc"}
+
+
+def test_load_entities_filters(root):
+    store.write_entities(entities_frame(), root=root)
+    wells = store.load_entities(source="testsrc", entity_type="well", root=root)
+    assert set(wells["entity_id"]) == {"W-1", "W-2"}
+    assert store.load_entities(source="missing", root=root).empty
+
+
+def test_write_entities_replaces_per_source(root):
+    store.write_entities(entities_frame(), root=root)
+    smaller = entities_frame().iloc[[0]]  # testsrc shrinks to one well
+    store.write_entities(smaller, root=root)
+    assert len(store.load_entities(source="testsrc", root=root)) == 1
+    assert len(store.load_entities(source="othersrc", root=root)) == 1  # untouched
+
+
+def test_load_entities_empty_store(root):
+    loaded = store.load_entities(root=root)
+    assert loaded.empty
+    assert list(loaded.columns) == list(schema.ENTITY_COLUMNS)

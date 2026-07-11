@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import geopandas as gpd
 import pandas as pd
 
 from ogprod import schema
@@ -72,3 +73,48 @@ def write_production(frame: pd.DataFrame, root: str | Path | None = None) -> lis
         _atomic_write_parquet(merged, path)
         written.append(path)
     return written
+
+
+def _entities_file(root: Path, source: str) -> Path:
+    return root / "entities" / f"{source}.parquet"
+
+
+def write_entities(entities: gpd.GeoDataFrame, root: str | Path | None = None) -> list[Path]:
+    """Replace each source's entities file (GeoParquet); returns written paths.
+
+    Entities are small (10³–10⁴ rows per source), so whole-file replacement
+    per source beats merge logic.
+    """
+    schema.validate_entities(entities)
+    base = resolve_root(root)
+    written = []
+    for source, group in entities.groupby("source"):
+        path = _entities_file(base, str(source))
+        group = group.reset_index(drop=True)[list(schema.ENTITY_COLUMNS)]
+        _atomic_write_parquet(group, path)
+        written.append(path)
+    return written
+
+
+def load_entities(
+    *,
+    source: str | None = None,
+    entity_type: str | None = None,
+    root: str | Path | None = None,
+) -> gpd.GeoDataFrame:
+    """Load entities from the store, optionally filtered by source/entity_type."""
+    base = resolve_root(root) / "entities"
+    if source is not None:
+        files = [base / f"{source}.parquet"]
+    elif base.exists():
+        files = sorted(base.glob("*.parquet"))
+    else:
+        files = []
+    files = [f for f in files if f.exists()]
+    if not files:
+        return schema.empty_entities()
+    parts = [gpd.read_parquet(f) for f in files]
+    entities = parts[0] if len(parts) == 1 else pd.concat(parts, ignore_index=True)
+    if entity_type is not None:
+        entities = entities[entities["entity_type"] == entity_type].reset_index(drop=True)
+    return entities
