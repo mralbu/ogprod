@@ -195,7 +195,7 @@ via JODI/OPEC are effectively the only public data there.
 3. **Units vary by jurisdiction:** m³ (Brazil, Argentina, Norway uses Sm³/scm),
    barrels/Mcf (US, Canada partially), Nm³ (Netherlands). Unit normalization
    must be first-class.
-4. **Identifiers vary:** ANP well codes, US API numbers, Petrinex UWIs, Sodir
+4. **Identifiers vary:** ANP well names, US API numbers, Petrinex UWIs, Sodir
    NPDID. Keep source-native IDs and add a namespaced canonical ID.
 5. **Reporting lag and revisions:** most sources lag 1–3 months and restate
    prior months (Petrinex ships amendments; Texas revises heavily). Ingestion

@@ -33,7 +33,7 @@ CANONICAL_UNIT = "m3"
 CANONICAL_COLUMNS: tuple[str, ...] = (
     "source",  # connector name, e.g. "anp"
     "entity_type",  # "well" | "field"
-    "entity_id",  # source-native identifier (ANP well code, NPDID, ...)
+    "entity_id",  # source-native identifier (ANP well name, NPDID, ...)
     "entity_name",  # human-readable name
     "field",  # field the entity belongs to (== entity_name for fields)
     "basin",

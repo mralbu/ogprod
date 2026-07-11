@@ -21,7 +21,7 @@ Every connector returns a long-format `pandas.DataFrame`, one row per
 |---|---|
 | `source` | connector name (`"anp"`, `"sodir"`, …) |
 | `entity_type` | `"well"` or `"field"` |
-| `entity_id` | source-native identifier: ANP well code, Argentina `idpozo`, Sodir NPDID |
+| `entity_id` | source-native identifier: ANP well name (`Nome Poço`), Argentina `idpozo`, Sodir NPDID |
 | `entity_name` | human-readable name |
 | `field` | field the entity belongs to (equals `entity_name` for field-level sources) |
 | `basin` | geological basin, when the source reports it |
@@ -243,7 +243,7 @@ data/store/
   [--entities]` chains fetch → parse → write against the resolved store
   root. It writes one raw file at a time, in fetch order, so ANP's
   terra/mar/pré-sal split upserts correctly instead of double-counting: the
-  pré-sal file is written last and its rows (a subset of mar's) replace the
+  pré-sal file is written after mar and its rows (a subset of mar's) replace the
   corresponding mar rows for the same `(entity_id, period, product)` rather
   than being summed with them.
 

@@ -69,7 +69,7 @@ All three fetch implementations were verified against live downloads in July
 ```python
 paths = ogprod.fetch("anp", "data/", year=2023, month=1)   # monthly, 2021-2023
 paths = ogprod.fetch("anp", "data/", year=2021)            # every month of a year
-paths = ogprod.fetch("anp", "data/", year=2019)            # yearly,  2005-2020
+paths = ogprod.fetch("anp", "data/", year=2019)            # yearly, 2005-2020
 paths = ogprod.fetch("anp", "data/")                       # everything, 2005-2023 (~70 MB)
 ```
 
