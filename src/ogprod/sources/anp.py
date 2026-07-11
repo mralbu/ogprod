@@ -23,6 +23,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+import geopandas as gpd
 import httpx
 import pandas as pd
 
@@ -70,6 +71,63 @@ _CDP_URL = "https://cdp.anp.gov.br/"
 _ZIP_LINK = re.compile(
     r'href="(?P<url>[^"]*arquivos-producao-de-petroleo-e-gas-natural-por-poco/[^"]+\.zip)"'
 )
+
+
+# Well cadastre — one row per drilled well with base coordinates
+# (SIRGAS2000, equivalent to WGS84 at this scale). The "Tabela de Poços"
+# download page documented by ANP no longer resolves (404 as of 2026-07); the
+# live "Acervo de Dados" page instead links this GeoServer WFS query, which
+# returns the full cadastre (~31k wells) as CSV with a WKT point geometry
+# column ("GEOM"). ANP also separately publishes yearly "poços públicos"
+# CSVs (declassified wells only, a few hundred rows/year) in the
+# semicolon/comma-decimal style with explicit LATITUDE_BASE_DD/
+# LONGITUDE_BASE_DD columns documented in the original brief — parse_entities
+# accepts either shape. Extend these aliases/URL if a live download differs
+# again.
+_CADASTRE_WFS_URL = (
+    "https://gishub.anp.gov.br/geoserver/BD_ANP/ows?service=WFS&version=1.0.0"
+    "&request=GetFeature&typeName=BD_ANP:POCOS_SIRGAS&outputFormat=csv"
+)
+
+_ENTITY_META_ALIASES = {
+    "poco": "entity_name",
+    "nome poco": "entity_name",
+    "nome poco anp": "entity_name",
+    "campo": "field",
+    "nome campo": "field",
+    "bacia": "basin",
+    "nome bacia": "basin",
+    "estado": "region",
+    "uf": "region",
+    "operador": "operator",
+    "situacao": "status",
+    "situacao poco": "status",
+}
+_LATITUDE_ALIASES = ("latitude_base_dd", "latitude base dd", "latitude base (dd)", "latitude dd")
+_LONGITUDE_ALIASES = (
+    "longitude_base_dd",
+    "longitude base dd",
+    "longitude base (dd)",
+    "longitude dd",
+)
+_GEOMETRY_ALIASES = ("geom", "geometry", "the_geom")
+
+
+def _read_entities(raw: base.RawFile) -> pd.DataFrame:
+    """Read a cadastre CSV, tolerating the WFS export's comma-delimited,
+    period-decimal style as well as the semicolon/comma-decimal style used
+    elsewhere in ANP's bulk files."""
+    if isinstance(raw, str | Path):
+        with open(raw, encoding="utf-8-sig", errors="ignore") as handle:
+            first_line = handle.readline()
+    else:
+        position = raw.tell()
+        chunk = raw.readline()
+        raw.seek(position)
+        first_line = chunk.decode("utf-8-sig") if isinstance(chunk, bytes) else chunk
+    semicolon_delimited = first_line.count(";") > first_line.count(",")
+    sep, decimal = (";", ",") if semicolon_delimited else (",", ".")
+    return pd.read_csv(raw, sep=sep, decimal=decimal, encoding="utf-8-sig", low_memory=False)
 
 
 def _link_period(url: str) -> tuple[int, int | None] | None:
@@ -339,6 +397,60 @@ class ANP(base.Source):
         raise ValueError(
             f"no ANP bulk file for {wanted}; "
             f"periods available: {sorted(periods)} (see {self.docs_url})"
+        )
+
+    def fetch_entities(
+        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
+    ) -> list[Path]:
+        """Download the well cadastre CSV (one row per drilled well, with coordinates)."""
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with base.open_client(client) as http:
+            return [base.download(http, _CADASTRE_WFS_URL, dest_dir / "pocos_sirgas.csv")]
+
+    def parse_entities(self, raw: base.RawFile) -> gpd.GeoDataFrame:
+        frame = _read_entities(raw)
+        normalized = {_normalize(column): column for column in frame.columns}
+
+        meta: dict[str, pd.Series] = {}
+        for alias, role in _ENTITY_META_ALIASES.items():
+            if alias in normalized and role not in meta:
+                meta[role] = frame[normalized[alias]]
+        if "entity_name" not in meta:
+            raise ValueError(
+                "not an ANP well cadastre file; needs a 'Poço' column, "
+                f"got: {sorted(frame.columns)}"
+            )
+
+        geom_column = next((normalized[a] for a in _GEOMETRY_ALIASES if a in normalized), None)
+        latitude = next((normalized[a] for a in _LATITUDE_ALIASES if a in normalized), None)
+        longitude = next((normalized[a] for a in _LONGITUDE_ALIASES if a in normalized), None)
+        if geom_column is not None:
+            wkt = frame[geom_column].where(frame[geom_column].notna(), None)
+            geometry = gpd.GeoSeries.from_wkt(wkt)
+        elif latitude is not None and longitude is not None:
+            lon = pd.to_numeric(frame[longitude], errors="coerce")
+            lat = pd.to_numeric(frame[latitude], errors="coerce")
+            points = gpd.GeoSeries(gpd.points_from_xy(lon, lat))
+            geometry = points.where(~(lon.isna() | lat.isna()), None)
+        else:
+            raise ValueError(
+                "not an ANP well cadastre file; needs a geometry (WKT) column or "
+                f"decimal-degree lat/lon columns, got: {sorted(frame.columns)}"
+            )
+
+        name = meta["entity_name"]
+        return base.build_entities(
+            source=self.name,
+            entity_type=self.entity_type,
+            entity_id=name,
+            entity_name=name,
+            geometry=geometry,
+            field=meta.get("field"),
+            basin=meta.get("basin"),
+            region=meta.get("region"),
+            operator=meta.get("operator"),
+            status=meta.get("status"),
         )
 
     def parse(self, raw: base.RawFile) -> pd.DataFrame:

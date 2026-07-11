@@ -171,3 +171,43 @@ def test_rejects_file_without_well_column(tmp_path):
     bogus.write_text("a;b\n1;2\n")
     with pytest.raises(ValueError, match="no well name column"):
         ogprod.load("anp", bogus)
+
+
+def test_parse_entities_well_coordinates(data_dir):
+    entities = ogprod.load_entities("anp", data_dir / "anp_tabela_pocos_sample.csv")
+    schema.validate_entities(entities)
+    assert len(entities) == 2
+    assert set(entities["entity_type"]) == {"well"}
+
+    assert entities.geometry.isna().sum() == 1  # 3-BRSA-496-RJS has no coordinates
+
+    tpi = entities[entities["entity_id"] == "7-TPI-1-RJS"].iloc[0]
+    assert tpi.geometry.x == pytest.approx(-40.051942)  # lon from the WKT "GEOM" column
+    assert tpi.geometry.y == pytest.approx(-22.384617)
+    assert tpi["field"] == "TARTARUGA"
+    assert tpi["basin"] == "Campos"
+    assert tpi["status"] == "Produzindo"
+
+
+def test_parse_entities_decimal_degree_columns(tmp_path):
+    # ANP also publishes yearly "poços públicos" cadastre extracts in the
+    # semicolon/comma-decimal style with explicit lat/lon columns instead of
+    # a WKT geometry column; parse_entities must handle both shapes.
+    file = tmp_path / "pocos_publicos_2023.csv"
+    file.write_text(
+        "POCO;OPERADOR;ESTADO;BACIA;CAMPO;SITUACAO;LATITUDE_BASE_DD;LONGITUDE_BASE_DD\n"
+        "7-TPI-1-RJS;PETROBRAS;Rio de Janeiro;Campos;TARTARUGA;Produzindo;-22,384617;-40,051942\n",
+        encoding="utf-8",
+    )
+    entities = ogprod.load_entities("anp", file)
+    schema.validate_entities(entities)
+    row = entities.iloc[0]
+    assert row.geometry.x == pytest.approx(-40.051942)
+    assert row.geometry.y == pytest.approx(-22.384617)
+
+
+def test_parse_entities_rejects_other_files(tmp_path):
+    bogus = tmp_path / "bogus.csv"
+    bogus.write_text("a;b\n1;2\n")
+    with pytest.raises(ValueError, match="ANP"):
+        ogprod.load_entities("anp", bogus)
