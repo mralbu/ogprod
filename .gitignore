@@ -15,3 +15,6 @@ build/
 
 # Data downloads (raw source files can be huge; keep them out of git)
 /data/
+
+# Jupyter
+.ipynb_checkpoints/
