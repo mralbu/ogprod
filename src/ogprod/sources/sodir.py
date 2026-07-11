@@ -8,6 +8,9 @@ identified by its stable NPDID and its name.
 Downloads: https://factpages.sodir.no/ (Field → Table view → Production →
 Saleable → Monthly, "Download data"); see also
 https://www.sodir.no/en/facts/data-and-analyses/open-data/
+
+Field entities (ring-fence polygons) come from FactMaps' ArcGIS DataService
+instead, queried directly as GeoJSON — see ``_AREA_URL`` below.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import geopandas as gpd
 import httpx
 import pandas as pd
 
@@ -39,6 +43,37 @@ _CSV_URL = (
     "&rs:Command=Render&rc:Toolbar=false&rc:Parameters=f&rs:Format=CSV&Top100=false"
     "&IpAddress=1.2.3.4&CultureCode=en"
 )
+
+# FactMaps field-outline ("ring fence") polygons. There is no public zipped
+# shapefile download (the documented `/downloads/shape/fldArea.zip` 404s);
+# the working source is FactMaps' ArcGIS DataService, layer 7100 ("field"),
+# queried as GeoJSON in EPSG:4326. Attribute names come straight off that
+# service (see https://factmaps.sodir.no/api/rest/services/DataService/Data/
+# MapServer/7100), but older docs describe a DBF-style shapefile with 10-char
+# truncated names, so aliases cover both forms; extend this table if FactMaps
+# drifts (see docs/design.md).
+_AREA_URL = (
+    "https://factmaps.sodir.no/api/rest/services/DataService/Data/MapServer/7100/query"
+    "?where=1%3D1&outFields=*&f=geojson"
+)
+
+_ENTITY_ALIASES = {
+    "fieldname": "entity_name",
+    "fldname": "entity_name",
+    "idfield": "entity_id",
+    "npdidfield": "entity_id",
+    "fldnpdidfield": "entity_id",
+    "fldnpdidfi": "entity_id",
+    "oplongname": "operator",
+    "opername": "operator",
+    "fldcurrentoperator": "operator",
+    "cmplongname": "operator",
+    "main_area": "region",
+    "fldmainarea": "region",
+    "status": "status",
+    "fldstatus": "status",
+    "fldcurrentactivitysatus": "status",
+}
 
 
 @base.register
@@ -86,4 +121,52 @@ class Sodir(base.Source):
             period=period,
             volumes_m3=volumes,
             field=name,
+        )
+
+    def fetch_entities(
+        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
+    ) -> list[Path]:
+        """Download FactMaps field outlines (ring fences) as GeoJSON."""
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with base.open_client(client) as http:
+            return [base.download(http, _AREA_URL, dest_dir / "field.geojson")]
+
+    def parse_entities(self, raw: base.RawFile) -> gpd.GeoDataFrame:
+        frame = gpd.read_file(raw)
+        columns = {column.lower(): column for column in frame.columns}
+        roles: dict[str, str] = {}
+        for alias, role in _ENTITY_ALIASES.items():
+            if alias in columns and role not in roles:
+                roles[role] = columns[alias]
+        if "entity_name" not in roles or "entity_id" not in roles:
+            raise ValueError(f"not a Sodir field-area file; columns found: {sorted(frame.columns)}")
+
+        # A handful of fields (e.g. newly approved, not yet delineated) carry
+        # no geometry in FactMaps; they cannot be represented as a ring
+        # fence, so drop them rather than fail the whole parse.
+        frame = frame[~(frame.geometry.isna() | frame.geometry.is_empty)]
+        # FactMaps polygons occasionally self-intersect (invalid rings);
+        # repair them so dissolve's union doesn't degrade into a
+        # GeometryCollection.
+        frame = frame.set_geometry(frame.geometry.make_valid())
+
+        # One geometry per field: FactMaps splits fields into several polygons.
+        dissolved = frame.dissolve(by=roles["entity_id"], aggfunc="first").reset_index()
+        name = dissolved[roles["entity_name"]].astype("string")
+
+        def optional(role: str) -> pd.Series | None:
+            return dissolved[roles[role]] if role in roles else None
+
+        return base.build_entities(
+            source=self.name,
+            entity_type=self.entity_type,
+            entity_id=dissolved[roles["entity_id"]].astype("string"),
+            entity_name=name,
+            geometry=dissolved.geometry,
+            field=name,
+            region=optional("region"),
+            operator=optional("operator"),
+            status=optional("status"),
+            crs=dissolved.crs,
         )
