@@ -73,11 +73,13 @@ def field_area_geojson(tmp_path):
     polygons to exercise the dissolve into one MultiPolygon per field.
 
     NORDFELT carries only a null geometry (e.g. newly approved, not yet
-    delineated) and must be dropped entirely, exercising the null-geometry
-    drop in ``parse_entities``. SNORRE has a self-intersecting "bowtie" ring
-    alongside a second, valid polygon, exercising ``.make_valid()`` ahead of
-    the dissolve — without the repair, dissolving a bowtie with another
-    polygon degrades into a GeometryCollection that fails schema validation.
+    delineated) and must survive as a null-geometry row — an entity without
+    a ring fence still carries joinable metadata. GHOST has a valid polygon
+    but no NPDID and must be dropped (nothing can join it). SNORRE has a
+    self-intersecting "bowtie" ring alongside a second, valid polygon,
+    exercising ``.make_valid()`` ahead of the dissolve — without the repair,
+    dissolving a bowtie with another polygon degrades into a
+    GeometryCollection that fails schema validation.
     """
     frame = gpd.GeoDataFrame(
         {
@@ -88,29 +90,17 @@ def field_area_geojson(tmp_path):
                 "NORDFELT",
                 "SNORRE",
                 "SNORRE",
+                "GHOST",
             ],
-            "fldNpdidField": ["26376286", "46437", "46437", "99999", "27438", "27438"],
-            "cmpLongName": [
-                "Equinor Energy AS",
-                "Equinor Energy AS",
-                "Equinor Energy AS",
-                "Equinor Energy AS",
-                "Equinor Energy AS",
-                "Equinor Energy AS",
-            ],
-            "fldMainArea": [
-                "North sea",
-                "North sea",
-                "North sea",
-                "North sea",
-                "North sea",
-                "North sea",
-            ],
+            "fldNpdidField": ["26376286", "46437", "46437", "99999", "27438", "27438", None],
+            "cmpLongName": ["Equinor Energy AS"] * 7,
+            "fldMainArea": ["North sea"] * 7,
             "fldCurrentActivitySatus": [
                 "Producing",
                 "Producing",
                 "Producing",
                 "Approved",
+                "Producing",
                 "Producing",
                 "Producing",
             ],
@@ -122,6 +112,7 @@ def field_area_geojson(tmp_path):
                 # Self-intersecting "bowtie" ring (invalid until repaired).
                 Polygon([(4.0, 61.0), (4.1, 61.1), (4.1, 61.0), (4.0, 61.1), (4.0, 61.0)]),
                 Polygon([(4.2, 61.0), (4.3, 61.0), (4.3, 61.1), (4.2, 61.1)]),
+                Polygon([(5.0, 61.0), (5.1, 61.0), (5.1, 61.1), (5.0, 61.1)]),
             ],
         },
         crs="EPSG:4326",
@@ -134,8 +125,8 @@ def field_area_geojson(tmp_path):
 def test_parse_entities_field_ring_fences(field_area_geojson):
     entities = ogprod.load_entities("sodir", field_area_geojson)
     schema.validate_entities(entities)
-    # JOHAN SVERDRUP, TROLL, SNORRE — NORDFELT is dropped (null geometry only).
-    assert len(entities) == 3
+    # JOHAN SVERDRUP, TROLL, SNORRE, NORDFELT — GHOST is dropped (no NPDID).
+    assert len(entities) == 4
     assert set(entities["entity_type"]) == {"field"}
 
     troll = entities[entities["entity_name"] == "TROLL"].iloc[0]
@@ -145,15 +136,21 @@ def test_parse_entities_field_ring_fences(field_area_geojson):
     assert troll["operator"] == "Equinor Energy AS"
 
 
-def test_parse_entities_drops_null_geometry_field(field_area_geojson):
-    """A field whose only feature has a null geometry is dropped entirely.
-
-    Without the ``frame.geometry.isna()`` filter in ``parse_entities``, this
-    row would reach ``dissolve`` and either raise or produce a null geometry
-    that fails ``schema.validate_entities``.
-    """
+def test_parse_entities_keeps_null_geometry_field(field_area_geojson):
+    """A field whose only feature has a null geometry survives as a
+    null-geometry row — it still joins production for metadata (the
+    documented invariant: missing geometry is a row, not an error)."""
     entities = ogprod.load_entities("sodir", field_area_geojson)
-    assert "NORDFELT" not in set(entities["entity_name"])
+    nordfelt = entities[entities["entity_name"] == "NORDFELT"].iloc[0]
+    assert nordfelt["entity_id"] == "99999"
+    assert nordfelt.geometry is None or pd.isna(nordfelt.geometry)
+
+
+def test_parse_entities_drops_features_without_npdid(field_area_geojson):
+    """A feature with geometry but no NPDID can't join anything; it is
+    dropped rather than failing the whole parse."""
+    entities = ogprod.load_entities("sodir", field_area_geojson)
+    assert "GHOST" not in set(entities["entity_name"])
 
 
 def test_parse_entities_repairs_self_intersecting_ring(field_area_geojson):

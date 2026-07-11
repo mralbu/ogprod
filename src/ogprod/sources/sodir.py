@@ -145,17 +145,28 @@ class Sodir(base.Source):
         if "entity_name" not in roles or "entity_id" not in roles:
             raise ValueError(f"not a Sodir field-area file; columns found: {sorted(frame.columns)}")
 
-        # A handful of fields (e.g. newly approved, not yet delineated) carry
-        # no geometry in FactMaps; they cannot be represented as a ring
-        # fence, so drop them rather than fail the whole parse.
-        frame = frame[~(frame.geometry.isna() | frame.geometry.is_empty)]
+        # Repair and dissolve only the features that carry geometry.
         # FactMaps polygons occasionally self-intersect (invalid rings);
         # repair them so dissolve's union doesn't degrade into a
-        # GeometryCollection.
-        frame = frame.set_geometry(frame.geometry.make_valid())
-
+        # GeometryCollection. Features without an NPDID are dropped here
+        # (dissolve's groupby skips null keys; build_entities enforces the
+        # same policy) — they can't join anything.
+        id_column = roles["entity_id"]
+        has_geometry = ~(frame.geometry.isna() | frame.geometry.is_empty)
+        geometric = frame[has_geometry]
+        geometric = geometric.set_geometry(geometric.geometry.make_valid())
         # One geometry per field: FactMaps splits fields into several polygons.
-        dissolved = frame.dissolve(by=roles["entity_id"], aggfunc="first").reset_index()
+        dissolved = geometric.dissolve(by=id_column, aggfunc="first").reset_index()
+
+        # Fields with no geometry at all (e.g. newly approved, not yet
+        # delineated) keep a null-geometry row so they still join for
+        # metadata — the schema's invariant is that missing geometry is a
+        # row, not an error.
+        bare = frame[~has_geometry & frame[id_column].notna()]
+        bare = bare[~bare[id_column].isin(dissolved[id_column])]
+        bare = bare.drop_duplicates(subset=[id_column]).assign(geometry=None)
+        if len(bare):
+            dissolved = pd.concat([dissolved, bare], ignore_index=True)
         name = dissolved[roles["entity_name"]].astype("string")
 
         def optional(role: str) -> pd.Series | None:
