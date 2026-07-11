@@ -29,6 +29,29 @@ def test_parse_field_production_monthly(data_dir):
     assert troll_gas["volume"] == pytest.approx(3.6e9)  # billion Sm3 -> m3
 
 
+def test_parse_entity_id_survives_float_promoted_npdid(tmp_path):
+    """If prfNpdidInformationCarrier ever arrives float-typed (e.g. because a
+    null value in another row promotes the whole column to float64), the
+    entity_id must still be the clean integer string "46437", not "46437.0".
+
+    A bare ``.astype("string")`` on a float64 column would yield "46437.0",
+    which silently breaks joins against entities keyed by "46437".
+    """
+    csv_path = tmp_path / "field_production_monthly.csv"
+    csv_path.write_text(
+        "prfInformationCarrier,prfYear,prfMonth,prfPrdOilNetMillSm3,"
+        "prfPrdGasNetBillSm3,prfPrdNGLNetMillSm3,prfPrdCondensateNetMillSm3,"
+        "prfPrdProducedWaterInFieldMillSm3,prfNpdidInformationCarrier\n"
+        "TROLL,2024,5,0.6,3.6,0.32,0.04,0.9,46437\n"
+        # Blank NPDID on this row forces the whole column to float64 when
+        # pandas reads the CSV, promoting "46437" to 46437.0.
+        "UNKNOWN FIELD,2024,5,0.1,0.1,0.01,0.01,0.1,\n"
+    )
+    frame = ogprod.load("sodir", csv_path)
+    troll = frame[frame["entity_name"] == "TROLL"]
+    assert set(troll["entity_id"]) == {"46437"}
+
+
 def test_rejects_other_files(tmp_path):
     bogus = tmp_path / "bogus.csv"
     bogus.write_text("a,b\n1,2\n")
@@ -149,6 +172,33 @@ def test_parse_entities_repairs_self_intersecting_ring(field_area_geojson):
     assert snorre["entity_id"] == "27438"
     assert snorre.geometry.geom_type in {"Polygon", "MultiPolygon"}
     assert snorre.geometry.is_valid
+
+
+def test_parse_entities_id_survives_float_promoted_npdid(tmp_path):
+    """Same float-promotion hazard as production parse, but for
+    fldNpdidField: a null NPDID on one feature promotes the whole column to
+    float64, and entity_id must still come out as "46437", not "46437.0".
+    """
+    frame = gpd.GeoDataFrame(
+        {
+            "fldName": ["TROLL", "NULLFIELD"],
+            "fldNpdidField": [46437.0, None],
+            "cmpLongName": ["Equinor Energy AS", "Equinor Energy AS"],
+            "fldMainArea": ["North sea", "North sea"],
+            "fldCurrentActivitySatus": ["Producing", "Approved"],
+            "geometry": [
+                Polygon([(3.5, 60.6), (3.6, 60.6), (3.6, 60.7), (3.5, 60.7)]),
+                None,
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    path = tmp_path / "field.geojson"
+    frame.to_file(path, driver="GeoJSON")
+
+    entities = ogprod.load_entities("sodir", path)
+    troll = entities[entities["entity_name"] == "TROLL"].iloc[0]
+    assert troll["entity_id"] == "46437"
 
 
 def test_parse_entities_rejects_other_files(tmp_path):

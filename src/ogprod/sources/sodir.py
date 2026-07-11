@@ -57,6 +57,22 @@ _AREA_URL = (
     "?where=1%3D1&outFields=*&f=geojson"
 )
 
+def _npdid_string(series: pd.Series) -> pd.Series:
+    """Render an NPDID column as clean integer strings.
+
+    NPDIDs are always integers, but the column sometimes arrives float-typed
+    (a null elsewhere in the column promotes the whole thing to float64), and
+    a bare ``.astype("string")`` on that would yield e.g. "46437.0" instead
+    of "46437", silently breaking the (source, entity_id) join between
+    production and entities. Route through nullable Int64 first so a clean
+    integer string always comes out; values that aren't numeric (e.g. the
+    name-fallback path) still pass through as plain strings.
+    """
+    numeric = pd.to_numeric(series, errors="coerce").astype("Int64")
+    as_int_string = numeric.astype("string")
+    return as_int_string.where(numeric.notna(), series.astype("string"))
+
+
 _ENTITY_ALIASES = {
     "fieldname": "entity_name",
     "fldname": "entity_name",
@@ -100,7 +116,7 @@ class Sodir(base.Source):
         period = month_start(frame["prfYear"], frame["prfMonth"])
         name = frame["prfInformationCarrier"].astype("string")
         entity_id = (
-            frame["prfNpdidInformationCarrier"].astype("string")
+            _npdid_string(frame["prfNpdidInformationCarrier"])
             if "prfNpdidInformationCarrier" in frame.columns
             else name
         )
@@ -161,7 +177,7 @@ class Sodir(base.Source):
         return base.build_entities(
             source=self.name,
             entity_type=self.entity_type,
-            entity_id=dissolved[roles["entity_id"]].astype("string"),
+            entity_id=_npdid_string(dissolved[roles["entity_id"]]),
             entity_name=name,
             geometry=dissolved.geometry,
             field=name,
