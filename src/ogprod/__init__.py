@@ -8,13 +8,15 @@ canonical long-format DataFrame.
 from ogprod.schema import (
     CANONICAL_COLUMNS,
     CANONICAL_UNIT,
+    ENTITY_COLUMNS,
     EntityType,
     Product,
     SchemaError,
     canonical_id,
     validate,
+    validate_entities,
 )
-from ogprod.sources import available, fetch, get, load
+from ogprod.sources import available, fetch, fetch_entities, get, load, load_entities
 from ogprod.units import convert, to_m3
 
 __version__ = "0.1.0"
@@ -22,6 +24,7 @@ __version__ = "0.1.0"
 __all__ = [
     "CANONICAL_COLUMNS",
     "CANONICAL_UNIT",
+    "ENTITY_COLUMNS",
     "EntityType",
     "Product",
     "SchemaError",
@@ -29,8 +32,11 @@ __all__ = [
     "canonical_id",
     "convert",
     "fetch",
+    "fetch_entities",
     "get",
     "load",
+    "load_entities",
     "to_m3",
     "validate",
+    "validate_entities",
 ]

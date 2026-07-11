@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Any, ClassVar
 
+import geopandas as gpd
 import httpx
 import pandas as pd
 
@@ -77,6 +78,21 @@ class Source(ABC):
         """
         raise NotImplementedError(f"{self.name} has no automated fetch; see {self.docs_url}")
 
+    def parse_entities(self, raw: RawFile) -> gpd.GeoDataFrame:
+        """Parse a raw publisher file into the canonical entities GeoDataFrame.
+
+        One row per entity: well coordinates as Points, field ring fences as
+        (Multi)Polygons, in EPSG:4326. Connectors whose publisher has no
+        geometry dataset leave this unimplemented.
+        """
+        raise NotImplementedError(f"{self.name} has no entity parser; see {self.docs_url}")
+
+    def fetch_entities(
+        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
+    ) -> list[Path]:
+        """Download the publisher's entity/geometry file(s) into ``dest_dir``."""
+        raise NotImplementedError(f"{self.name} has no automated entity fetch; see {self.docs_url}")
+
 
 _REGISTRY: dict[str, type[Source]] = {}
 
@@ -108,6 +124,16 @@ def load(name: str, raw: RawFile) -> pd.DataFrame:
 def fetch(name: str, dest_dir: str | Path, **kwargs: Any) -> list[Path]:
     """Download raw file(s) with the connector registered under ``name``."""
     return get(name).fetch(dest_dir, **kwargs)
+
+
+def load_entities(name: str, raw: RawFile) -> gpd.GeoDataFrame:
+    """Parse an entity/geometry file with the connector registered under ``name``."""
+    return get(name).parse_entities(raw)
+
+
+def fetch_entities(name: str, dest_dir: str | Path, **kwargs: Any) -> list[Path]:
+    """Download entity/geometry file(s) with the connector registered under ``name``."""
+    return get(name).fetch_entities(dest_dir, **kwargs)
 
 
 def build_frame(
@@ -153,3 +179,49 @@ def build_frame(
         return schema.empty_frame()
     frame = pd.concat(parts, ignore_index=True)[list(schema.CANONICAL_COLUMNS)]
     return schema.validate(frame)
+
+
+def build_entities(
+    *,
+    source: str,
+    entity_type: schema.EntityType,
+    entity_id: pd.Series,
+    entity_name: pd.Series,
+    geometry: gpd.GeoSeries | list,
+    field: pd.Series | None = None,
+    basin: pd.Series | None = None,
+    region: pd.Series | None = None,
+    operator: pd.Series | None = None,
+    status: pd.Series | None = None,
+    crs: Any = schema.ENTITY_CRS,
+) -> gpd.GeoDataFrame:
+    """Assemble a canonical entities frame; reprojects to EPSG:4326 and validates.
+
+    All series must share an index. ``crs`` describes the *incoming* geometry;
+    pass the publisher's CRS and the frame is reprojected.
+    """
+    na = pd.Series(pd.NA, index=entity_id.index, dtype="string")
+
+    def text(series: pd.Series | None) -> pd.Series:
+        return na if series is None else series.astype("string")
+
+    entities = gpd.GeoDataFrame(
+        {
+            "source": source,
+            "entity_type": entity_type.value,
+            "entity_id": entity_id.astype("string"),
+            "entity_name": entity_name.astype("string"),
+            "field": text(field),
+            "basin": text(basin),
+            "region": text(region),
+            "operator": text(operator),
+            "status": text(status),
+            "geometry": geometry,
+        },
+        geometry="geometry",
+        crs=crs,
+    )
+    if entities.crs is None or entities.crs.to_epsg() != 4326:
+        entities = entities.to_crs(schema.ENTITY_CRS)
+    entities = entities[list(schema.ENTITY_COLUMNS)].reset_index(drop=True)
+    return schema.validate_entities(entities)
