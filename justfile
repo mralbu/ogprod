@@ -10,6 +10,10 @@ sync:
 fetch *args:
     uv run python -m ogprod fetch {{args}}
 
+# Fetch + parse + upsert a source into data/store (`just ingest sodir`, `just ingest anp --year 2023`, `just ingest sodir --entities`)
+ingest *args:
+    uv run python -m ogprod ingest {{args}}
+
 # Re-execute the example notebooks in place (downloads data on first run)
 notebooks:
     uv run --group notebooks jupyter nbconvert --to notebook --execute --inplace notebooks/*.ipynb
