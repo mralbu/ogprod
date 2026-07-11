@@ -231,3 +231,12 @@ def test_load_production_empty_filter_list(root):
 def test_sql_empty_store_entities_has_geometry_column(root):
     result = store.sql("SELECT geometry FROM entities", root=root)
     assert len(result) == 0
+
+
+def test_sql_entities_geometry_typed_blob_on_empty_store(root):
+    # The empty-store fallback view must expose the same column types as a
+    # populated store (geometry = WKB bytes), so queries behave identically.
+    described = store.sql(
+        "SELECT column_type FROM (DESCRIBE entities) WHERE column_name = 'geometry'", root=root
+    )
+    assert described["column_type"].iloc[0] == "BLOB"

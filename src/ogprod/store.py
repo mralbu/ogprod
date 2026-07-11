@@ -27,8 +27,8 @@ from ogprod import schema
 DEFAULT_ROOT = Path("data/store")
 _ENV_VAR = "OGPROD_STORE"
 
-_UPSERT_KEY = ["entity_id", "period", "product"]
-_SORT_KEY = ["entity_id", "period", "product"]
+#: Upsert key within a partition; rows are also kept sorted by it.
+_KEY = ["entity_id", "period", "product"]
 
 
 def resolve_root(root: str | Path | None = None) -> Path:
@@ -58,7 +58,7 @@ def write_production(frame: pd.DataFrame, root: str | Path | None = None) -> lis
     restates a subset of the mar file).
     """
     schema.validate(frame)
-    frame = frame.drop_duplicates(subset=["source", *_UPSERT_KEY], keep="last")
+    frame = frame.drop_duplicates(subset=["source", *_KEY], keep="last")
     written = []
     base = resolve_root(root)
     frame = frame.copy()
@@ -68,10 +68,10 @@ def write_production(frame: pd.DataFrame, root: str | Path | None = None) -> lis
         merged = group
         if path.exists():
             existing = pd.read_parquet(path)
-            incoming_keys = pd.MultiIndex.from_frame(group[_UPSERT_KEY])
-            kept = existing[~pd.MultiIndex.from_frame(existing[_UPSERT_KEY]).isin(incoming_keys)]
+            incoming_keys = pd.MultiIndex.from_frame(group[_KEY])
+            kept = existing[~pd.MultiIndex.from_frame(existing[_KEY]).isin(incoming_keys)]
             merged = pd.concat([kept, group], ignore_index=True)
-        merged = merged.sort_values(_SORT_KEY, ignore_index=True)[list(schema.CANONICAL_COLUMNS)]
+        merged = merged.sort_values(_KEY, ignore_index=True)[list(schema.CANONICAL_COLUMNS)]
         _atomic_write_parquet(merged, path)
         written.append(path)
     return written
@@ -240,7 +240,11 @@ def sql(query: str, root: str | Path | None = None) -> pd.DataFrame:
             f"read_parquet({_files_literal(entity_files)}, union_by_name=true)"
         )
     else:
-        empty = pd.DataFrame(schema.empty_entities().drop(columns="geometry"))
-        empty["geometry"] = pd.Series(dtype=object)
-        con.register("entities", empty)
+        # Match the populated store's column types (geometry = WKB BLOB) so
+        # queries behave identically against an empty store.
+        columns = ", ".join(
+            f"CAST(NULL AS {'BLOB' if column == 'geometry' else 'VARCHAR'}) AS {column}"
+            for column in schema.ENTITY_COLUMNS
+        )
+        con.execute(f"CREATE VIEW entities AS SELECT {columns} WHERE false")
     return con.execute(query).df()
