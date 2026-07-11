@@ -38,6 +38,22 @@ frame[frame["product"] == "oil"].groupby("field")["volume"].sum()
 ogprod.convert(1.0, "m3", "bbl")
 ```
 
+For repeated use, `ingest` fetches, parses, and upserts a source into a local
+Parquet store (`just ingest sodir` next to the `just fetch` recipe above), so
+you don't re-download or re-parse on every query:
+
+```sh
+python -m ogprod ingest sodir             # production
+python -m ogprod ingest sodir --entities  # field ring fences
+```
+
+```python
+from ogprod import store
+
+oil = store.load_production(source="sodir", product="oil", start="2020-01-01")
+fields = store.load_entities(source="sodir")  # GeoDataFrame with ring fences
+```
+
 Worked examples live in [notebooks/](notebooks/) — one per source, from fetch
 to charts (`uv run --group notebooks jupyter lab` to run them). The canonical
 schema, unit handling, and how to add a new source connector are documented in
@@ -66,6 +82,7 @@ Requires [uv](https://docs.astral.sh/uv/) and [just](https://just.systems/)
 ```sh
 just sync        # install dependencies
 just fetch ...   # download raw files into data/, e.g. `just fetch sodir`
+just ingest ...  # fetch + parse + upsert into data/store, e.g. `just ingest sodir --entities`
 just test        # pytest
 just lint        # ruff check + format check
 just fmt         # auto-format
@@ -77,13 +94,15 @@ Project layout:
 
 ```
 src/ogprod/
-  schema.py        # canonical long-format schema + validation
+  schema.py        # canonical production + entities schemas, validation
   units.py         # volume unit conversion (everything stored in m³)
+  store.py         # Parquet/GeoParquet store: upsert, load, DuckDB queries
+  __main__.py      # `python -m ogprod fetch|ingest ...` CLI
   sources/
-    base.py        # Source ABC, registry, canonical-frame builder
-    anp.py         # Brazil, well-level
-    argentina.py   # Argentina, well-level
-    sodir.py       # Norway, field-level
+    base.py        # Source ABC, registry, canonical-frame/entities builders
+    anp.py         # Brazil, well-level (+ well cadastre entities)
+    argentina.py   # Argentina, well-level (+ wells listing entities)
+    sodir.py       # Norway, field-level (+ FactMaps ring-fence entities)
 tests/             # pytest suite with fixture files mirroring real formats
 notebooks/         # executed example notebooks, one per source
 docs/

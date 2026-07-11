@@ -44,6 +44,21 @@ python -m ogprod fetch anp --year 2023 --month 1 --dest raw/
 
 It prints the downloaded paths, one per line.
 
+`python -m ogprod ingest <source> ...` (`just ingest ...`) chains fetch →
+parse → upsert into the local Parquet store (`data/store/` by default; see
+[design.md](design.md#store)) instead of just downloading. Both `fetch` and
+`ingest` take `--entities` to operate on the source's geometry dataset (well
+coordinates or field ring fences) instead of production:
+
+```sh
+python -m ogprod fetch sodir --entities --dest data/           # FactMaps GeoJSON
+python -m ogprod ingest sodir --entities                       # ...straight into the store
+```
+
+Not every source has entity geometry wired up the same way as production —
+see the per-source notes below for what `--entities` fetches and its manual
+fallback.
+
 All three fetch implementations were verified against live downloads in July
 2026, with parsed totals cross-checked against published country figures.
 
@@ -84,6 +99,23 @@ The files are semicolon-separated with comma decimals and dot thousands
 separators, and bulk files use a stacked multi-row header — `parse` handles
 all of that (see [design.md](design.md#per-connector-notes)).
 
+**Entities (well coordinates).**
+
+```python
+paths = ogprod.fetch_entities("anp", "data/")
+entities = ogprod.load_entities("anp", paths[0])
+```
+
+The gov.br-documented "Tabela de Poços" download page 404s; `fetch_entities`
+instead queries ANP's GeoServer WFS directly (`BD_ANP:POCOS_SIRGAS`) for the
+full cadastre (~31k wells) as CSV with a WKT point column. `entity_id` is the
+well name (`Nome Poço`) — the cadastre has no separate stable well code.
+
+Manual alternative: the yearly "poços públicos" CSVs on the same gov.br
+open-data page (declassified wells only, a few hundred rows/year) work too —
+`parse_entities` accepts either the WFS export or that format (explicit
+`LATITUDE_BASE_DD`/`LONGITUDE_BASE_DD` columns).
+
 ### `argentina` — Secretaría de Energía, well-level (monthly)
 
 ```python
@@ -105,6 +137,26 @@ Files are comma-separated, dot decimals, UTF-8, with stable lowercase column
 names (`idpozo`, `anio`, `mes`, `prod_pet`, `prod_gas`, `prod_agua`). Oil/water
 are in m³, gas in thousands of m³.
 
+**Entities (well coordinates).**
+
+```python
+paths = ogprod.fetch_entities("argentina", "data/")
+entities = ogprod.load_entities("argentina", paths[0])
+```
+
+The wells listing is not a separate CKAN package (the documented
+"listado-de-pozos-cargados-por-empresas-operadoras" id 404s) — it's another
+CSV resource, "Listado de pozos cargados por empresas operadoras", inside the
+*same* `produccion-de-petroleo-y-gas-por-pozo` dataset used for production.
+Coordinates are plain decimal degrees in `coordenadax`/`coordenaday`
+(lon/lat), unlike production's `geojson` column. `operator` comes from
+`idempresa`, a short company code (e.g. "YPF") — **not** directly comparable
+to production's `empresa`; `clasificacion` (e.g. "EXPLOTACION") is the
+closest analog to well status.
+
+Manual alternative: same dataset page as production, above; download the
+"Listado de pozos..." resource by hand.
+
 ### `sodir` — Norway (ex-NPD), field-level (monthly)
 
 ```python
@@ -123,6 +175,24 @@ full table exports).
 Oil/NGL/condensate/water are in millions of Sm³, gas in billions of Sm³; the
 field is identified by its stable NPDID (`prfNpdidInformationCarrier`) and
 name.
+
+**Entities (field ring fences).**
+
+```python
+paths = ogprod.fetch_entities("sodir", "data/")
+entities = ogprod.load_entities("sodir", paths[0])
+```
+
+There is no public zipped shapefile — the documented
+`/downloads/shape/fldArea.zip` 404s. `fetch_entities` instead queries
+FactMaps' ArcGIS DataService directly (layer 7100, "field") for GeoJSON
+polygons in EPSG:4326. `parse_entities` drops fields with no geometry yet
+(newly approved, not delineated), repairs self-intersecting rings with
+`make_valid`, and dissolves each field's several polygons into one;
+`entity_id` is the field NPDID.
+
+Manual alternative: [FactMaps](https://factmaps.sodir.no/) lets you query
+and export layer 7100 by hand if the API URL above ever moves.
 
 ## When a file fails to parse
 
