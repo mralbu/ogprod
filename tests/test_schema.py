@@ -1,5 +1,9 @@
+from typing import cast
+
+import geopandas as gpd
 import pandas as pd
 import pytest
+from shapely.geometry import Point, Polygon
 
 from ogprod import schema
 
@@ -58,3 +62,65 @@ def test_period_must_be_month_start():
 
 def test_canonical_id():
     assert schema.canonical_id("anp", "7-TPI-1-RJS") == "anp:7-TPI-1-RJS"
+
+
+def _entities(**overrides) -> gpd.GeoDataFrame:
+    """A minimal valid entities frame (one well, one field)."""
+    base = {
+        "source": ["anp", "sodir"],
+        "entity_type": ["well", "field"],
+        "entity_id": ["7-TPI-1-RJS", "43765"],
+        "entity_name": ["7-TPI-1-RJS", "EKOFISK"],
+        "field": ["TARTARUGA", "EKOFISK"],
+        "basin": ["Campos", None],
+        "region": ["Rio de Janeiro", "North sea"],
+        "operator": ["PETROBRAS", "ConocoPhillips"],
+        "status": ["Producing", "Producing"],
+        "geometry": [
+            Point(-40.05, -22.38),
+            Polygon([(3.2, 56.5), (3.3, 56.5), (3.3, 56.6), (3.2, 56.6)]),
+        ],
+    }
+    base.update(overrides)
+    return gpd.GeoDataFrame(base, geometry="geometry", crs=overrides.pop("crs", "EPSG:4326"))
+
+
+def test_validate_entities_accepts_valid_frame():
+    entities = _entities()
+    assert schema.validate_entities(entities) is entities
+
+
+def test_validate_entities_rejects_missing_columns():
+    entities = cast(gpd.GeoDataFrame, _entities().drop(columns=["status"]))
+    with pytest.raises(schema.SchemaError, match="status"):
+        schema.validate_entities(entities)
+
+
+def test_validate_entities_rejects_wrong_crs():
+    entities = _entities().to_crs(32631)
+    with pytest.raises(schema.SchemaError, match="4326"):
+        schema.validate_entities(entities)
+
+
+def test_validate_entities_rejects_well_with_polygon():
+    entities = _entities(entity_type=["well", "well"])
+    with pytest.raises(schema.SchemaError, match="well"):
+        schema.validate_entities(entities)
+
+
+def test_validate_entities_rejects_bad_entity_type():
+    entities = _entities(entity_type=["well", "platform"])
+    with pytest.raises(schema.SchemaError, match="platform"):
+        schema.validate_entities(entities)
+
+
+def test_validate_entities_allows_missing_geometry():
+    entities = _entities(geometry=[None, None])
+    schema.validate_entities(entities)
+
+
+def test_empty_entities_is_valid():
+    empty = schema.empty_entities()
+    assert list(empty.columns) == list(schema.ENTITY_COLUMNS)
+    assert len(empty) == 0
+    schema.validate_entities(empty)

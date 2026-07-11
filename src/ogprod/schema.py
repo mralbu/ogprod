@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import enum
 
+import geopandas as gpd
 import pandas as pd
 
 
@@ -116,3 +117,66 @@ def validate(frame: pd.DataFrame) -> pd.DataFrame:
         raise SchemaError("'volume' must be numeric")
 
     return frame
+
+
+ENTITY_COLUMNS: tuple[str, ...] = (
+    "source",  # connector name, e.g. "anp"
+    "entity_type",  # "well" | "field"
+    "entity_id",  # source-native identifier — joins to production
+    "entity_name",  # human-readable name
+    "field",  # field the entity belongs to
+    "basin",
+    "region",  # state / province / offshore area
+    "operator",
+    "status",  # lifecycle when reported (producing / shut-in / ...), source-native text
+    "geometry",  # Point for wells, (Multi)Polygon ring fences for fields
+)
+
+_ENTITY_STRING_COLUMNS = tuple(c for c in ENTITY_COLUMNS if c != "geometry")
+
+#: Geometry types each entity_type may carry (missing geometry is always allowed).
+_GEOMETRY_TYPES: dict[str, set[str]] = {
+    EntityType.WELL.value: {"Point"},
+    EntityType.FIELD.value: {"Polygon", "MultiPolygon"},
+}
+
+#: CRS every entities frame must be in.
+ENTITY_CRS = "EPSG:4326"
+
+
+def empty_entities() -> gpd.GeoDataFrame:
+    """An empty GeoDataFrame with the canonical entity columns."""
+    frame = pd.DataFrame({column: pd.Series(dtype="string") for column in _ENTITY_STRING_COLUMNS})
+    geometry = gpd.GeoSeries([], name="geometry", crs=ENTITY_CRS)
+    return gpd.GeoDataFrame(frame, geometry=geometry)[list(ENTITY_COLUMNS)]
+
+
+def validate_entities(entities: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Check that ``entities`` conforms to the canonical entity schema.
+
+    Returns the frame unchanged so calls can be inlined; raises
+    :class:`SchemaError` describing the first problem found.
+    """
+    if not isinstance(entities, gpd.GeoDataFrame):
+        raise SchemaError("entities must be a geopandas.GeoDataFrame")
+    missing = [column for column in ENTITY_COLUMNS if column not in entities.columns]
+    if missing:
+        raise SchemaError(f"missing entity columns: {missing}")
+    if len(entities) == 0:
+        return entities
+
+    bad_types = set(entities["entity_type"].dropna().unique()) - {e.value for e in EntityType}
+    if bad_types:
+        raise SchemaError(f"invalid entity_type values: {sorted(bad_types)}")
+
+    if entities.crs is None or entities.crs.to_epsg() != 4326:
+        raise SchemaError(f"entities must be in {ENTITY_CRS}, got {entities.crs}")
+
+    for entity_type, allowed in _GEOMETRY_TYPES.items():
+        geoms = entities.loc[entities["entity_type"] == entity_type, "geometry"].dropna()
+        bad_geoms = set(geoms.geom_type.unique()) - allowed
+        if bad_geoms:
+            raise SchemaError(
+                f"{entity_type} geometry must be {sorted(allowed)}, got {sorted(bad_geoms)}"
+            )
+    return entities
