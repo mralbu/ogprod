@@ -48,6 +48,23 @@ _WELLS_RESOURCE_NAME = "Listado de pozos cargados por empresas operadoras"
 _ENTITY_REQUIRED = ("idpozo", "coordenadax", "coordenaday")
 
 
+def _csv_resources(http: httpx.Client) -> list[dict]:
+    """The dataset's CSV resources from the portal's CKAN ``package_show``."""
+    response = http.get(_PACKAGE_SHOW_URL, params={"id": _DATASET_ID})
+    response.raise_for_status()
+    return [
+        resource
+        for resource in response.json()["result"]["resources"]
+        if resource.get("format") == "CSV"
+    ]
+
+
+def _download_resource(http: httpx.Client, resource: dict, dest_dir: Path) -> list[Path]:
+    url = resource["url"]
+    dest = dest_dir / httpx.URL(url).path.rsplit("/", 1)[-1]
+    return [base.download(http, url, dest)]
+
+
 @base.register
 class Argentina(base.Source):
     name = "argentina"
@@ -68,13 +85,7 @@ class Argentina(base.Source):
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
         with base.open_client(client) as http:
-            response = http.get(_PACKAGE_SHOW_URL, params={"id": _DATASET_ID})
-            response.raise_for_status()
-            resources = [
-                resource
-                for resource in response.json()["result"]["resources"]
-                if resource.get("format") == "CSV"
-            ]
+            resources = _csv_resources(http)
             matches = [r for r in resources if str(year) in (r.get("name") or "")]
             if not matches:
                 years = sorted(
@@ -83,9 +94,7 @@ class Argentina(base.Source):
                     if (match := re.search(r"\b(19|20)\d\d\b", resource.get("name") or ""))
                 )
                 raise ValueError(f"no Capítulo IV CSV for {year}; years available: {years}")
-            url = matches[0]["url"]
-            dest = dest_dir / httpx.URL(url).path.rsplit("/", 1)[-1]
-            return [base.download(http, url, dest)]
+            return _download_resource(http, matches[0], dest_dir)
 
     def parse(self, raw: base.RawFile) -> pd.DataFrame:
         # low_memory=False: real files are >100 MB and chunked type inference
@@ -96,8 +105,10 @@ class Argentina(base.Source):
             raise ValueError(f"not a Capítulo IV well production file; missing {missing}")
 
         period = month_start(frame["anio"], frame["mes"])
-        entity_id = frame["idpozo"].astype("string")
-        entity_name = frame["sigla"] if "sigla" in frame.columns else entity_id
+        # idpozo is numeric and arrives float-typed when any row leaves it
+        # blank; base.build_frame's id normalization keeps ids clean.
+        entity_id = frame["idpozo"]
+        entity_name = frame["sigla"] if "sigla" in frame.columns else base.id_string(entity_id)
 
         volumes = {
             product: pd.to_numeric(frame[column], errors="coerce").map(
@@ -130,21 +141,16 @@ class Argentina(base.Source):
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
         with base.open_client(client) as http:
-            response = http.get(_PACKAGE_SHOW_URL, params={"id": _DATASET_ID})
-            response.raise_for_status()
-            resources = [
+            matches = [
                 resource
-                for resource in response.json()["result"]["resources"]
-                if resource.get("format") == "CSV"
-                and _WELLS_RESOURCE_NAME in (resource.get("name") or "")
+                for resource in _csv_resources(http)
+                if _WELLS_RESOURCE_NAME in (resource.get("name") or "")
             ]
-            if not resources:
+            if not matches:
                 raise ValueError(
                     f"no {_WELLS_RESOURCE_NAME!r} CSV resource in CKAN dataset {_DATASET_ID!r}"
                 )
-            url = resources[0]["url"]
-            dest = dest_dir / httpx.URL(url).path.rsplit("/", 1)[-1]
-            return [base.download(http, url, dest)]
+            return _download_resource(http, matches[0], dest_dir)
 
     def parse_entities(self, raw: base.RawFile) -> gpd.GeoDataFrame:
         frame = pd.read_csv(raw, low_memory=False)
@@ -156,12 +162,12 @@ class Argentina(base.Source):
         y = pd.to_numeric(frame["coordenaday"], errors="coerce")
         points = gpd.GeoSeries(gpd.points_from_xy(x, y), crs="EPSG:4326")
         geometry = points.where(~(x.isna() | y.isna()), None)
-        entity_id = frame["idpozo"].astype("string")
+        entity_id = frame["idpozo"]
 
         def optional(column: str) -> pd.Series | None:
             return frame[column] if column in frame.columns else None
 
-        entity_name = frame["sigla"] if "sigla" in frame.columns else entity_id
+        entity_name = frame["sigla"] if "sigla" in frame.columns else base.id_string(entity_id)
         return base.build_entities(
             source=self.name,
             entity_type=self.entity_type,

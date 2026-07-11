@@ -206,6 +206,21 @@ def test_parse_entities_decimal_degree_columns(tmp_path):
     assert row.geometry.y == pytest.approx(-22.384617)
 
 
+def test_parse_entities_cp1252_encoded_cadastre(tmp_path):
+    # Some ANP vintages are cp1252-encoded (the production reader already
+    # falls back); the cadastre reader must fall back the same way instead
+    # of raising UnicodeDecodeError.
+    file = tmp_path / "pocos_publicos_2023.csv"
+    file.write_bytes(
+        (
+            "POCO;OPERADOR;ESTADO;BACIA;CAMPO;SITUACAO;LATITUDE_BASE_DD;LONGITUDE_BASE_DD\n"
+            "7-TPI-1-RJS;PETROBRAS;São Paulo;Campos;TARTARUGA;Produzindo;-22,384617;-40,051942\n"
+        ).encode("cp1252")
+    )
+    entities = ogprod.load_entities("anp", file)
+    assert entities["region"].iloc[0] == "São Paulo"
+
+
 def test_parse_entities_rejects_other_files(tmp_path):
     bogus = tmp_path / "bogus.csv"
     bogus.write_text("a;b\n1;2\n")

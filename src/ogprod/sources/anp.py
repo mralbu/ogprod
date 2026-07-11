@@ -116,18 +116,28 @@ _GEOMETRY_ALIASES = ("geom", "geometry", "the_geom")
 def _read_entities(raw: base.RawFile) -> pd.DataFrame:
     """Read a cadastre CSV, tolerating the WFS export's comma-delimited,
     period-decimal style as well as the semicolon/comma-decimal style used
-    elsewhere in ANP's bulk files."""
+    elsewhere in ANP's bulk files. Like ``_read``, falls back to cp1252 —
+    some ANP vintages are cp1252-encoded."""
+    try:
+        return _read_entities_encoded(raw, "utf-8-sig")
+    except UnicodeDecodeError:
+        if not isinstance(raw, str | Path):
+            raw.seek(0)
+        return _read_entities_encoded(raw, "cp1252")
+
+
+def _read_entities_encoded(raw: base.RawFile, encoding: str) -> pd.DataFrame:
     if isinstance(raw, str | Path):
-        with open(raw, encoding="utf-8-sig", errors="ignore") as handle:
+        with open(raw, encoding=encoding, errors="ignore") as handle:
             first_line = handle.readline()
     else:
         position = raw.tell()
         chunk = raw.readline()
         raw.seek(position)
-        first_line = chunk.decode("utf-8-sig") if isinstance(chunk, bytes) else chunk
+        first_line = chunk.decode(encoding, errors="ignore") if isinstance(chunk, bytes) else chunk
     semicolon_delimited = first_line.count(";") > first_line.count(",")
     sep, decimal = (";", ",") if semicolon_delimited else (",", ".")
-    return pd.read_csv(raw, sep=sep, decimal=decimal, encoding="utf-8-sig", low_memory=False)
+    return pd.read_csv(raw, sep=sep, decimal=decimal, encoding=encoding, low_memory=False)
 
 
 def _link_period(url: str) -> tuple[int, int | None] | None:
