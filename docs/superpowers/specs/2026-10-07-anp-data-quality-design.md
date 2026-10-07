@@ -81,9 +81,9 @@ The project rule that "a key repeated within one parsed frame is a
 `SchemaError`, never silently deduped" stays in force. These merges are
 explicit, documented and specific to each format, they check their own
 assumptions, and `build_frame`/`validate` still reject anything left over.
-The parse logs one `INFO` line per file with the number of merged groups. The
-module docstring and docs/design.md's per-connector notes record the rule,
-and these counts as of 2026-10-07.
+docs/design.md's per-connector notes record the rule, and docs/follow-ups.md
+records these counts as of 2026-10-07. ogprod has no logging, so no per-file
+log line is emitted.
 
 Effect: 2005 onshore oil drops from 12.020 to 11.841 Mm³. 1941–2003 totals
 are unchanged against keeping the state-matched row. 2004 gas recovers

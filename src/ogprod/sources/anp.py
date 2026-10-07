@@ -19,7 +19,10 @@ from __future__ import annotations
 import re
 import shutil
 import unicodedata
+import warnings
 import zipfile
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +31,7 @@ import httpx
 import pandas as pd
 
 from ogprod import units
-from ogprod.schema import EntityType, Product, month_start
+from ogprod.schema import EntityType, Product, SchemaError, month_start
 from ogprod.sources import base
 
 _UNIT_ALIASES = {
@@ -59,6 +62,41 @@ _META_ALIASES = {
     "uf": "region",
     "operador": "operator",
 }
+
+
+@dataclass(frozen=True)
+class Gap:
+    """A stretch of months where ANP's well-level data is known to be incomplete.
+
+    ogprod never imputes these volumes; ``parse`` warns when a file reports
+    the product inside the gap.
+    """
+
+    product: Product
+    start: date
+    end: date  # inclusive month start
+    description: str
+
+
+#: Publisher gaps, verified against national totals (see
+#: docs/superpowers/specs/2026-10-07-anp-data-quality-design.md).
+KNOWN_GAPS: tuple[Gap, ...] = (
+    Gap(
+        product=Product.GAS,
+        start=date(2003, 7, 1),
+        end=date(2005, 6, 1),
+        description=(
+            "only ~600 of ~8,300 producing wells report gas (≈5% of normal volume); "
+            "the gap is in ANP's own files, both the current 2005 zip and the "
+            "archived 2003-2004 CSVs"
+        ),
+    ),
+)
+
+# Two non-zero volumes for one product in repeated rows of the same
+# (well, period, field) count as the same reported value within this
+# relative tolerance; anything further apart is a real conflict.
+_MERGE_RTOL = 5e-3
 
 
 # gov.br hosts bulk zips (yearly 2005-2020, monthly 2021-2023) linked from this
@@ -320,6 +358,44 @@ def _realign(frame: pd.DataFrame) -> pd.DataFrame:
     return realigned
 
 
+def _merge_repeated_rows(
+    frame: pd.DataFrame, key: list[str], volume_columns: list[str]
+) -> pd.DataFrame:
+    """Collapse rows that repeat a (well, period, field) key into one row.
+
+    ANP files repeat well-months in a few known shapes: verbatim copies, one
+    row per crude stream with identical volumes (2019-05 mar/pré-sal), and
+    the 2005 terra file's leftovers of a state cross-join, where both copies
+    carry the oil but only one carries the gas. Summing would double-count
+    oil and dropping a copy would lose gas, so each product takes the first
+    non-zero value in file order (0 if the group only has zeros). Metadata
+    comes from the group's first row. Two different non-zero values for one
+    product raise SchemaError rather than being guessed between.
+    """
+    repeated = frame.duplicated(key, keep=False)
+    if not repeated.any():
+        return frame
+    rows = frame[repeated]
+    group = rows.groupby(key, dropna=False, sort=False).ngroup()
+    first_of_group = ~group.duplicated()
+    merged = rows[first_of_group].copy()
+    merged.index = group[first_of_group].to_numpy()
+    for column in volume_columns:
+        values = rows[column]
+        nonzero = values.where(values != 0).groupby(group)
+        low, high, first = nonzero.min(), nonzero.max(), nonzero.first()
+        conflict = (high - low).abs() > _MERGE_RTOL * high.abs()
+        if conflict.any():
+            sample = merged.loc[conflict[conflict].index, key].head(5)
+            raise SchemaError(
+                f"duplicate {key} rows with conflicting {column!r} volumes: "
+                f"{sample.to_dict('records')}"
+            )
+        has_zero = (values == 0).groupby(group).any()
+        merged[column] = first.mask(first.isna() & has_zero, 0.0)
+    return pd.concat([frame[~repeated], merged], ignore_index=True)
+
+
 def _period(frame: pd.DataFrame, columns: dict[str, str]) -> pd.Series:
     if "periodo" in columns:
         # Written "2023/01" in bulk files, "2023-01" elsewhere.
@@ -471,12 +547,6 @@ class ANP(base.Source):
             # header mid-file; keep only rows with a real period cell.
             period_text = frame[normalized["periodo"]].astype(str)
             frame = frame[period_text.str.match(_PERIOD_PATTERN, na=False)].reset_index(drop=True)
-        # Some files repeat a row verbatim (e.g. 2015_producao_presal.csv,
-        # identical down to contract and installation). Only such exact
-        # repeats are dropped; rows sharing a key with different values still
-        # fail validation rather than silently losing volume.
-        frame = frame.drop_duplicates(ignore_index=True)
-
         meta: dict[str, pd.Series] = {}
         for alias, role in _META_ALIASES.items():
             if alias in normalized and role not in meta:
@@ -529,15 +599,40 @@ class ANP(base.Source):
                 values if product not in volumes else volumes[product].add(values, fill_value=0.0)
             )
 
-        return base.build_frame(
+        # Repeated well-months are merged per product, never summed or
+        # dropped; see _merge_repeated_rows for the shapes ANP publishes.
+        work = pd.DataFrame(
+            {"period": period, **meta, **{product.value: v for product, v in volumes.items()}}
+        )
+        key = ["entity", "period"] + (["field"] if "field" in meta else [])
+        work = _merge_repeated_rows(work, key, [product.value for product in volumes])
+
+        result = base.build_frame(
             source=self.name,
             entity_type=self.entity_type,
-            entity_id=meta["entity"],
-            entity_name=meta["entity"],
-            period=period,
-            volumes_m3=volumes,
-            field=meta.get("field"),
-            basin=meta.get("basin"),
-            region=meta.get("region"),
-            operator=meta.get("operator"),
+            entity_id=work["entity"],
+            entity_name=work["entity"],
+            period=work["period"],
+            volumes_m3={product: work[product.value] for product in volumes},
+            field=work.get("field"),
+            basin=work.get("basin"),
+            region=work.get("region"),
+            operator=work.get("operator"),
         )
+        _warn_known_gaps(result)
+        return result
+
+
+def _warn_known_gaps(frame: pd.DataFrame) -> None:
+    for gap in KNOWN_GAPS:
+        in_gap = (frame["product"] == gap.product.value) & frame["period"].between(
+            pd.Timestamp(gap.start), pd.Timestamp(gap.end)
+        )
+        if in_gap.any():
+            warnings.warn(
+                f"ANP well-level {gap.product.value} is incomplete for "
+                f"{gap.start:%Y-%m}..{gap.end:%Y-%m}: {gap.description}; "
+                "see ogprod.sources.anp.KNOWN_GAPS",
+                UserWarning,
+                stacklevel=3,
+            )

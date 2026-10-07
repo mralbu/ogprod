@@ -94,6 +94,10 @@ Caveats:
   contain per-month CSVs *and* whole-year aggregate CSVs (`2012_06_producao_mar.csv`
   alongside `2012_producao_mar.csv`). Load one granularity, not both, or every
   volume counts twice.
+- **Gas is missing for 2003-07 … 2005-06.** ANP's own files report gas for
+  only ~600 of ~8,300 wells in those months, so national gas totals there are
+  ≈5% of reality. ogprod warns and leaves the data as published; see
+  `ogprod.sources.anp.KNOWN_GAPS`.
 
 The files are semicolon-separated with comma decimals and dot thousands
 separators, and bulk files use a stacked multi-row header — `parse` handles

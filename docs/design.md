@@ -56,8 +56,9 @@ Design choices behind it:
   field`) repeats, and every connector runs it on its own output (via
   `base.build_frame`). A repeated key inside one file means the parser can't
   tell two rows apart; failing beats silently keeping one and losing volume.
-  (ANP drops rows repeated *verbatim* before that check — some files carry
-  them, e.g. `2015_producao_presal.csv`.)
+  (ANP is the documented exception: it merges repeated well-months before
+  that check, per product, and still rejects real conflicts — see the ANP
+  per-connector notes.)
 
 ## Entities
 
@@ -153,6 +154,17 @@ year, omitting `year` downloads the whole archive (multi-zip fetches extract
 into per-period subdirectories). 2024+ exists only in the interactive CDP app,
 so `fetch` raises a pointed error for those years. Note the pré-sal
 file is a subset of the mar file — concatenating all three double-counts.
+Some files repeat a `(well, period, field)` within the file: verbatim
+copies, one row per crude stream with identical volumes
+(`2019_05_producao_mar`/`presal`), and the 2005 terra file's leftovers of an
+old state cross-join, where both copies carry the oil but only one carries
+the gas. `parse` merges each group into one row — per product, the first
+non-zero value in file order — so oil isn't double-counted and gas isn't
+lost; two non-zero values more than 0.5% apart raise `SchemaError`.
+**Known publisher gaps** are listed in `anp.KNOWN_GAPS` and never imputed:
+gas for 2003-07..2005-06 is reported by only ~600 of ~8,300 wells (≈5% of
+national volume); `parse` emits a `UserWarning` when a file reports a
+product inside a gap.
 Well entities come from a separate cadastre: the documented "Tabela de
 Poços" download page 404s, so `fetch_entities` queries ANP's GeoServer WFS
 directly (`BD_ANP:POCOS_SIRGAS`, ~31k wells) as CSV with a WKT `GEOM` point

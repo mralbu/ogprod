@@ -180,6 +180,76 @@ def test_parse_drops_verbatim_repeated_rows(tmp_path):
     assert frame["volume"].iloc[0] == pytest.approx(58.1)
 
 
+def test_merges_repeated_well_month_split_across_rows(tmp_path):
+    # 2005_producao_terra.csv repeats well-months: both copies carry the oil,
+    # only one carries the gas (the other carries the production hours).
+    # The well produced the oil once, with that gas.
+    file = tmp_path / "2005_producao_terra.csv"
+    file.write_text(
+        "Poço;Campo;Período;Óleo (bbl/dia);Gás Natural (Mm³/dia);Tempo de Produção (hs por mês)\n"
+        "7-FBE-8-BA;FAZENDA BOA ESPERANÇA;2005/01;119,7032;3,1945;0\n"
+        "7-FBE-8-BA;FAZENDA BOA ESPERANÇA;2005/01;119,7032;0,0000;31\n",
+        encoding="utf-8",
+    )
+    with pytest.warns(UserWarning, match="incomplete"):  # 2005-01 is inside the gas gap
+        frame = ogprod.load("anp", file)
+
+    assert _row(frame, "7-FBE-8-BA", "oil")["volume"] == pytest.approx(
+        119.7032 * 31 * 0.158987294928
+    )
+    assert _row(frame, "7-FBE-8-BA", "gas")["volume"] == pytest.approx(3.1945 * 31 * 1000)
+
+
+def test_merges_crude_stream_rows_with_identical_volumes(tmp_path):
+    # 2019_05_producao_mar.csv lists a well once per crude stream; the
+    # volumes repeat, only the crude-quality columns differ.
+    file = tmp_path / "2019_05_producao_mar.csv"
+    file.write_text(
+        "Poço;Campo;Período;Petróleo (bbl/dia);Grau API\n"
+        "3-RNS-120-RN;ARABAIANA;2019/05;63,6567;38,0\n"
+        "3-RNS-120-RN;ARABAIANA;2019/05;63,6567;41,5\n",
+        encoding="utf-8",
+    )
+    frame = ogprod.load("anp", file)
+    assert len(frame) == 1
+    assert frame["volume"].iloc[0] == pytest.approx(63.6567 * 31 * 0.158987294928)
+
+
+def test_merge_tolerates_rounding_differences(tmp_path):
+    file = tmp_path / "poco.csv"
+    file.write_text(
+        "Poço;Campo;Período;Petróleo (m³)\n7-X-1-BA;F;2023/01;100,0\n7-X-1-BA;F;2023/01;100,2\n",
+        encoding="utf-8",
+    )
+    frame = ogprod.load("anp", file)
+    assert frame["volume"].iloc[0] == pytest.approx(100.0)
+
+
+def test_warns_on_known_gas_gap(tmp_path):
+    file = tmp_path / "poco.csv"
+    file.write_text(
+        "Poço;Campo;Período;Petróleo (m³);Gás Natural (Mm³)\n7-X-1-BA;F;2004/03;10,0;1,0\n",
+        encoding="utf-8",
+    )
+    with pytest.warns(UserWarning, match="gas is incomplete for 2003-07..2005-06"):
+        ogprod.load("anp", file)
+
+
+@pytest.mark.parametrize(
+    "header,row",
+    [
+        ("Poço;Campo;Período;Petróleo (m³);Gás Natural (Mm³)", "7-X-1-BA;F;2007/03;10,0;1,0"),
+        ("Poço;Campo;Período;Petróleo (m³)", "7-X-1-BA;F;2004/03;10,0"),
+    ],
+    ids=["outside-gap", "no-gas-reported"],
+)
+def test_no_gap_warning_outside_gap_or_product(tmp_path, recwarn, header, row):
+    file = tmp_path / "poco.csv"
+    file.write_text(f"{header}\n{row}\n", encoding="utf-8")
+    ogprod.load("anp", file)
+    assert not [w for w in recwarn if "incomplete" in str(w.message)]
+
+
 def test_rejects_conflicting_rows_for_one_key(tmp_path):
     # Same well, field and month with different volumes: refuse to guess.
     file = tmp_path / "poco.csv"
@@ -187,7 +257,7 @@ def test_rejects_conflicting_rows_for_one_key(tmp_path):
         "Poço;Campo;Período;Petróleo (m³)\n7-X-1-BA;F;2023/01;10,0\n7-X-1-BA;F;2023/01;12,0\n",
         encoding="utf-8",
     )
-    with pytest.raises(schema.SchemaError, match="duplicate"):
+    with pytest.raises(schema.SchemaError, match="conflicting"):
         ogprod.load("anp", file)
 
 

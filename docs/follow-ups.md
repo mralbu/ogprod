@@ -93,6 +93,12 @@ as BLOB to match a populated store; `_UPSERT_KEY`/`_SORT_KEY` merged.
   file with `Petróleo` + `Condensado` but no `Óleo` would count condensate
   twice; no such layout has been seen yet.
 
+- **ANP repeated well-months and the 2003–2005 gas gap** (2026-10-07). As of
+  this date, 3 of 357 current files repeat well-months (2005 terra: 5,472
+  groups; 2019-05 mar: 26; 2019-05 pré-sal: 3) and `parse` merges them per
+  product. If ANP republishes 2003–2005 with gas, the gap warning will
+  start firing on complete data: re-check national totals and drop the
+  `KNOWN_GAPS` entry. Spec: `docs/superpowers/specs/2026-10-07-anp-data-quality-design.md`.
 - **ANP duplicate well names.** The live cadastre (31,273 rows, checked
   July 2026) has zero duplicate `POCO` values, so `validate_entities`'
   uniqueness check passes today. If ANP ever publishes a duplicate,
