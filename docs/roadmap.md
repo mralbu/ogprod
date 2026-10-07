@@ -43,6 +43,11 @@ daily sources (NSTA well data), and possibly basin/region name harmonies
 
 ## Store and scale
 
+- **ANP pre-2005 history.** ANP no longer serves its 1941–2004 per-well
+  CSVs. Byte-identical Wayback captures exist, and the specs are written:
+  checksum-pinned Wayback fetch, old-format parse, and a Zenodo mirror
+  (`docs/superpowers/specs/2026-10-07-anp-historical-*`). This would add
+  64 years to the repo's biggest well-level source.
 - **ANP 2024+ gap.** Bulk files stop at 2023; recent data sits in the CDP
   application. Reverse-engineering CDP's export (or scraping its API)
   closes the two-year hole in the repo's biggest well-level source.

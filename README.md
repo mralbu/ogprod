@@ -73,7 +73,9 @@ Each connector separates `fetch` (network: download the publisher's raw files)
 from `parse` (pure: normalize a raw file, works on files downloaded by any
 means). See [docs/downloading.md](docs/downloading.md) for each source's
 download options and caveats — e.g. ANP bulk files stop at 2023; newer Brazil
-data is only in ANP's interactive CDP app. The survey of ~15 further candidate
+data is only in ANP's interactive CDP app, and ANP's own well-level gas is
+incomplete for 2003-07..2005-06 (`ogprod.sources.anp.KNOWN_GAPS`; ogprod warns,
+never imputes). The survey of ~15 further candidate
 sources is in [docs/data-sources.md](docs/data-sources.md).
 
 ## Development
