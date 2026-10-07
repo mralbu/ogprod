@@ -81,12 +81,30 @@ def test_write_leaves_other_partitions_untouched(root):
     assert other.read_bytes() == before
 
 
-def test_duplicate_keys_within_one_write_keep_last(root):
-    frame = production_frame([{"volume": 1.0}, {"volume": 7.0}])  # same key twice
-    store.write_production(frame, root=root)
-    stored = pd.read_parquet(root / "production/source=testsrc/year=2023/data.parquet")
-    assert len(stored) == 1
-    assert stored["volume"].iloc[0] == 7.0
+def test_duplicate_keys_within_one_write_rejected(root):
+    # Two rows a parser can't tell apart must not silently collapse to one.
+    frame = pd.concat(
+        [production_frame([{"volume": 1.0}]), production_frame([{"volume": 7.0}])],
+        ignore_index=True,
+    )
+    with pytest.raises(schema.SchemaError, match="duplicate"):
+        store.write_production(frame, root=root)
+    assert not root.exists()
+
+
+def test_combine_restatements_later_frame_wins():
+    # ANP's pré-sal file restates a subset of the mar file: across files the
+    # later row replaces the earlier one; unrelated rows are all kept.
+    mar = production_frame([{"entity_id": "W-1", "volume": 1.0}, {"entity_id": "W-2"}])
+    pre_sal = production_frame([{"entity_id": "W-1", "volume": 7.0}])
+    combined = store.combine_restatements([mar, pre_sal])
+    assert combined.set_index("entity_id")["volume"].to_dict() == {"W-1": 7.0, "W-2": 100.0}
+
+
+def test_combine_restatements_rejects_duplicates_within_one_frame():
+    repeated = pd.concat([production_frame([{}]), production_frame([{}])], ignore_index=True)
+    with pytest.raises(schema.SchemaError, match="duplicate"):
+        store.combine_restatements([repeated])
 
 
 def test_one_well_split_across_fields_keeps_both_rows(root):

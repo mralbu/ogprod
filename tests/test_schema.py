@@ -37,6 +37,24 @@ def test_valid_frame_passes():
     assert schema.validate(frame) is frame
 
 
+def test_duplicate_production_key_rejected():
+    frame = pd.concat([_valid_frame(), _valid_frame()], ignore_index=True)
+    with pytest.raises(schema.SchemaError, match="duplicate"):
+        schema.validate(frame)
+
+
+def test_duplicate_key_with_null_field_rejected():
+    row = _valid_frame().assign(field=pd.Series([pd.NA], dtype="string"))
+    with pytest.raises(schema.SchemaError, match="duplicate"):
+        schema.validate(pd.concat([row, row], ignore_index=True))
+
+
+def test_same_well_month_in_two_fields_is_not_a_duplicate():
+    # ANP splits one well's month across fields; those are distinct rows.
+    other_field = _valid_frame().assign(field="TUPI_ECO")
+    schema.validate(pd.concat([_valid_frame(), other_field], ignore_index=True))
+
+
 def test_missing_column():
     with pytest.raises(schema.SchemaError, match="missing canonical columns"):
         schema.validate(_valid_frame().drop(columns=["volume"]))

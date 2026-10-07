@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 
 from ogprod import units
@@ -13,6 +14,12 @@ def test_barrel_factor():
 
 def test_thousand_cubic_metres():
     assert units.to_m3(2.5, "e3m3") == pytest.approx(2500.0)
+
+
+def test_factor_scales_a_whole_column():
+    column = pd.Series([1.0, 2.0, None]) * units.factor("e3m3")
+    assert column.tolist()[:2] == [1000.0, 2000.0]
+    assert pd.isna(column.iloc[2])
 
 
 def test_gas_units():

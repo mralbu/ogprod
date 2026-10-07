@@ -166,6 +166,31 @@ def test_parse_drops_repeated_header_blocks(tmp_path):
     assert frame["volume"].sum() == pytest.approx(30.0)
 
 
+def test_parse_drops_verbatim_repeated_rows(tmp_path):
+    # 2015_producao_presal.csv repeats some rows verbatim; they are one row.
+    file = tmp_path / "2015_producao_presal.csv"
+    file.write_text(
+        "Poço;Campo;Período;Petróleo (m³)\n"
+        "3-RJS-159-RJS;PAMPO;2015/05;58,1\n"
+        "3-RJS-159-RJS;PAMPO;2015/05;58,1\n",
+        encoding="utf-8",
+    )
+    frame = ogprod.load("anp", file)
+    assert len(frame) == 1
+    assert frame["volume"].iloc[0] == pytest.approx(58.1)
+
+
+def test_rejects_conflicting_rows_for_one_key(tmp_path):
+    # Same well, field and month with different volumes: refuse to guess.
+    file = tmp_path / "poco.csv"
+    file.write_text(
+        "Poço;Campo;Período;Petróleo (m³)\n7-X-1-BA;F;2023/01;10,0\n7-X-1-BA;F;2023/01;12,0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(schema.SchemaError, match="duplicate"):
+        ogprod.load("anp", file)
+
+
 def test_rejects_file_without_well_column(tmp_path):
     bogus = tmp_path / "bogus.csv"
     bogus.write_text("a;b\n1;2\n")

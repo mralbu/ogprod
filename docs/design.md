@@ -51,8 +51,13 @@ Design choices behind it:
   months. Daily sources (UK NSTA well data) would add a `frequency` marker or
   a resample step at ingestion; not needed yet.
 - **Validation is a function, not a framework.** `schema.validate(frame)`
-  checks columns, enum values, month-normalized periods, and numeric volumes,
-  and every connector runs it on its own output (via `base.build_frame`).
+  checks columns, enum values, month-normalized periods, numeric volumes, and
+  that no `schema.PRODUCTION_KEY` (`source, entity_id, period, product,
+  field`) repeats, and every connector runs it on its own output (via
+  `base.build_frame`). A repeated key inside one file means the parser can't
+  tell two rows apart; failing beats silently keeping one and losing volume.
+  (ANP drops rows repeated *verbatim* before that check — some files carry
+  them, e.g. `2015_producao_presal.csv`.)
 
 ## Entities
 
@@ -267,11 +272,14 @@ data/store/
   [--entities]` chains fetch → parse → write against the resolved store
   root. Parsed frames are concatenated in fetch order and written in large
   batches (each `(source, year)` partition rewritten once per batch, not
-  once per raw file); duplicate keys within a batch keep the last
-  occurrence, so ANP's terra/mar/pré-sal split upserts correctly instead of
+  once per raw file). `store.combine_restatements` builds each batch: a
+  later file's row replaces an earlier file's row with the same key, so
+  ANP's terra/mar/pré-sal split upserts correctly instead of
   double-counting — the pré-sal file's rows (a subset of mar's, identical
   down to the field) replace the corresponding mar rows for the same
   `(entity_id, period, product, field)` rather than being summed with them.
+  Keep-last applies only *across* files; `write_production` itself rejects
+  a frame that repeats a key.
 
 ### Website data contract (future work)
 

@@ -109,9 +109,7 @@ class Sodir(base.Source):
         )
 
         volumes = {
-            product: pd.to_numeric(frame[column], errors="coerce").map(
-                lambda v, u=unit: units.to_m3(v, u)
-            )
+            product: pd.to_numeric(frame[column], errors="coerce") * units.factor(unit)
             for column, (product, unit) in _VOLUME_COLUMNS.items()
             if column in frame.columns
         }

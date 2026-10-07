@@ -30,8 +30,14 @@ _VOLUME_COLUMNS: dict[str, tuple[Product, str]] = {
 
 _REQUIRED = ("idpozo", "anio", "mes")
 
-# The portal is a stock CKAN instance; package_show lists one CSV resource per
-# year (e.g. "Producción de Pozos de Gas y Petróleo – 2025").
+# The portal is a stock CKAN instance; package_show lists the per-year CSVs
+# as "Producción de Pozos de Gas y Petróleo [-|–] <year>". Two lookalikes are
+# skipped: "(DDJJ abiertas y cerradas)" variants, which by their name also
+# include sworn declarations still open for amendment, and older duplicates
+# of a year (since 2025 some years appear twice, the newer resource adding an
+# ``id`` column over the same rows). Matching the exact name and taking the
+# newest ``created`` keeps the choice independent of CKAN's listing order.
+_YEAR_RESOURCE = re.compile(r"Producción de Pozos de Gas y Petróleo\s*[-–]?\s*(?P<year>\d{4})")
 _PACKAGE_SHOW_URL = "http://datos.energia.gob.ar/api/3/action/package_show"
 _DATASET_ID = "produccion-de-petroleo-y-gas-por-pozo"
 
@@ -85,16 +91,17 @@ class Argentina(base.Source):
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
         with base.open_client(client) as http:
-            resources = _csv_resources(http)
-            matches = [r for r in resources if str(year) in (r.get("name") or "")]
-            if not matches:
-                years = sorted(
-                    match.group()
-                    for resource in resources
-                    if (match := re.search(r"\b(19|20)\d\d\b", resource.get("name") or ""))
+            by_year: dict[int, list[dict]] = {}
+            for resource in _csv_resources(http):
+                match = _YEAR_RESOURCE.fullmatch((resource.get("name") or "").strip())
+                if match:
+                    by_year.setdefault(int(match["year"]), []).append(resource)
+            if year not in by_year:
+                raise ValueError(
+                    f"no Capítulo IV CSV for {year}; years available: {sorted(by_year)}"
                 )
-                raise ValueError(f"no Capítulo IV CSV for {year}; years available: {years}")
-            return _download_resource(http, matches[0], dest_dir)
+            newest = max(by_year[year], key=lambda resource: resource.get("created") or "")
+            return _download_resource(http, newest, dest_dir)
 
     def parse(self, raw: base.RawFile) -> pd.DataFrame:
         # low_memory=False: real files are >100 MB and chunked type inference
@@ -111,9 +118,7 @@ class Argentina(base.Source):
         entity_name = frame["sigla"] if "sigla" in frame.columns else base.id_string(entity_id)
 
         volumes = {
-            product: pd.to_numeric(frame[column], errors="coerce").map(
-                lambda v, u=unit: units.to_m3(v, u)
-            )
+            product: pd.to_numeric(frame[column], errors="coerce") * units.factor(unit)
             for column, (product, unit) in _VOLUME_COLUMNS.items()
             if column in frame.columns
         }

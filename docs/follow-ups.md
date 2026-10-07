@@ -56,7 +56,42 @@ as BLOB to match a populated store; `_UPSERT_KEY`/`_SORT_KEY` merged.
   removes exactly the restatements (commit `2ca1ba9`, regression-tested).
   Anyone with a store written before that commit should re-ingest ANP.
 
+## Fixed 2026-10-07 (review of main)
+
+- **Silent keep-last dedup inside one file.** `write_production` used to
+  drop every repeated `(source, entity_id, period, product, field)` keep-last,
+  for every source — fine for ANP's cross-file restatements, but it would
+  also have swallowed genuinely distinct rows *within* a file (the class of
+  bug behind the multi-field loss above). `schema.validate` now rejects a
+  repeated `schema.PRODUCTION_KEY`; keep-last lives only in
+  `store.combine_restatements`, which ingest applies across files. Checked
+  against live data: Argentina 2026 (661k rows) and ANP 2010/2015/2020/
+  2021-08/2023-12 have no conflicting repeats. ANP's
+  `2015_producao_presal.csv` has two rows repeated verbatim (every column,
+  contract and installation included); the ANP parser now drops verbatim
+  repeats only. The 2015 archive ingests to 2.42 Mbbl/d mean oil.
+- **Argentina fetch picked the first name containing the year.** The portal
+  lists 2024 and 2025 twice (the newer copy adds an `id` column) plus
+  `(DDJJ abiertas y cerradas)` variants, so the choice hung on CKAN's
+  listing order. Now: exact-name match, DDJJ excluded, newest `created`.
+- **Per-value unit conversion.** Connectors converted with
+  `.map(lambda ...)`; now one vectorized multiply by `units.factor(unit)`.
+- **`store.sql()` leaked its DuckDB connection** — now closed after the query.
+
 ## Open watch items
+
+- **Upserts never remove or move rows.** A restatement that withdraws a
+  well-month, or reassigns it to a renamed/corrected field (`field` is in
+  the key), leaves the old row in the store — double-counting in the
+  rename case. Safe for today's sources (pré-sal restates mar identically
+  down to the field); revisit before Petrinex amendments land. Options:
+  replace whole `(source, period)` slices per ingest (needs batches that
+  never split a month's files) or an explicit `--replace` mode.
+- **ANP "oil" changes meaning across vintages.** Files with only `Petróleo`
+  count condensate as oil; files with `Óleo` split it out, so a
+  condensate-producing well's oil series can step at a format change. A
+  file with `Petróleo` + `Condensado` but no `Óleo` would count condensate
+  twice; no such layout has been seen yet.
 
 - **ANP duplicate well names.** The live cadastre (31,273 rows, checked
   July 2026) has zero duplicate `POCO` values, so `validate_entities`'
