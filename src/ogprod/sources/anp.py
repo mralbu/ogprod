@@ -471,6 +471,11 @@ class ANP(base.Source):
             # header mid-file; keep only rows with a real period cell.
             period_text = frame[normalized["periodo"]].astype(str)
             frame = frame[period_text.str.match(_PERIOD_PATTERN, na=False)].reset_index(drop=True)
+        # Some files repeat a row verbatim (e.g. 2015_producao_presal.csv,
+        # identical down to contract and installation). Only such exact
+        # repeats are dropped; rows sharing a key with different values still
+        # fail validation rather than silently losing volume.
+        frame = frame.drop_duplicates(ignore_index=True)
 
         meta: dict[str, pd.Series] = {}
         for alias, role in _META_ALIASES.items():
@@ -517,7 +522,7 @@ class ANP(base.Source):
             values = pd.to_numeric(raw_values, errors="coerce")
             if is_rate:
                 values = values * days_in_month
-            values = values.map(lambda v, u=unit: units.to_m3(v, u))
+            values = values * units.factor(unit)
             # A product can appear in several columns (e.g. associated and
             # non-associated gas); sum them.
             volumes[product] = (

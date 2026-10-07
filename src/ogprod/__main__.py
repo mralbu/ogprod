@@ -99,10 +99,10 @@ def _ingest(args: argparse.Namespace, options: dict) -> list[Path]:
         merged = frames[0] if len(frames) == 1 else pd.concat(frames, ignore_index=True)
         return store.write_entities(cast(gpd.GeoDataFrame, merged), root=args.store_root)
 
-    # Parse in fetch order and write in large batches: write_production's
-    # keep-last dedup resolves overlapping files (ANP's pré-sal file restates
-    # a subset of the mar file), and each (source, year) partition is
-    # rewritten once per batch instead of once per raw file.
+    # Parse in fetch order and write in large batches: combine_restatements
+    # lets a later file replace an earlier file's rows (ANP's pré-sal file
+    # restates a subset of the mar file), and each (source, year) partition
+    # is rewritten once per batch instead of once per raw file.
     written: list[Path] = []
     batch: list[pd.DataFrame] = []
     rows = 0
@@ -113,12 +113,12 @@ def _ingest(args: argparse.Namespace, options: dict) -> list[Path]:
             rows += len(frame)
             if rows >= _BATCH_ROWS:
                 written += store.write_production(
-                    pd.concat(batch, ignore_index=True), root=args.store_root
+                    store.combine_restatements(batch), root=args.store_root
                 )
                 batch, rows = [], 0
         if batch:
             written += store.write_production(
-                pd.concat(batch, ignore_index=True), root=args.store_root
+                store.combine_restatements(batch), root=args.store_root
             )
     except (ValueError, TypeError):
         # A failure mid-run: report what earlier flushes already wrote (the

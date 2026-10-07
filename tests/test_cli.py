@@ -120,6 +120,19 @@ def test_ingest_concatenates_files_into_one_write(tmp_path, monkeypatch, data_di
     assert len(store.load_production(root=tmp_path / "s")) == 10  # overlap deduped, not summed
 
 
+def test_ingest_later_file_restates_earlier(tmp_path, monkeypatch, data_dir):
+    # ANP's pré-sal file restates rows of the mar file: the later file wins.
+    original = ogprod.load("sodir", data_dir / "sodir_field_production_monthly_sample.csv")
+    restated = original.assign(volume=original["volume"] * 2)
+    frames = {"mar.csv": original, "pre_sal.csv": restated}
+    monkeypatch.setattr(ogprod, "fetch", lambda name, dest, **kw: [Path(n) for n in frames])
+    monkeypatch.setattr(ogprod, "load", lambda name, raw: frames[Path(raw).name])
+    assert main(["ingest", "sodir", "--dest", str(tmp_path), "--store", str(tmp_path / "s")]) == 0
+    stored = store.load_production(root=tmp_path / "s")
+    assert len(stored) == len(original)
+    assert stored["volume"].sum() == pytest.approx(restated["volume"].sum())
+
+
 def test_ingest_parse_error_names_failing_file(tmp_path, monkeypatch, capsys, data_dir):
     sample = data_dir / "sodir_field_production_monthly_sample.csv"
     bad = tmp_path / "bogus.csv"

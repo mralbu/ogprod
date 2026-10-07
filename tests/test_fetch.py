@@ -17,9 +17,24 @@ ARG_PACKAGE_SHOW = {
     "success": True,
     "result": {
         "resources": [
+            # Lookalikes listed first, as on the live portal: an older copy of
+            # the year and the "DDJJ abiertas y cerradas" variant.
+            {
+                "format": "CSV",
+                "name": "Producción de Pozos de Gas y Petróleo - 2024 (DDJJ abiertas y cerradas)",
+                "created": "2025-06-01T00:00:00",
+                "url": "http://datos.energia.gob.ar/dataset/c8/resource/dd/download/ddjj-2024.csv",
+            },
+            {
+                "format": "CSV",
+                "name": "Producción de Pozos de Gas y Petróleo - 2024",
+                "created": "2024-01-09T08:07:34",
+                "url": "http://datos.energia.gob.ar/dataset/c8/resource/old/download/old-2024.csv",
+            },
             {
                 "format": "CSV",
                 "name": "Producción de Pozos de Gas y Petróleo – 2024",
+                "created": "2025-04-29T11:37:18",
                 "url": "http://datos.energia.gob.ar/dataset/c8/resource/aa/download/pozos-2024.csv",
             },
             {

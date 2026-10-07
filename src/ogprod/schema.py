@@ -46,6 +46,12 @@ CANONICAL_COLUMNS: tuple[str, ...] = (
     "volume",  # volume produced over the period, in CANONICAL_UNIT
 )
 
+#: Identity of a production row: unique within a canonical frame, and the
+#: store's upsert key. ``field`` is part of it because ANP reports one well's
+#: month split across several fields (e.g. ATAPU and ATAPU_ECO) — distinct
+#: volumes that must all be kept.
+PRODUCTION_KEY: tuple[str, ...] = ("source", "entity_id", "period", "product", "field")
+
 _STRING_COLUMNS = (
     "source",
     "entity_type",
@@ -125,6 +131,14 @@ def validate(frame: pd.DataFrame) -> pd.DataFrame:
 
     if not pd.api.types.is_numeric_dtype(frame["volume"]):
         raise SchemaError("'volume' must be numeric")
+
+    # A repeated key means the parser met two rows it cannot tell apart;
+    # silently keeping one would drop volume. (Restatements *across* files are
+    # resolved by the ingest step, not here.)
+    duplicated = frame.duplicated(subset=list(PRODUCTION_KEY))
+    if duplicated.any():
+        sample = frame.loc[duplicated, list(PRODUCTION_KEY)].astype(str).drop_duplicates().head(5)
+        raise SchemaError(f"duplicate {PRODUCTION_KEY} rows: {sample.to_dict('records')}")
 
     return frame
 

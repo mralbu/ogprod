@@ -36,7 +36,8 @@ class UnitError(ValueError):
     """Raised for unknown unit names."""
 
 
-def _factor(unit: str) -> float:
+def factor(unit: str) -> float:
+    """Cubic metres per one ``unit``; multiply a whole column by it to convert."""
     try:
         return CUBIC_METRES_PER[unit]
     except KeyError:
@@ -46,9 +47,9 @@ def _factor(unit: str) -> float:
 
 def convert(value: float, from_unit: str, to_unit: str = "m3") -> float:
     """Convert ``value`` between volume units."""
-    return value * _factor(from_unit) / _factor(to_unit)
+    return value * factor(from_unit) / factor(to_unit)
 
 
 def to_m3(value: float, unit: str) -> float:
     """Convert ``value`` in ``unit`` to cubic metres."""
-    return value * _factor(unit)
+    return value * factor(unit)

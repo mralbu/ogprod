@@ -123,8 +123,12 @@ paths = ogprod.fetch("argentina", "data/", year=2024)
 ```
 
 `fetch` asks the portal's CKAN API ([package_show](http://datos.energia.gob.ar/api/3/action/package_show?id=produccion-de-petroleo-y-gas-por-pozo))
-for the per-year CSV resource, so no file URL is hardcoded. Full-year files
-are 100–300 MB; expect the download to take a minute.
+for the per-year CSV resource, so no file URL is hardcoded. The resource is
+matched by exact name (`Producción de Pozos de Gas y Petróleo – <year>`,
+any dash); the `(DDJJ abiertas y cerradas)` variants are skipped, and when a
+year is listed twice (2024 and 2025 are, as of October 2026, the newer copy
+adding an `id` column over the same rows) the most recently created resource
+wins. Full-year files are 100–300 MB; expect the download to take a minute.
 
 Manual alternative: the dataset page is
 [Producción de petróleo y gas por pozo (Capítulo IV)](http://datos.energia.gob.ar/dataset/produccion-de-petroleo-y-gas-por-pozo).

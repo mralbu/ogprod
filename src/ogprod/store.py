@@ -27,12 +27,9 @@ from ogprod import schema
 DEFAULT_ROOT = Path("data/store")
 _ENV_VAR = "OGPROD_STORE"
 
-#: Upsert key within a partition; rows are also kept sorted by it. ``field``
-#: is part of the key because ANP reports a well's month split across several
-#: fields (e.g. ATAPU and ATAPU_ECO) — distinct volumes that must all be
-#: kept — while ANP's pré-sal file restates mar rows identically (same field),
-#: so keep-last dedup still removes exactly the restatements.
-_KEY = ["entity_id", "period", "product", "field"]
+#: Upsert key within a (source, year) partition — ``schema.PRODUCTION_KEY``
+#: minus the partition's source; rows are also kept sorted by it.
+_KEY = [column for column in schema.PRODUCTION_KEY if column != "source"]
 
 
 def _key_index(frame: pd.DataFrame) -> pd.MultiIndex:
@@ -64,12 +61,11 @@ def write_production(frame: pd.DataFrame, root: str | Path | None = None) -> lis
     """Upsert a canonical frame into the store; returns rewritten partition paths.
 
     Incoming rows replace stored rows with the same
-    ``(source, entity_id, period, product, field)``; duplicate keys within
-    ``frame`` itself keep the last occurrence (matters for ANP, whose pré-sal
-    file restates a subset of the mar file).
+    ``(source, entity_id, period, product, field)``. ``frame`` must not repeat
+    a key (``schema.validate`` rejects it); combining overlapping files is
+    the caller's job — see ``combine_restatements``.
     """
     schema.validate(frame)
-    frame = frame.drop_duplicates(subset=["source", *_KEY], keep="last")
     written = []
     base = resolve_root(root)
     frame = frame.copy()
@@ -85,6 +81,19 @@ def write_production(frame: pd.DataFrame, root: str | Path | None = None) -> lis
         _atomic_write_parquet(merged, path)
         written.append(path)
     return written
+
+
+def combine_restatements(frames: Iterable[pd.DataFrame]) -> pd.DataFrame:
+    """Concatenate parsed frames in order; a later frame's row replaces an
+    earlier one with the same ``schema.PRODUCTION_KEY``.
+
+    For publishers whose files overlap (ANP's pré-sal file restates a subset
+    of the mar file). Each frame must be valid on its own, so a key repeated
+    *within* one file still fails loudly instead of losing volume.
+    """
+    frames = [schema.validate(frame) for frame in frames]
+    combined = pd.concat(frames, ignore_index=True) if frames else schema.empty_frame()
+    return combined.drop_duplicates(subset=list(schema.PRODUCTION_KEY), keep="last")
 
 
 def _entities_file(root: Path, source: str) -> Path:
@@ -233,28 +242,28 @@ def sql(query: str, root: str | Path | None = None) -> pd.DataFrame:
     :func:`load_entities` when you want real geometries).
     """
     base = resolve_root(root)
-    con = duckdb.connect()
-    production_files = _production_files(base, None, None, None)
-    if production_files:
-        con.execute(
-            "CREATE VIEW production AS SELECT * FROM "
-            f"read_parquet({_files_literal(production_files)})"
-        )
-    else:
-        con.register("production", schema.empty_frame())
-    entities_dir = base / "entities"
-    entity_files = sorted(entities_dir.glob("*.parquet")) if entities_dir.exists() else []
-    if entity_files:
-        con.execute(
-            "CREATE VIEW entities AS SELECT * FROM "
-            f"read_parquet({_files_literal(entity_files)}, union_by_name=true)"
-        )
-    else:
-        # Match the populated store's column types (geometry = WKB BLOB) so
-        # queries behave identically against an empty store.
-        columns = ", ".join(
-            f"CAST(NULL AS {'BLOB' if column == 'geometry' else 'VARCHAR'}) AS {column}"
-            for column in schema.ENTITY_COLUMNS
-        )
-        con.execute(f"CREATE VIEW entities AS SELECT {columns} WHERE false")
-    return con.execute(query).df()
+    with duckdb.connect() as con:
+        production_files = _production_files(base, None, None, None)
+        if production_files:
+            con.execute(
+                "CREATE VIEW production AS SELECT * FROM "
+                f"read_parquet({_files_literal(production_files)})"
+            )
+        else:
+            con.register("production", schema.empty_frame())
+        entities_dir = base / "entities"
+        entity_files = sorted(entities_dir.glob("*.parquet")) if entities_dir.exists() else []
+        if entity_files:
+            con.execute(
+                "CREATE VIEW entities AS SELECT * FROM "
+                f"read_parquet({_files_literal(entity_files)}, union_by_name=true)"
+            )
+        else:
+            # Match the populated store's column types (geometry = WKB BLOB) so
+            # queries behave identically against an empty store.
+            columns = ", ".join(
+                f"CAST(NULL AS {'BLOB' if column == 'geometry' else 'VARCHAR'}) AS {column}"
+                for column in schema.ENTITY_COLUMNS
+            )
+            con.execute(f"CREATE VIEW entities AS SELECT {columns} WHERE false")
+        return con.execute(query).df()
