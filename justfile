@@ -18,6 +18,10 @@ ingest *args:
 notebooks:
     uv run --group notebooks jupyter nbconvert --to notebook --execute --inplace notebooks/*.ipynb
 
+# Serve Jupyter notebooks on all interfaces (`just jupyter`, `just jupyter 8889`)
+jupyter port="8888":
+    uv run --group notebooks jupyter notebook --ip 0.0.0.0 --port {{port}} notebooks/
+
 # Run the test suite
 test *args:
     uv run pytest {{args}}
