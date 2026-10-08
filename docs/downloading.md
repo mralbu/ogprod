@@ -1,63 +1,68 @@
 # Downloading and loading data
 
-`ogprod` can download production files for you (`fetch`) and parse them into
-the canonical frame (`load`). This page is the practical companion to the
-source survey in [data-sources.md](data-sources.md) and the architecture in
-[design.md](design.md): what `fetch` gets you per source, where to click when
+`ogprod` downloads production files for you, parses them into the canonical
+frame, and keeps the result in a local store (`Store.ingest`). This page is
+the practical companion to the source survey in
+[data-sources.md](data-sources.md) and the architecture in
+[design.md](design.md): what ingest downloads per source, where to click when
 you download by hand, and the per-source caveats.
 
 ## The workflow
 
-Every connector splits two concerns (`sources/base.py`):
-
-- **`parse(raw)`** — pure, always available. Takes a path or open file object
-  of a file *as published* and returns a validated canonical frame.
-- **`fetch(dest_dir, **kwargs)`** — network. Downloads the raw file(s) into
-  `dest_dir` and returns their paths (a list — ANP splits one month across
-  several CSVs).
-
 ```python
 import ogprod
 
-ogprod.available()                     # ['anp', 'argentina', 'sodir']
+ogprod.available()                      # ['anp', 'argentina', 'sodir']
 
-paths = ogprod.fetch("sodir", "data/")
-frame = ogprod.load("sodir", paths[0])
+db = ogprod.Store()                     # ~/.local/share/ogprod/store, or $OGPROD_STORE
+db.ingest("sodir")                      # download, parse, upsert (+ entities, first time)
+frame = db.production(source="sodir")
 
-# fetch is optional — load also takes files you downloaded by hand,
-# as a path or an open file/buffer:
-frame = ogprod.load("anp", "2023_01_producao_Mar.csv")
+# Files you downloaded by hand (e.g. a CDP export) go in the same way:
+db.ingest("anp", files=["2023_01_producao_Mar.csv"], entities=False)
 ```
 
-`load` reads the file, matches its columns, converts every volume to m³, drops
-rows with no volume, and runs `schema.validate` before returning. The result
-has the canonical columns documented in [design.md](design.md#canonical-schema).
+Parsing reads each file, matches its columns, converts every volume to m³,
+drops rows with no volume, and runs `schema.validate`; ingest then resolves
+overlapping files (ANP's pré-sal restates mar) and upserts. Frames have the
+canonical columns documented in [design.md](design.md#canonical-schema).
 
-There is also a CLI wrapper for downloading without opening Python
-(`just fetch ...` inside this repo runs the same thing):
+Under the store, every connector splits two concerns (`sources/base.py`),
+reachable through `ogprod.sources.get(name)` when you want raw files or a
+single parsed file:
+
+- **`parse(raw)`** — pure, always available. Takes a path or open file object
+  of a file *as published* and returns a validated canonical frame.
+- **`fetch(dest_dir, ...)`** — network. Downloads the raw file(s) into
+  `dest_dir` and returns their paths (a list — ANP splits one month across
+  several CSVs). Options (`year`, `month`) are explicit per connector; an
+  unknown one raises `TypeError`.
+
+```python
+from ogprod import sources
+
+paths = sources.get("sodir").fetch("data/")       # raw files only
+frame = sources.get("sodir").parse(paths[0])      # one file, not stored
+```
+
+The CLI mirrors this (`just ingest ...` / `just fetch ...` inside this repo):
 
 ```sh
-python -m ogprod fetch sodir                      # into data/ by default
-python -m ogprod fetch argentina --year 2024
-python -m ogprod fetch anp --year 2023 --month 1 --dest raw/
+python -m ogprod ingest sodir                       # into the store
+python -m ogprod ingest anp --year 2023 --month 1
+python -m ogprod ingest anp --files a.csv b.csv     # files downloaded by hand
+python -m ogprod coverage                           # what the store holds
+python -m ogprod fetch argentina --year 2024        # raw files into data/, no ingest
+python -m ogprod fetch sodir --entities --dest raw/ # raw entity file (FactMaps GeoJSON)
 ```
 
-It prints the downloaded paths, one per line.
-
-`python -m ogprod ingest <source> ...` (`just ingest ...`) chains fetch →
-parse → upsert into the local Parquet store (`data/store/` by default; see
-[design.md](design.md#store)) instead of just downloading. Both `fetch` and
-`ingest` take `--entities` to operate on the source's geometry dataset (well
-coordinates or field ring fences) instead of production:
-
-```sh
-python -m ogprod fetch sodir --entities --dest data/           # FactMaps GeoJSON
-python -m ogprod ingest sodir --entities                       # ...straight into the store
-```
+`fetch` prints the downloaded paths, one per line. `ingest` brings in each
+source's entity geometry (well coordinates or field ring fences) on its first
+run; `--refresh` re-downloads it and `--no-entities` skips it.
 
 Not every source has entity geometry wired up the same way as production —
-see the per-source notes below for what `--entities` fetches and its manual
-fallback.
+see the per-source notes below for what the entity download fetches and its
+manual fallback.
 
 All three fetch implementations were verified against live downloads in July
 2026, with parsed totals cross-checked against published country figures.
@@ -67,10 +72,10 @@ All three fetch implementations were verified against live downloads in July
 ### `anp` — Brazil, well-level (monthly)
 
 ```python
-paths = ogprod.fetch("anp", "data/", year=2023, month=1)   # monthly, 2021-2023
-paths = ogprod.fetch("anp", "data/", year=2021)            # every month of a year
-paths = ogprod.fetch("anp", "data/", year=2019)            # yearly, 2005-2020
-paths = ogprod.fetch("anp", "data/")                       # everything, 2005-2023 (~70 MB)
+db.ingest("anp", year=2023, month=1)   # monthly, 2021-2023
+db.ingest("anp", year=2021)            # every month of a year
+db.ingest("anp", year=2019)            # yearly, 2005-2020
+db.ingest("anp")                       # everything, 2005-2023 (~70 MB download)
 ```
 
 `fetch` scrapes the [gov.br open-data page](https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/producao-de-petroleo-e-gas-natural-por-poco)
@@ -85,7 +90,7 @@ Caveats:
 - **Data ends at 2023-12.** From 2024 on, ANP publishes well production only
   through the interactive [CDP application](https://cdp.anp.gov.br/) — there
   is no bulk file to download, and `fetch` raises an error saying so. Export a
-  CSV from CDP by hand and pass it to `load`.
+  CSV from CDP by hand and ingest it with `db.ingest("anp", files=[...])`.
 - **One month = several files.** Each zip bundles **terra** (onshore), **mar**
   (offshore) and **pré-sal** CSVs. The pré-sal file is a *subset* of the mar
   file: analyze it separately, but sum only terra + mar for country totals —
@@ -106,8 +111,8 @@ all of that (see [design.md](design.md#per-connector-notes)).
 **Entities (well coordinates).**
 
 ```python
-paths = ogprod.fetch_entities("anp", "data/")
-entities = ogprod.load_entities("anp", paths[0])
+db.entities(source="anp")                          # ingested with production
+paths = sources.get("anp").fetch_entities("data/")   # or the raw cadastre file
 ```
 
 The gov.br-documented "Tabela de Poços" download page 404s; `fetch_entities`
@@ -123,7 +128,7 @@ open-data page (declassified wells only, a few hundred rows/year) work too —
 ### `argentina` — Secretaría de Energía, well-level (monthly)
 
 ```python
-paths = ogprod.fetch("argentina", "data/", year=2024)
+db.ingest("argentina", year=2024)
 ```
 
 `fetch` asks the portal's CKAN API ([package_show](http://datos.energia.gob.ar/api/3/action/package_show?id=produccion-de-petroleo-y-gas-por-pozo))
@@ -148,8 +153,8 @@ are in m³, gas in thousands of m³.
 **Entities (well coordinates).**
 
 ```python
-paths = ogprod.fetch_entities("argentina", "data/")
-entities = ogprod.load_entities("argentina", paths[0])
+db.entities(source="argentina")                          # ingested with production
+paths = sources.get("argentina").fetch_entities("data/")   # or the raw listing
 ```
 
 The wells listing is not a separate CKAN package (the documented
@@ -168,7 +173,7 @@ Manual alternative: same dataset page as production, above; download the
 ### `sodir` — Norway (ex-NPD), field-level (monthly)
 
 ```python
-paths = ogprod.fetch("sodir", "data/")   # whole history, one ~2 MB CSV
+db.ingest("sodir")   # whole history, one ~2 MB CSV
 ```
 
 `fetch` hits the FactPages report-server CSV export for the
@@ -187,8 +192,8 @@ name.
 **Entities (field ring fences).**
 
 ```python
-paths = ogprod.fetch_entities("sodir", "data/")
-entities = ogprod.load_entities("sodir", paths[0])
+db.entities(source="sodir")                          # ingested with production
+paths = sources.get("sodir").fetch_entities("data/")   # or the raw GeoJSON
 ```
 
 There is no public zipped shapefile — the documented
@@ -222,7 +227,7 @@ Override `fetch` on the `Source` subclass; use the shared helpers in
 `sources/base.py`:
 
 ```python
-def fetch(self, dest_dir, *, client=None, **kwargs):
+def fetch(self, dest_dir, *, year=None, client=None):  # explicit options, no **kwargs
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     with base.open_client(client) as http:
@@ -230,7 +235,9 @@ def fetch(self, dest_dir, *, client=None, **kwargs):
 ```
 
 Keep `fetch` and `parse` separate so parsing stays testable offline: `fetch`
-returns paths, and `load`/`parse` take it from there. Accept a `client`
+returns paths, and `parse` (driven by `Store.ingest`) takes it from there. If
+the publisher's files overlap, override `restatement_order` so the restating
+file is parsed last. Accept a `client`
 keyword and test the fetch against an `httpx.MockTransport` with canned
 publisher responses (see `tests/test_fetch.py`); verify the URL and the
 downloaded file end to end against the live portal before wiring it in.

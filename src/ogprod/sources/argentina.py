@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 
 import geopandas as gpd
 import httpx
@@ -83,7 +82,6 @@ class Argentina(base.Source):
         *,
         year: int | None = None,
         client: httpx.Client | None = None,
-        **kwargs: Any,
     ) -> list[Path]:
         """Download the per-year Capítulo IV CSV for ``year``."""
         if year is None:
@@ -140,7 +138,7 @@ class Argentina(base.Source):
         )
 
     def fetch_entities(
-        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
+        self, dest_dir: str | Path, *, client: httpx.Client | None = None
     ) -> list[Path]:
         """Download the wells listing CSV (coordinates for every reported well)."""
         dest_dir = Path(dest_dir)

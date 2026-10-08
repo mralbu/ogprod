@@ -132,14 +132,18 @@ def test_write_rejects_invalid_frame(root):
         store.write_production(pd.DataFrame({"nope": [1]}), root=root)
 
 
-def test_resolve_root_env_var(tmp_path, monkeypatch):
+def test_resolve_root_order(tmp_path, monkeypatch):
     from pathlib import Path
 
-    assert store.resolve_root("explicit") == Path("explicit")
     monkeypatch.setenv("OGPROD_STORE", str(tmp_path / "env-store"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    assert store.resolve_root("explicit") == Path("explicit")
     assert store.resolve_root(None) == tmp_path / "env-store"
     monkeypatch.delenv("OGPROD_STORE")
-    assert store.resolve_root(None) == store.DEFAULT_ROOT
+    assert store.resolve_root(None) == tmp_path / "xdg/ogprod/store"
+    monkeypatch.delenv("XDG_DATA_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    assert store.resolve_root(None) == tmp_path / "home/.local/share/ogprod/store"
 
 
 def entities_frame() -> gpd.GeoDataFrame:

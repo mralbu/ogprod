@@ -6,12 +6,12 @@ import pandas as pd
 import pytest
 from shapely.geometry import Polygon
 
-import ogprod
 from ogprod import schema
+from ogprod.sources import get
 
 
 def test_parse_field_production_monthly(data_dir):
-    frame = ogprod.load("sodir", data_dir / "sodir_field_production_monthly_sample.csv")
+    frame = get("sodir").parse(data_dir / "sodir_field_production_monthly_sample.csv")
     schema.validate(frame)
 
     assert set(frame["entity_type"]) == {"field"}
@@ -47,7 +47,7 @@ def test_parse_entity_id_survives_float_promoted_npdid(tmp_path):
         # pandas reads the CSV, promoting "46437" to 46437.0.
         "UNKNOWN FIELD,2024,5,0.1,0.1,0.01,0.01,0.1,\n"
     )
-    frame = ogprod.load("sodir", csv_path)
+    frame = get("sodir").parse(csv_path)
     troll = frame[frame["entity_name"] == "TROLL"]
     assert set(troll["entity_id"]) == {"46437"}
 
@@ -56,7 +56,7 @@ def test_rejects_other_files(tmp_path):
     bogus = tmp_path / "bogus.csv"
     bogus.write_text("a,b\n1,2\n")
     with pytest.raises(ValueError, match="Sodir"):
-        ogprod.load("sodir", bogus)
+        get("sodir").parse(bogus)
 
 
 @pytest.fixture
@@ -123,7 +123,7 @@ def field_area_geojson(tmp_path):
 
 
 def test_parse_entities_field_ring_fences(field_area_geojson):
-    entities = ogprod.load_entities("sodir", field_area_geojson)
+    entities = get("sodir").parse_entities(field_area_geojson)
     schema.validate_entities(entities)
     # JOHAN SVERDRUP, TROLL, SNORRE, NORDFELT — GHOST is dropped (no NPDID).
     assert len(entities) == 4
@@ -140,7 +140,7 @@ def test_parse_entities_keeps_null_geometry_field(field_area_geojson):
     """A field whose only feature has a null geometry survives as a
     null-geometry row — it still joins production for metadata (the
     documented invariant: missing geometry is a row, not an error)."""
-    entities = ogprod.load_entities("sodir", field_area_geojson)
+    entities = get("sodir").parse_entities(field_area_geojson)
     nordfelt = entities[entities["entity_name"] == "NORDFELT"].iloc[0]
     assert nordfelt["entity_id"] == "99999"
     assert nordfelt.geometry is None or pd.isna(nordfelt.geometry)
@@ -149,7 +149,7 @@ def test_parse_entities_keeps_null_geometry_field(field_area_geojson):
 def test_parse_entities_drops_features_without_npdid(field_area_geojson):
     """A feature with geometry but no NPDID can't join anything; it is
     dropped rather than failing the whole parse."""
-    entities = ogprod.load_entities("sodir", field_area_geojson)
+    entities = get("sodir").parse_entities(field_area_geojson)
     assert "GHOST" not in set(entities["entity_name"])
 
 
@@ -162,7 +162,7 @@ def test_parse_entities_repairs_self_intersecting_ring(field_area_geojson):
     GeometryCollection, which is neither Polygon nor MultiPolygon and is not
     ``is_valid`` in the way this test expects.
     """
-    entities = ogprod.load_entities("sodir", field_area_geojson)
+    entities = get("sodir").parse_entities(field_area_geojson)
     schema.validate_entities(entities)
 
     snorre = entities[entities["entity_name"] == "SNORRE"].iloc[0]
@@ -193,7 +193,7 @@ def test_parse_entities_id_survives_float_promoted_npdid(tmp_path):
     path = tmp_path / "field.geojson"
     frame.to_file(path, driver="GeoJSON")
 
-    entities = ogprod.load_entities("sodir", path)
+    entities = get("sodir").parse_entities(path)
     troll = entities[entities["entity_name"] == "TROLL"].iloc[0]
     assert troll["entity_id"] == "46437"
 
@@ -204,7 +204,7 @@ def test_parse_entities_rejects_other_files(tmp_path):
         bogus, driver="GeoJSON"
     )
     with pytest.raises(ValueError, match="Sodir"):
-        ogprod.load_entities("sodir", bogus)
+        get("sodir").parse_entities(bogus)
 
 
 def test_fetch_entities_downloads_field_geojson(tmp_path):
@@ -228,7 +228,7 @@ def test_fetch_entities_downloads_field_geojson(tmp_path):
         )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    paths = ogprod.fetch_entities("sodir", tmp_path, client=client)
+    paths = get("sodir").fetch_entities(tmp_path, client=client)
     assert len(paths) == 1
     with paths[0].open() as fh:
         payload = json.load(fh)

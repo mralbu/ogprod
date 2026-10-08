@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import IO, Any, ClassVar
+from typing import IO, Any, ClassVar, TypeVar
 
 import geopandas as gpd
 import httpx
@@ -24,7 +24,7 @@ from ogprod import schema
 
 RawFile = str | Path | IO[str] | IO[bytes]
 
-_USER_AGENT = "ogprod/0.1"
+_USER_AGENT = "ogprod/0.2"
 _TIMEOUT = httpx.Timeout(120.0)
 
 
@@ -64,9 +64,7 @@ class Source(ABC):
     def parse(self, raw: RawFile) -> pd.DataFrame:
         """Parse a raw file from this source into a canonical DataFrame."""
 
-    def fetch(
-        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
-    ) -> list[Path]:
+    def fetch(self, dest_dir: str | Path, *, client: httpx.Client | None = None) -> list[Path]:
         """Download raw file(s) into ``dest_dir`` and return their paths.
 
         Returns a list because some publishers split one period across several
@@ -74,9 +72,21 @@ class Source(ABC):
         ``parse``. Connectors without a stable download URL leave this
         unimplemented and document where to fetch files manually; ``client``
         lets callers inject a configured ``httpx.Client`` (tests use a mock
-        transport).
+        transport). Overrides declare their options (``year``, ``month``) as
+        explicit keywords with no ``**kwargs`` catch-all, so a misspelt option
+        raises ``TypeError`` instead of silently widening the download.
         """
         raise NotImplementedError(f"{self.name} has no automated fetch; see {self.docs_url}")
+
+    def restatement_order(self, paths: list[Path]) -> list[Path]:
+        """Order raw files so that a file restating another's rows comes after it.
+
+        Ingest parses files in this order and keeps the last row per key, so a
+        publisher whose files overlap (ANP's pré-sal file restates a subset of
+        the mar file) overrides this to make its rule explicit. The default
+        keeps the given order.
+        """
+        return list(paths)
 
     def parse_entities(self, raw: RawFile) -> gpd.GeoDataFrame:
         """Parse a raw publisher file into the canonical entities GeoDataFrame.
@@ -88,16 +98,17 @@ class Source(ABC):
         raise NotImplementedError(f"{self.name} has no entity parser; see {self.docs_url}")
 
     def fetch_entities(
-        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
+        self, dest_dir: str | Path, *, client: httpx.Client | None = None
     ) -> list[Path]:
         """Download the publisher's entity/geometry file(s) into ``dest_dir``."""
         raise NotImplementedError(f"{self.name} has no automated entity fetch; see {self.docs_url}")
 
 
 _REGISTRY: dict[str, type[Source]] = {}
+_S = TypeVar("_S", bound=Source)
 
 
-def register(cls: type[Source]) -> type[Source]:
+def register(cls: type[_S]) -> type[_S]:
     """Class decorator adding a connector to the registry."""
     _REGISTRY[cls.name] = cls
     return cls
@@ -114,26 +125,6 @@ def get(name: str) -> Source:
 def available() -> list[str]:
     """Names of all registered connectors."""
     return sorted(_REGISTRY)
-
-
-def load(name: str, raw: RawFile) -> pd.DataFrame:
-    """Parse ``raw`` with the connector registered under ``name``."""
-    return get(name).parse(raw)
-
-
-def fetch(name: str, dest_dir: str | Path, **kwargs: Any) -> list[Path]:
-    """Download raw file(s) with the connector registered under ``name``."""
-    return get(name).fetch(dest_dir, **kwargs)
-
-
-def load_entities(name: str, raw: RawFile) -> gpd.GeoDataFrame:
-    """Parse an entity/geometry file with the connector registered under ``name``."""
-    return get(name).parse_entities(raw)
-
-
-def fetch_entities(name: str, dest_dir: str | Path, **kwargs: Any) -> list[Path]:
-    """Download entity/geometry file(s) with the connector registered under ``name``."""
-    return get(name).fetch_entities(dest_dir, **kwargs)
 
 
 def build_frame(

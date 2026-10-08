@@ -5,7 +5,7 @@ from shapely.geometry import Point
 
 import ogprod
 from ogprod import schema
-from ogprod.sources import base
+from ogprod.sources import base, get
 
 
 def test_builtin_sources_registered():
@@ -13,20 +13,20 @@ def test_builtin_sources_registered():
 
 
 def test_get_returns_source_instance():
-    source = ogprod.get("sodir")
+    source = get("sodir")
     assert source.name == "sodir"
-    assert source.entity_type == ogprod.EntityType.FIELD
+    assert source.entity_type == schema.EntityType.FIELD
 
 
 def test_unknown_source():
     with pytest.raises(KeyError, match="unknown source"):
-        ogprod.get("opec")
+        get("opec")
 
 
 def test_fetch_default_not_implemented_mentions_docs_url():
     class NoFetch(base.Source):
         name = "nofetch"
-        entity_type = ogprod.EntityType.WELL
+        entity_type = schema.EntityType.WELL
         docs_url = "https://example.org/data"
 
         def parse(self, raw):
@@ -39,7 +39,7 @@ def test_fetch_default_not_implemented_mentions_docs_url():
 def test_source_without_entities_raises_pointed_error():
     class NoEntities(base.Source):
         name = "noentities"
-        entity_type = ogprod.EntityType.WELL
+        entity_type = schema.EntityType.WELL
         docs_url = "https://example.org/wells"
 
         def parse(self, raw):
@@ -118,8 +118,11 @@ def test_build_entities_assembles_and_reprojects():
     assert entities["field"].isna().all()  # optional metadata defaults to NA
 
 
-def test_load_entities_dispatches_through_registry():
-    with pytest.raises(KeyError, match="unknown source"):
-        ogprod.load_entities("nope", "raw.csv")
-    with pytest.raises(KeyError, match="unknown source"):
-        ogprod.fetch_entities("nope", "dest")
+def test_top_level_surface_is_small():
+    assert sorted(ogprod.__all__) == ["Product", "SchemaError", "Store", "available", "convert"]
+
+
+def test_fetch_rejects_unknown_options(tmp_path):
+    # A typo must not silently fall back to "download everything".
+    with pytest.raises(TypeError):
+        get("anp").fetch(tmp_path, yaer=2023)  # ty: ignore[unknown-argument]
