@@ -103,8 +103,9 @@ Design rules, enforced by `schema.validate_entities`:
 - `parse_entities(raw) -> GeoDataFrame` — pure, parses a raw geometry file.
   Connectors whose publisher has no geometry dataset leave it unimplemented
   (raises `NotImplementedError` pointing at `docs_url`).
-- `fetch_entities(dest_dir, **kwargs) -> list[Path]` — network, downloads the
-  publisher's geometry file(s). Also optional.
+- `fetch_entities(dest_dir, *, client=None) -> list[Path]` — network, downloads
+  the publisher's geometry file(s). Also optional; `Store.ingest` skips
+  entities for connectors that don't override it.
 
 `base.build_entities(...)` is the entities counterpart to `build_frame`:
 connectors hand it metadata series plus a geometry column, and it assembles
@@ -244,6 +245,10 @@ small live fetch+parse per source, deselected from the normal suite
    row still joins for metadata); rows without an entity id are dropped by
    `build_entities`. An entirely missing geometry dataset means leaving both
    methods unimplemented.
+6. **If the publisher's files overlap** (one file restates another's rows,
+   like ANP's pré-sal over mar), override `restatement_order` so the restating
+   file comes last: ingest keeps the last row per key. Declare `fetch`
+   options as explicit keywords (no `**kwargs`).
 
 Good next candidates, roughly in order of effort (see data-sources.md):
 BSEE OGOR-A (well, bulk delimited), Petrinex Alberta (well, CSV), NSTA PPRS

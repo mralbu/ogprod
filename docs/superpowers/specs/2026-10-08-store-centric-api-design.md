@@ -1,6 +1,7 @@
 # Store-centric Python API — design
 
-Status: implemented 2026-10-08.
+Status: implemented 2026-10-08 (`784b16c`); review findings in
+`docs/follow-ups.md`.
 
 ## Goal
 
@@ -228,9 +229,10 @@ The default store location changes. `__version__` goes to 0.2.0.
   covers the `coverage` command.
 - `test_registry.py` drops the wrapper tests; `test_store.py` covers the new
   root resolution (XDG and home fallbacks).
-- `test_sources_anp.py` covers `restatement_order`.
-- `test_live_smoke.py` is unchanged: it exercises connector `fetch`
-  directly.
+- `restatement_order` is covered in `test_ingest.py` (with the shuffled-order
+  ingest test it exists for) rather than `test_sources_anp.py`.
+- `test_live_smoke.py` keeps the same checks, rewritten from the removed
+  wrappers to `sources.get(...)` / connector classes.
 
 ## Docs and examples
 
@@ -242,8 +244,10 @@ The default store location changes. `__version__` goes to 0.2.0.
   - `docs/downloading.md`: `ingest(files=...)` for manual downloads;
   - CLAUDE.md: architecture and the store root.
 - **Notebooks** drop `STORE`, `root=` and the hand-written skip-if-downloaded
-  logic, and use `db = ogprod.Store()` and `db.ingest(...)`. Notebook 02
-  keeps its per-file comparison through `ogprod.sources.get("anp").parse`.
+  logic, and use `db = ogprod.Store()` and `db.ingest(...)`. Notebook 02 is
+  the exception: its per-file terra/mar/pré-sal comparison needs the raw CSVs,
+  so it keeps them in `data/anp/` (reused when present), parses them through
+  the ANP connector, and ingests them with `files=`.
 
 ## Out of scope
 
