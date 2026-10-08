@@ -24,7 +24,6 @@ import zipfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 import geopandas as gpd
 import httpx
@@ -212,6 +211,14 @@ def _extract_csvs(zip_path: Path, target_dir: Path) -> list[Path]:
                 shutil.copyfileobj(source, sink)
             extracted.append(target)
     return extracted
+
+
+def _environment_rank(path: Path) -> int:
+    """0 for terra/unknown, 1 for mar, 2 for pré-sal, read from the file name."""
+    words = re.split(r"[^a-z0-9]+", _normalize(Path(path).stem))
+    if "presal" in "".join(words):
+        return 2
+    return 1 if "mar" in words else 0
 
 
 def _normalize(header: str) -> str:
@@ -421,7 +428,6 @@ class ANP(base.Source):
         year: int | None = None,
         month: int | None = None,
         client: httpx.Client | None = None,
-        **kwargs: Any,
     ) -> list[Path]:
         """Download bulk zip(s) and extract their CSVs.
 
@@ -486,7 +492,7 @@ class ANP(base.Source):
         )
 
     def fetch_entities(
-        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
+        self, dest_dir: str | Path, *, client: httpx.Client | None = None
     ) -> list[Path]:
         """Download the well cadastre CSV (one row per drilled well, with coordinates)."""
         dest_dir = Path(dest_dir)
@@ -538,6 +544,16 @@ class ANP(base.Source):
             operator=meta.get("operator"),
             status=meta.get("status"),
         )
+
+    def restatement_order(self, paths: list[Path]) -> list[Path]:
+        """Terra and mar files first, pré-sal last.
+
+        The pré-sal file restates a subset of the mar file's rows; ingest keeps
+        the last row per key, so pré-sal must come after mar. The sort is
+        stable: files keep their given order within each group, and files
+        that name no environment (e.g. CDP exports) go first.
+        """
+        return sorted(paths, key=_environment_rank)
 
     def parse(self, raw: base.RawFile) -> pd.DataFrame:
         frame = _read(raw)

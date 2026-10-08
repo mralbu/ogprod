@@ -11,7 +11,7 @@ import zipfile
 import httpx
 import pytest
 
-import ogprod
+from ogprod.sources import anp, argentina, get
 
 ARG_PACKAGE_SHOW = {
     "success": True,
@@ -71,17 +71,17 @@ def argentina_client(argentina_csv) -> httpx.Client:
 
 
 def test_argentina_fetch_resolves_year_resource(tmp_path, argentina_client):
-    paths = ogprod.get("argentina").fetch(tmp_path, year=2024, client=argentina_client)
+    paths = argentina.Argentina().fetch(tmp_path, year=2024, client=argentina_client)
 
     assert [p.name for p in paths] == ["pozos-2024.csv"]
     assert paths[0].parent == tmp_path
-    frame = ogprod.load("argentina", paths[0])
+    frame = get("argentina").parse(paths[0])
     assert set(frame["source"]) == {"argentina"}
 
 
 def test_argentina_fetch_unknown_year(tmp_path, argentina_client):
     with pytest.raises(ValueError, match="2024"):
-        ogprod.get("argentina").fetch(tmp_path, year=1990, client=argentina_client)
+        argentina.Argentina().fetch(tmp_path, year=1990, client=argentina_client)
 
 
 @pytest.fixture
@@ -97,10 +97,10 @@ def sodir_client(data_dir) -> httpx.Client:
 
 
 def test_sodir_fetch_downloads_full_table(tmp_path, sodir_client):
-    paths = ogprod.get("sodir").fetch(tmp_path, client=sodir_client)
+    paths = get("sodir").fetch(tmp_path, client=sodir_client)
 
     assert [p.name for p in paths] == ["field_production_monthly.csv"]
-    frame = ogprod.load("sodir", paths[0])
+    frame = get("sodir").parse(paths[0])
     assert set(frame["source"]) == {"sodir"}
 
 
@@ -142,10 +142,10 @@ def anp_client(data_dir) -> httpx.Client:
 
 
 def test_anp_fetch_extracts_monthly_zip(tmp_path, anp_client):
-    paths = ogprod.get("anp").fetch(tmp_path, year=2023, month=1, client=anp_client)
+    paths = anp.ANP().fetch(tmp_path, year=2023, month=1, client=anp_client)
 
     assert sorted(p.name for p in paths) == ["2023_01_mar.csv", "2023_01_terra.csv"]
-    frame = ogprod.load("anp", paths[0])
+    frame = get("anp").parse(paths[0])
     assert set(frame["source"]) == {"anp"}
 
 
@@ -155,12 +155,12 @@ def test_anp_fetch_extracts_monthly_zip(tmp_path, anp_client):
     ids=["2021-underscore", "2021-dash", "2022-nested", "2022-nested-underscore"],
 )
 def test_anp_fetch_matches_all_link_conventions(tmp_path, anp_client, year, month):
-    paths = ogprod.get("anp").fetch(tmp_path, year=year, month=month, client=anp_client)
+    paths = anp.ANP().fetch(tmp_path, year=year, month=month, client=anp_client)
     assert len(paths) == 2
 
 
 def test_anp_fetch_yearly_archive_without_month(tmp_path, anp_client):
-    paths = ogprod.get("anp").fetch(tmp_path, year=2019, client=anp_client)
+    paths = anp.ANP().fetch(tmp_path, year=2019, client=anp_client)
     assert len(paths) == 2
     assert all(p.parent == tmp_path for p in paths)  # single zip extracts flat
 
@@ -168,14 +168,14 @@ def test_anp_fetch_yearly_archive_without_month(tmp_path, anp_client):
 def test_anp_fetch_monthly_year_without_month_gets_all_months(tmp_path, anp_client):
     # 2021 has no yearly zip, only monthly ones (01 and 08 in the fixture page);
     # each period lands in its own subdirectory.
-    paths = ogprod.get("anp").fetch(tmp_path, year=2021, client=anp_client)
+    paths = anp.ANP().fetch(tmp_path, year=2021, client=anp_client)
     assert len(paths) == 4
     assert {p.parent.name for p in paths} == {"2021-01", "2021-08"}
 
 
 def test_anp_fetch_without_year_downloads_everything(tmp_path, anp_client):
     # 6 zips on the fixture page x 2 CSVs each
-    paths = ogprod.get("anp").fetch(tmp_path, client=anp_client)
+    paths = get("anp").fetch(tmp_path, client=anp_client)
     assert len(paths) == 12
     assert {p.parent.name for p in paths} == {
         "2019",
@@ -189,9 +189,4 @@ def test_anp_fetch_without_year_downloads_everything(tmp_path, anp_client):
 
 def test_anp_fetch_recent_year_points_at_cdp(tmp_path, anp_client):
     with pytest.raises(ValueError, match="cdp.anp.gov.br"):
-        ogprod.get("anp").fetch(tmp_path, year=2025, month=3, client=anp_client)
-
-
-def test_module_level_fetch_dispatches(tmp_path, sodir_client):
-    paths = ogprod.fetch("sodir", tmp_path, client=sodir_client)
-    assert [p.name for p in paths] == ["field_production_monthly.csv"]
+        anp.ANP().fetch(tmp_path, year=2025, month=3, client=anp_client)

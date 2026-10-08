@@ -14,47 +14,45 @@ North Sea field can be analyzed side by side.
 
 ## Quickstart
 
+Everything goes through one object, `ogprod.Store`: ingest a source, then
+query it.
+
 ```python
 import ogprod
 
 ogprod.available()
 # ['anp', 'argentina', 'sodir']
 
-# Download a source's raw file(s)...
-paths = ogprod.fetch("anp", "data/", year=2023, month=1)
-# ...or from the shell: `python -m ogprod fetch anp --year 2023 --month 1`
-# (`just fetch ...` in this repo)
+db = ogprod.Store()          # ~/.local/share/ogprod/store, or $OGPROD_STORE
+db.ingest("sodir")           # fetch + parse + upsert, plus field ring fences
+db.ingest("anp", year=2023, month=6)
 
-# ...and parse them into the canonical schema (or parse files you
-# downloaded yourself)
-frame = ogprod.load("anp", paths[0])
+oil = db.production(source="anp", product="oil", start="2023-06")
+oil.groupby("field")["volume"].sum()   # one row per (well, month, product); always m³
 
-frame.columns
-# source, entity_type, entity_id, entity_name, field, basin, region,
-# operator, period, product, volume
+fields = db.entities(source="sodir")   # GeoDataFrame, joins production on entity_id
+db.coverage()                          # what the store holds, per source
+db.sql("SELECT source, sum(volume) FROM production GROUP BY source")
 
-# One row per (entity, month, product); volumes are always in m³
-frame[frame["product"] == "oil"].groupby("field")["volume"].sum()
-
-# Convert to oilfield units when you need them
-ogprod.convert(1.0, "m3", "bbl")
+ogprod.convert(1.0, "m3", "bbl")       # oilfield units at the edge
 ```
 
-For repeated use, `ingest` fetches, parses, and upserts a source into a local
-Parquet store (`just ingest sodir` next to the `just fetch` recipe above), so
-you don't re-download or re-parse on every query:
+`ingest` resolves publishers' overlapping files for you (ANP's pré-sal file
+restates part of the mar file; concatenating them by hand double-counts), and
+re-running it picks up restated history. Entities (well coordinates, field
+ring fences) come in on a source's first ingest; `refresh=True` re-downloads
+them. Files you downloaded yourself go in with `db.ingest("anp", files=[...])`.
+
+The same from the shell (`just ingest ...` in this repo):
 
 ```sh
-python -m ogprod ingest sodir             # production
-python -m ogprod ingest sodir --entities  # field ring fences
+python -m ogprod ingest sodir
+python -m ogprod ingest anp --year 2023 --month 6
+python -m ogprod coverage
 ```
 
-```python
-from ogprod import store
-
-oil = store.load_production(source="sodir", product="oil", start="2020-01-01")
-fields = store.load_entities(source="sodir")  # GeoDataFrame with ring fences
-```
+The store is plain hive-partitioned Parquet (GeoParquet for entities), so
+DuckDB, pandas or QGIS can also open the files directly.
 
 Worked examples live in [notebooks/](notebooks/) — one per source, from fetch
 to charts (`uv run --group notebooks jupyter lab` to run them). The canonical
@@ -69,9 +67,9 @@ schema, unit handling, and how to add a new source connector are documented in
 | `argentina` | Secretaría de Energía (Argentina) | well, monthly | "Capítulo IV" CSVs, incl. the unconventional (Vaca Muerta) dataset |
 | `sodir` | Sodir (Norway) | field, monthly | FactPages `field_production_monthly` table, back to 1971 |
 
-Each connector separates `fetch` (network: download the publisher's raw files)
-from `parse` (pure: normalize a raw file, works on files downloaded by any
-means). See [docs/downloading.md](docs/downloading.md) for each source's
+Under the store, each connector (`ogprod.sources.get(name)`) separates
+`fetch` (network: download the publisher's raw files) from `parse` (pure:
+normalize one raw file, works on files downloaded by any means). See [docs/downloading.md](docs/downloading.md) for each source's
 download options and caveats — e.g. ANP bulk files stop at 2023; newer Brazil
 data is only in ANP's interactive CDP app, and ANP's own well-level gas is
 incomplete for 2003-07..2005-06 (`ogprod.sources.anp.KNOWN_GAPS`; ogprod warns,
@@ -86,7 +84,7 @@ Requires [uv](https://docs.astral.sh/uv/) and [just](https://just.systems/)
 ```sh
 just sync        # install dependencies
 just fetch ...   # download raw files into data/, e.g. `just fetch sodir`
-just ingest ...  # fetch + parse + upsert into data/store, e.g. `just ingest sodir --entities`
+just ingest ...  # fetch + parse + upsert into the store, e.g. `just ingest sodir`
 just test        # pytest
 just lint        # ruff check + format check
 just fmt         # auto-format
@@ -100,8 +98,8 @@ Project layout:
 src/ogprod/
   schema.py        # canonical production + entities schemas, validation
   units.py         # volume unit conversion (everything stored in m³)
-  store.py         # Parquet/GeoParquet store: upsert, load, DuckDB queries
-  __main__.py      # `python -m ogprod fetch|ingest ...` CLI
+  store.py         # Store: ingest pipeline, Parquet/GeoParquet upsert, DuckDB queries
+  __main__.py      # `python -m ogprod ingest|coverage|fetch ...` CLI
   sources/
     base.py        # Source ABC, registry, canonical-frame/entities builders
     anp.py         # Brazil, well-level (+ well cadastre entities)

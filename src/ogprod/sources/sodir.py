@@ -16,7 +16,6 @@ instead, queried directly as GeoJSON — see ``_AREA_URL`` below.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import geopandas as gpd
 import httpx
@@ -83,9 +82,7 @@ class Sodir(base.Source):
     entity_type = EntityType.FIELD
     docs_url = "https://factpages.sodir.no/"
 
-    def fetch(
-        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
-    ) -> list[Path]:
+    def fetch(self, dest_dir: str | Path, *, client: httpx.Client | None = None) -> list[Path]:
         """Download the full ``field_production_monthly`` table (one CSV)."""
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -125,7 +122,7 @@ class Sodir(base.Source):
         )
 
     def fetch_entities(
-        self, dest_dir: str | Path, *, client: httpx.Client | None = None, **kwargs: Any
+        self, dest_dir: str | Path, *, client: httpx.Client | None = None
     ) -> list[Path]:
         """Download FactMaps field outlines (ring fences) as GeoJSON."""
         dest_dir = Path(dest_dir)

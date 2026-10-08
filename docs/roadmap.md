@@ -76,7 +76,7 @@ daily sources (NSTA well data), and possibly basin/region name harmonies
 
 ## API and data-quality polish
 
-- **`store.load_production(..., unit="bbl")`** — conversion at the loader
+- **`Store.production(..., unit="bbl")`** — conversion at the loader
   edge; today users convert manually per column.
 - **Country/source registry metadata** — expose `docs_url`, country,
   license, and update cadence per connector (`ogprod.sources_info()`), so

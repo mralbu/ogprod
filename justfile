@@ -6,11 +6,11 @@ default:
 sync:
     uv sync --all-groups
 
-# Download a source's raw files into data/ (`just fetch sodir`, `just fetch anp` = whole archive, `just fetch anp --year 2023 --month 1`)
+# Download raw files only, without ingesting, into data/ (`just fetch sodir`, `just fetch anp` = whole archive, `just fetch anp --year 2023 --month 1`)
 fetch *args:
     uv run python -m ogprod fetch {{args}}
 
-# Fetch + parse + upsert a source into data/store (`just ingest sodir`, `just ingest anp --year 2023`, `just ingest sodir --entities`)
+# Fetch + parse + upsert a source into the store (`just ingest sodir`, `just ingest anp --year 2023`, `just ingest anp --files a.csv b.csv`)
 ingest *args:
     uv run python -m ogprod ingest {{args}}
 

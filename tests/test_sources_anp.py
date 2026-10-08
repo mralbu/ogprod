@@ -1,8 +1,8 @@
 import pandas as pd
 import pytest
 
-import ogprod
 from ogprod import schema
+from ogprod.sources import get
 
 
 def _row(frame: pd.DataFrame, entity: str, product: str) -> pd.Series:
@@ -12,7 +12,7 @@ def _row(frame: pd.DataFrame, entity: str, product: str) -> pd.Series:
 
 
 def test_parse_well_file(data_dir):
-    frame = ogprod.load("anp", data_dir / "anp_pocos_sample.csv")
+    frame = get("anp").parse(data_dir / "anp_pocos_sample.csv")
     schema.validate(frame)
 
     # 2 wells x 3 products
@@ -36,7 +36,7 @@ def test_parse_well_file(data_dir):
 
 
 def test_parse_daily_rate_and_periodo_column(data_dir):
-    frame = ogprod.load("anp", data_dir / "anp_pocos_rate_units.csv")
+    frame = get("anp").parse(data_dir / "anp_pocos_rate_units.csv")
     schema.validate(frame)
 
     row = frame.iloc[0]
@@ -49,7 +49,7 @@ def test_parse_slash_period_format(tmp_path):
     # Real bulk files write the period as "2023/01", not "2023-01".
     file = tmp_path / "poco.csv"
     file.write_text("Poço;Período;Petróleo (m³)\n7-X-1-BA;2023/01;10,0\n", encoding="utf-8")
-    frame = ogprod.load("anp", file)
+    frame = get("anp").parse(file)
     assert frame.iloc[0]["period"] == pd.Timestamp("2023-01-01")
 
 
@@ -61,7 +61,7 @@ def test_oleo_preferred_over_petroleo_total(tmp_path):
         "Poço;Período;Óleo (m³);Condensado (m³);Petróleo (m³)\n7-X-1-BA;2023/01;100,0;20,0;120,0\n",
         encoding="utf-8",
     )
-    frame = ogprod.load("anp", file)
+    frame = get("anp").parse(file)
     oil = frame[frame["product"] == "oil"].iloc[0]
     assert oil["volume"] == pytest.approx(100.0)
     condensate = frame[frame["product"] == "condensate"].iloc[0]
@@ -82,7 +82,7 @@ def test_parse_bulk_file_multirow_header(tmp_path):
         "1.100,0;20,0;1.120,0;1,0;2,0;3,0;50,0\n",  # 1.100,0 = thousands separator
         encoding="utf-8",
     )
-    frame = ogprod.load("anp", file)
+    frame = get("anp").parse(file)
 
     assert set(frame["entity_id"]) == {"7-FMO-1-BA"}  # ANP name, not operator's
     assert set(frame["period"]) == {pd.Timestamp("2023-01-01")}
@@ -109,7 +109,7 @@ def test_parse_yearly_archive_with_report_preamble(tmp_path):
         "Sergipe;Sergipe;7-GA-7D-SES;7GA 0007D SES;2005/01;76,5937\n",
         encoding="utf-8",
     )
-    frame = ogprod.load("anp", file)
+    frame = get("anp").parse(file)
 
     assert set(frame["entity_id"]) == {"7-GA-7D-SES"}
     assert frame.iloc[0]["period"] == pd.Timestamp("2005-01-01")
@@ -125,7 +125,7 @@ def test_parse_cp1252_encoded_file(tmp_path):
         "Rio de Janeiro;Campos;7-MRL-10-RJS;MRL-10;MARLIM;Petrobras;2023/12;500,0\n",
         encoding="cp1252",
     )
-    frame = ogprod.load("anp", file)
+    frame = get("anp").parse(file)
     assert set(frame["entity_id"]) == {"7-MRL-10-RJS"}
     assert frame.iloc[0]["period"] == pd.Timestamp("2023-12-01")
 
@@ -140,7 +140,7 @@ def test_parse_data_rows_shifted_left_of_header(tmp_path):
         "Recôncavo;7-C-10-BA;7C 0010 BA;CANDEIAS;Petrobras;2010/02;3,0;9,0\n",
         encoding="utf-8",
     )
-    frame = ogprod.load("anp", file)
+    frame = get("anp").parse(file)
 
     assert set(frame["entity_id"]) == {"7-C-10-BA"}
     assert set(frame["field"]) == {"CANDEIAS"}
@@ -161,7 +161,7 @@ def test_parse_drops_repeated_header_blocks(tmp_path):
         "7-B-2-BA;2020/06;20,0\n",
         encoding="utf-8",
     )
-    frame = ogprod.load("anp", file)
+    frame = get("anp").parse(file)
     assert set(frame["entity_id"]) == {"7-A-1-BA", "7-B-2-BA"}
     assert frame["volume"].sum() == pytest.approx(30.0)
 
@@ -175,7 +175,7 @@ def test_parse_drops_verbatim_repeated_rows(tmp_path):
         "3-RJS-159-RJS;PAMPO;2015/05;58,1\n",
         encoding="utf-8",
     )
-    frame = ogprod.load("anp", file)
+    frame = get("anp").parse(file)
     assert len(frame) == 1
     assert frame["volume"].iloc[0] == pytest.approx(58.1)
 
@@ -192,7 +192,7 @@ def test_merges_repeated_well_month_split_across_rows(tmp_path):
         encoding="utf-8",
     )
     with pytest.warns(UserWarning, match="incomplete"):  # 2005-01 is inside the gas gap
-        frame = ogprod.load("anp", file)
+        frame = get("anp").parse(file)
 
     assert _row(frame, "7-FBE-8-BA", "oil")["volume"] == pytest.approx(
         119.7032 * 31 * 0.158987294928
@@ -210,7 +210,7 @@ def test_merges_crude_stream_rows_with_identical_volumes(tmp_path):
         "3-RNS-120-RN;ARABAIANA;2019/05;63,6567;41,5\n",
         encoding="utf-8",
     )
-    frame = ogprod.load("anp", file)
+    frame = get("anp").parse(file)
     assert len(frame) == 1
     assert frame["volume"].iloc[0] == pytest.approx(63.6567 * 31 * 0.158987294928)
 
@@ -221,7 +221,7 @@ def test_merge_tolerates_rounding_differences(tmp_path):
         "Poço;Campo;Período;Petróleo (m³)\n7-X-1-BA;F;2023/01;100,0\n7-X-1-BA;F;2023/01;100,2\n",
         encoding="utf-8",
     )
-    frame = ogprod.load("anp", file)
+    frame = get("anp").parse(file)
     assert frame["volume"].iloc[0] == pytest.approx(100.0)
 
 
@@ -232,7 +232,7 @@ def test_warns_on_known_gas_gap(tmp_path):
         encoding="utf-8",
     )
     with pytest.warns(UserWarning, match="gas is incomplete for 2003-07..2005-06"):
-        ogprod.load("anp", file)
+        get("anp").parse(file)
 
 
 @pytest.mark.parametrize(
@@ -246,7 +246,7 @@ def test_warns_on_known_gas_gap(tmp_path):
 def test_no_gap_warning_outside_gap_or_product(tmp_path, recwarn, header, row):
     file = tmp_path / "poco.csv"
     file.write_text(f"{header}\n{row}\n", encoding="utf-8")
-    ogprod.load("anp", file)
+    get("anp").parse(file)
     assert not [w for w in recwarn if "incomplete" in str(w.message)]
 
 
@@ -258,18 +258,18 @@ def test_rejects_conflicting_rows_for_one_key(tmp_path):
         encoding="utf-8",
     )
     with pytest.raises(schema.SchemaError, match="conflicting"):
-        ogprod.load("anp", file)
+        get("anp").parse(file)
 
 
 def test_rejects_file_without_well_column(tmp_path):
     bogus = tmp_path / "bogus.csv"
     bogus.write_text("a;b\n1;2\n")
     with pytest.raises(ValueError, match="no well name column"):
-        ogprod.load("anp", bogus)
+        get("anp").parse(bogus)
 
 
 def test_parse_entities_well_coordinates(data_dir):
-    entities = ogprod.load_entities("anp", data_dir / "anp_tabela_pocos_sample.csv")
+    entities = get("anp").parse_entities(data_dir / "anp_tabela_pocos_sample.csv")
     schema.validate_entities(entities)
     assert len(entities) == 2
     assert set(entities["entity_type"]) == {"well"}
@@ -294,7 +294,7 @@ def test_parse_entities_decimal_degree_columns(tmp_path):
         "7-TPI-1-RJS;PETROBRAS;Rio de Janeiro;Campos;TARTARUGA;Produzindo;-22,384617;-40,051942\n",
         encoding="utf-8",
     )
-    entities = ogprod.load_entities("anp", file)
+    entities = get("anp").parse_entities(file)
     schema.validate_entities(entities)
     row = entities.iloc[0]
     assert row.geometry.x == pytest.approx(-40.051942)
@@ -312,7 +312,7 @@ def test_parse_entities_cp1252_encoded_cadastre(tmp_path):
             "7-TPI-1-RJS;PETROBRAS;São Paulo;Campos;TARTARUGA;Produzindo;-22,384617;-40,051942\n"
         ).encode("cp1252")
     )
-    entities = ogprod.load_entities("anp", file)
+    entities = get("anp").parse_entities(file)
     assert entities["region"].iloc[0] == "São Paulo"
 
 
@@ -320,4 +320,4 @@ def test_parse_entities_rejects_other_files(tmp_path):
     bogus = tmp_path / "bogus.csv"
     bogus.write_text("a;b\n1;2\n")
     with pytest.raises(ValueError, match="ANP"):
-        ogprod.load_entities("anp", bogus)
+        get("anp").parse_entities(bogus)

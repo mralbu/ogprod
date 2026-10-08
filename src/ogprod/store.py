@@ -1,5 +1,9 @@
 """Persistent local store: Parquet/GeoParquet files queried through DuckDB.
 
+:class:`Store` is the interface: ``ingest`` fetches, parses and upserts a
+source; ``production``/``entities``/``sql``/``coverage`` read it back. The
+module-level functions below are its internal pieces.
+
 The store is a directory of plain files — Parquet for production
 (hive-partitioned by source and year), GeoParquet for entities (one file per
 source). DuckDB is only the query engine (see ``load_production`` /
@@ -14,18 +18,27 @@ Publishers restate history, so production writes upsert on
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable
+import tempfile
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, TypeVar, cast
 
 import duckdb
 import geopandas as gpd
+import httpx
 import pandas as pd
 
-from ogprod import schema
+from ogprod import schema, sources
+from ogprod.sources import base
 
-#: Default store location, overridable via ``OGPROD_STORE`` or per call.
-DEFAULT_ROOT = Path("data/store")
 _ENV_VAR = "OGPROD_STORE"
+_Frame = TypeVar("_Frame", bound=pd.DataFrame)
+
+#: Flush accumulated parsed rows to the store once a batch reaches this
+#: size — bounds memory on whole-archive ingests while rewriting each
+#: (source, year) partition far less than once per raw file.
+_BATCH_ROWS = 2_000_000
 
 #: Upsert key within a (source, year) partition — ``schema.PRODUCTION_KEY``
 #: minus the partition's source; rows are also kept sorted by it.
@@ -40,10 +53,18 @@ def _key_index(frame: pd.DataFrame) -> pd.MultiIndex:
 
 
 def resolve_root(root: str | Path | None = None) -> Path:
-    """The store root: explicit argument, else $OGPROD_STORE, else data/store."""
+    """The store root: explicit argument, else $OGPROD_STORE, else the user data dir.
+
+    The user data dir is ``$XDG_DATA_HOME/ogprod/store``, falling back to
+    ``~/.local/share/ogprod/store`` — on macOS too, so the path is short and
+    predictable for opening the files with other tools.
+    """
     if root is not None:
-        return Path(root)
-    return Path(os.environ.get(_ENV_VAR, DEFAULT_ROOT))
+        return Path(root).expanduser()
+    if env := os.environ.get(_ENV_VAR):
+        return Path(env).expanduser()
+    data_home = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    return Path(data_home) / "ogprod" / "store"
 
 
 def _partition_path(root: Path, source: str, year: int) -> Path:
@@ -267,3 +288,236 @@ def sql(query: str, root: str | Path | None = None) -> pd.DataFrame:
             )
             con.execute(f"CREATE VIEW entities AS SELECT {columns} WHERE false")
         return con.execute(query).df()
+
+
+@dataclass(frozen=True)
+class IngestResult:
+    """What one :meth:`Store.ingest` call wrote."""
+
+    source: str
+    #: Production rows upserted (after resolving restatements across files).
+    rows: int
+    first_period: pd.Timestamp | None
+    last_period: pd.Timestamp | None
+    #: Production partition files rewritten.
+    partitions: tuple[Path, ...]
+    #: Entity rows written, or ``None`` when entities were not (re)ingested.
+    entities: int | None
+
+    def __str__(self) -> str:
+        span = (
+            f" {self.first_period:%Y-%m}..{self.last_period:%Y-%m}"
+            if self.first_period is not None
+            else ""
+        )
+        entities = "unchanged" if self.entities is None else f"{self.entities:,}"
+        return (
+            f"{self.source}: {self.rows:,} production rows{span} "
+            f"in {len(self.partitions)} partition(s); entities: {entities}"
+        )
+
+
+class Store:
+    """A local production/entities store — the way into ogprod.
+
+    ``Store()`` resolves its root from ``$OGPROD_STORE``, else
+    ``$XDG_DATA_HOME/ogprod/store``, else ``~/.local/share/ogprod/store``.
+    Single writer: two processes ingesting into one root concurrently race.
+    """
+
+    def __init__(self, root: str | Path | None = None) -> None:
+        self.root = resolve_root(root)
+
+    def __repr__(self) -> str:
+        return f"Store({str(self.root)!r})"
+
+    def ingest(
+        self,
+        source: str,
+        *,
+        files: Sequence[str | Path] | None = None,
+        entities: bool = True,
+        refresh: bool = False,
+        client: httpx.Client | None = None,
+        **options: Any,
+    ) -> IngestResult:
+        """Fetch, parse and upsert ``source`` into the store.
+
+        Without ``files``, raw files are downloaded into a temporary directory
+        (removed afterwards); ``options`` (``year``, ``month``) go to the
+        connector's fetch, and an option it doesn't take raises ``TypeError``.
+        With ``files``, those already-downloaded files are ingested instead.
+        Files are parsed in the connector's restatement order, so a file that
+        restates another's rows (ANP's pré-sal over mar) wins rather than
+        double-counting.
+
+        Entities (well coordinates / field ring fences) are ingested too
+        when the store has none for ``source`` yet, or when ``refresh``;
+        connectors without entity support are skipped. Pass
+        ``entities=False`` to skip them (e.g. offline with ``files``).
+
+        If parsing fails midway, partitions already flushed stay written and
+        the error propagates; re-running the same ingest heals the store.
+        """
+        connector = sources.get(source)
+        if files is not None and options:
+            raise TypeError(
+                f"{sorted(options)} select what to fetch; omit them when passing files="
+            )
+        with tempfile.TemporaryDirectory(prefix="ogprod-") as tmp:
+            if files is None:
+                paths = connector.fetch(Path(tmp) / "production", client=client, **options)
+            else:
+                paths = [Path(f) for f in files]
+            rows, first, last, partitions = self._ingest_production(connector, paths)
+            entity_rows = None
+            if entities and self._wants_entities(connector, refresh):
+                entity_paths = connector.fetch_entities(Path(tmp) / "entities", client=client)
+                entity_rows = self._ingest_entities(connector, entity_paths)
+        return IngestResult(
+            source=source,
+            rows=rows,
+            first_period=first,
+            last_period=last,
+            partitions=tuple(dict.fromkeys(partitions)),
+            entities=entity_rows,
+        )
+
+    def _ingest_production(
+        self, connector: base.Source, paths: list[Path]
+    ) -> tuple[int, pd.Timestamp | None, pd.Timestamp | None, list[Path]]:
+        # Parse in restatement order and write in large batches:
+        # combine_restatements lets a later file replace an earlier file's
+        # rows within a batch, and since an upsert replaces stored rows with
+        # incoming ones, writing batches in order keeps that across batches.
+        # Each (source, year) partition is rewritten once per batch, not once
+        # per raw file.
+        written: list[Path] = []
+        rows = 0
+        first: pd.Timestamp | None = None
+        last: pd.Timestamp | None = None
+        batch: list[pd.DataFrame] = []
+        batch_rows = 0
+
+        def flush() -> None:
+            nonlocal rows, first, last, batch, batch_rows
+            combined = combine_restatements(batch)
+            written.extend(write_production(combined, root=self.root))
+            if len(combined):
+                rows += len(combined)
+                low, high = combined["period"].min(), combined["period"].max()
+                first = low if first is None else min(first, low)
+                last = high if last is None else max(last, high)
+            batch, batch_rows = [], 0
+
+        for path in connector.restatement_order(paths):
+            frame = _parse_naming_file(connector.parse, path)
+            batch.append(frame)
+            batch_rows += len(frame)
+            if batch_rows >= _BATCH_ROWS:
+                flush()
+        if batch:
+            flush()
+        return rows, first, last, written
+
+    def _wants_entities(self, connector: base.Source, refresh: bool) -> bool:
+        if type(connector).fetch_entities is base.Source.fetch_entities:
+            return False  # publisher has no entity download
+        return refresh or not _entities_file(self.root, connector.name).exists()
+
+    def _ingest_entities(self, connector: base.Source, paths: list[Path]) -> int:
+        frames = [_parse_naming_file(connector.parse_entities, path) for path in paths]
+        merged = frames[0] if len(frames) == 1 else pd.concat(frames, ignore_index=True)
+        write_entities(cast(gpd.GeoDataFrame, merged), root=self.root)
+        return len(merged)
+
+    def production(
+        self,
+        *,
+        source: str | Iterable[str] | None = None,
+        entity_type: str | Iterable[str] | None = None,
+        entity_id: str | Iterable[str] | None = None,
+        field: str | Iterable[str] | None = None,
+        basin: str | Iterable[str] | None = None,
+        region: str | Iterable[str] | None = None,
+        operator: str | Iterable[str] | None = None,
+        product: str | Iterable[str] | None = None,
+        start: str | pd.Timestamp | None = None,
+        end: str | pd.Timestamp | None = None,
+    ) -> pd.DataFrame:
+        """Canonical production rows, one per (entity, month, product, field), in m³.
+
+        String filters accept one value or an iterable and combine with AND;
+        ``start``/``end`` bound ``period`` inclusively.
+        """
+        return load_production(
+            source=source,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            field=field,
+            basin=basin,
+            region=region,
+            operator=operator,
+            product=product,
+            start=start,
+            end=end,
+            root=self.root,
+        )
+
+    def entities(
+        self, *, source: str | None = None, entity_type: str | None = None
+    ) -> gpd.GeoDataFrame:
+        """Entities as a GeoDataFrame in EPSG:4326; joins production on (source, entity_id)."""
+        return load_entities(source=source, entity_type=entity_type, root=self.root)
+
+    def sql(self, query: str) -> pd.DataFrame:
+        """Run a DuckDB query over the ``production`` and ``entities`` views.
+
+        ``entities.geometry`` arrives as WKB bytes; use :meth:`entities` for
+        real geometries.
+        """
+        return sql(query, root=self.root)
+
+    def coverage(self) -> pd.DataFrame:
+        """What the store holds: one row per source.
+
+        Columns: ``source``, ``rows`` (production rows), ``producing_entities``
+        (distinct entity ids with production), ``first_period``,
+        ``last_period``, ``stored_entities`` (entity rows; null when none).
+        """
+        frame = self.sql(
+            """
+            WITH p AS (
+                SELECT source, count(*) AS rows,
+                       count(DISTINCT entity_id) AS producing_entities,
+                       min(period) AS first_period, max(period) AS last_period
+                FROM production GROUP BY source
+            ), e AS (
+                SELECT source, count(*) AS stored_entities FROM entities GROUP BY source
+            )
+            SELECT coalesce(p.source, e.source) AS source,
+                   coalesce(p.rows, 0) AS rows,
+                   coalesce(p.producing_entities, 0) AS producing_entities,
+                   p.first_period, p.last_period, e.stored_entities
+            FROM p FULL OUTER JOIN e ON p.source = e.source
+            ORDER BY 1
+            """
+        )
+        return frame.astype(
+            {
+                "source": "string",
+                "rows": "int64",
+                "producing_entities": "int64",
+                "first_period": "datetime64[ns]",
+                "last_period": "datetime64[ns]",
+                "stored_entities": "Int64",
+            }
+        )
+
+
+def _parse_naming_file(parse: Callable[[Path], _Frame], path: Path) -> _Frame:
+    """``parse(path)``, with the failing file's name added to a ValueError."""
+    try:
+        return parse(path)
+    except ValueError as error:
+        raise ValueError(f"{error} (while parsing {path})") from error

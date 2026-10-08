@@ -116,19 +116,27 @@ the GeoDataFrame, reprojects to EPSG:4326 if needed, and validates.
 
 - `parse(raw) -> DataFrame` — **pure and mandatory.** Takes a path or file
   object of a raw file as published, returns a validated canonical frame.
-- `fetch(dest_dir, *, client=None, **kwargs) -> list[Path]` — **optional.**
+- `fetch(dest_dir, *, client=None, ...) -> list[Path]` — **optional.**
   Downloads the publisher's raw file(s) into `dest_dir` and returns their
   paths (a list, because ANP splits one month across terra/mar/pré-sal CSVs).
   All three built-in connectors implement it. `client` takes an injected
   `httpx.Client`, which is how the tests exercise fetch offline against an
-  `httpx.MockTransport`; per-source parameters (`year`, `month`) arrive via
-  keyword. Connectors without a stable download URL leave the base
-  implementation, which raises `NotImplementedError` pointing at the
-  publisher's download page.
+  `httpx.MockTransport`. Per-source options (`year`, `month`) are explicit
+  keyword parameters with no `**kwargs` catch-all, so a misspelt option
+  raises `TypeError` instead of silently widening the download. Connectors
+  without a stable download URL leave the base implementation, which raises
+  `NotImplementedError` pointing at the publisher's download page.
+- `restatement_order(paths) -> list[Path]` — the order in which ingest
+  parses a set of raw files; a file that restates another's rows must come
+  after it, because ingest keeps the last row per key. The default keeps the
+  given order; ANP overrides it to put pré-sal after mar (stable sort on the
+  environment named in the file name; unrecognized files go first).
 
-`@base.register` adds a connector to the registry behind `ogprod.available()`,
-`ogprod.get(name)`, `ogprod.load(name, raw)`, and `ogprod.fetch(name, dest,
-**kwargs)`.
+`@base.register` adds a connector to the registry behind
+`ogprod.available()` and `ogprod.sources.get(name)`. This connector layer is
+the advanced interface — for parsing a single file in a diagnostic, or
+downloading raw files without ingesting them; everyday use goes through
+`ogprod.Store` (see Store below).
 
 `base.build_frame(...)` is the shared assembler: connectors hand it metadata
 series plus a `{Product: volumes_in_m3}` mapping and it melts, types, drops
@@ -244,19 +252,48 @@ BSEE OGOR-A (well, bulk delimited), Petrinex Alberta (well, CSV), NSTA PPRS
 ## Store
 
 Publishers restate history: Petrinex ships amendments, Texas revises months
-after the fact, ANP republishes. `ogprod.store` (`src/ogprod/store.py`) is a
+after the fact, ANP republishes. `ogprod.Store` (`src/ogprod/store.py`) is a
 persistent local store built on top of canonical frames, upserting on
-`(source, entity_id, period, product, field)` rather than appending. It's plain
-files, not a database server:
+`(source, entity_id, period, product, field)` rather than appending — and
+the package's main interface: everything is ingested into a store and read
+back from it. It's plain files, not a database server:
 
 ```
-data/store/
+~/.local/share/ogprod/store/
   production/source=anp/year=2023/data.parquet   # hive-partitioned Parquet
   entities/anp.parquet                            # GeoParquet, one file per source
 ```
 
+- **Interface.** `Store(root=None)` with `ingest(source, *, files=None,
+  entities=True, refresh=False, client=None, **options)`, `production(...)`,
+  `entities(...)`, `sql(query)` and `coverage()`. The top-level package
+  exports only `Store`, `available`, `convert`, `Product` and `SchemaError`.
+  The module-level functions in `store.py` (`write_production`,
+  `write_entities`, `combine_restatements`, `load_production`,
+  `load_entities`, `sql`, `resolve_root`) are `Store`'s internal pieces,
+  tested directly in `test_store.py`.
+- **Ingest.** Without `files`, the connector's `fetch` downloads into a
+  temporary directory (removed afterwards) with `options` passed through;
+  with `files`, those paths are used (and `options` is a `TypeError`). Paths
+  go through `connector.restatement_order`, are parsed in that order, and
+  are written in large batches (each `(source, year)` partition rewritten
+  once per batch of ~2M rows, not once per raw file).
+  `combine_restatements` builds each batch: a later file's row replaces an
+  earlier file's row with the same key, so ANP's terra/mar/pré-sal split
+  upserts correctly instead of double-counting — the pré-sal file's rows (a
+  subset of mar's, identical down to the field) replace the corresponding
+  mar rows rather than being summed with them. Writing batches in order
+  carries keep-last across batch boundaries, since an upsert replaces stored
+  rows with incoming ones. Keep-last applies only *across* files;
+  `write_production` itself rejects a frame that repeats a key. A parse
+  failure names the file and propagates; partitions already flushed stay
+  written. Returns an `IngestResult` (rows, period span, partitions,
+  entity rows) — never the frame, so there is one way to read data.
+- **Entities on ingest.** Ingested when the store has none for the source
+  yet, or with `refresh=True`; skipped for connectors without an entity
+  download; `entities=False` turns them off (e.g. offline with `files`).
 - **Production** is Parquet, hive-partitioned by `(source, year)`. DuckDB is
-  the query engine (`load_production`, `sql`), never the storage container —
+  the query engine (`production`, `sql`), never the storage container —
   every file is a plain Parquet file readable directly with pandas, and the
   same layout could be served statically. `write_production(frame)` groups
   incoming rows by `(source, year)`; for each affected partition it reads the
@@ -267,31 +304,27 @@ data/store/
   reports a well's month split across several fields (e.g. ATAPU and
   ATAPU_ECO) — distinct volumes that must all survive an upsert.
 - **Entities** are GeoParquet, one file per source, whole-file replaced by
-  `write_entities` — entity tables are small (10³–10⁴ rows), so merge logic
+  `write_entities` — entity tables are small (10³–10⁵ rows), so merge logic
   isn't worth having.
-- `load_production(source=..., field=..., product=..., start=..., end=...)`
-  and `load_entities(source=..., entity_type=...)` are the read side; both
-  return pandas/geopandas frames with the canonical columns. `store.sql(...)`
-  is a DuckDB escape hatch over `production`/`entities` views.
-- **Root resolution.** Every function takes `root=...`; when omitted it falls
-  back to the `OGPROD_STORE` environment variable, then `data/store/`.
+- **Read side.** `production(source=..., field=..., product=..., start=...,
+  end=...)` and `entities(source=..., entity_type=...)` return
+  pandas/geopandas frames with the canonical columns; `sql(...)` is a DuckDB
+  escape hatch over `production`/`entities` views; `coverage()` summarizes
+  rows, entities and period span per source, computed from the files.
+- **Root resolution.** `Store(root)`; when omitted, `$OGPROD_STORE`, then
+  `$XDG_DATA_HOME/ogprod/store`, then `~/.local/share/ogprod/store` — on
+  macOS too, so the path is short and predictable for opening the files with
+  other tools. It is a *store*, not a cache: publishers drop history and move
+  endpoints, so its contents can't be assumed re-downloadable.
 - **Single writer, idempotent.** Each partition write is atomic, but a
   multi-partition write interrupted midway leaves some partitions updated
   and others not — re-running the same ingest heals the store (upserts are
   idempotent). Two concurrent writers to the same partition race
   read-modify-write; the store assumes one writer at a time.
-- **CLI:** `python -m ogprod ingest <source> [--year ... --month ...]
-  [--entities]` chains fetch → parse → write against the resolved store
-  root. Parsed frames are concatenated in fetch order and written in large
-  batches (each `(source, year)` partition rewritten once per batch, not
-  once per raw file). `store.combine_restatements` builds each batch: a
-  later file's row replaces an earlier file's row with the same key, so
-  ANP's terra/mar/pré-sal split upserts correctly instead of
-  double-counting — the pré-sal file's rows (a subset of mar's, identical
-  down to the field) replace the corresponding mar rows for the same
-  `(entity_id, period, product, field)` rather than being summed with them.
-  Keep-last applies only *across* files; `write_production` itself rejects
-  a frame that repeats a key.
+- **CLI** (`__main__.py`) is a thin adapter: `python -m ogprod ingest
+  <source> [--year --month] [--files ...] [--no-entities] [--refresh]
+  [--store]` calls `Store.ingest`; `coverage` prints `Store.coverage()`;
+  `fetch <source> [--entities] [--dest]` downloads raw files only.
 
 ### Website data contract (future work)
 
