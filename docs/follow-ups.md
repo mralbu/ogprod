@@ -83,40 +83,37 @@ as BLOB to match a populated store; `_UPSERT_KEY`/`_SORT_KEY` merged.
 Two-axis review (standards + spec) of the `ogprod.Store` refactor. Spec:
 `docs/superpowers/specs/2026-10-08-store-centric-api-design.md`.
 
-1. **Regression of fixed item 7: a failed ingest no longer reports the
-   partitions already flushed.** The old CLI printed them before the error;
-   `Store.ingest` raises without an `IngestResult`, and the CLI prints only
-   the error. The store still heals on re-run, so this is a reporting gap,
-   not a data one. Fix: attach the written partitions to the exception
-   (e.g. an `IngestError` carrying them) and have the CLI print them.
-2. **Empty entity download fails after production is written.** If
-   `fetch_entities` returns `[]`, `_ingest_entities` calls `pd.concat([])`
-   → `ValueError: No objects to concatenate` (verified). Production was
-   already upserted, so the call reports failure for a mostly successful
-   ingest. Fix: treat no entity files as "no entities" (`entities=0` or
-   `None`) or raise a pointed error naming the source.
-3. **Entity support is detected by override, not by contract.** `ingest`
-   skips entities when `type(c).fetch_entities is Source.fetch_entities`;
-   the spec says connectors *raising* `NotImplementedError` are skipped. A
-   connector that overrides `fetch_entities` and raises conditionally
-   would fail after production is written. Consider an explicit
-   `Source.has_entities` flag (or catching `NotImplementedError` from
-   `fetch_entities` only).
+Items 1–3 were fixed the same day (see "Fixed 2026-10-08" below); the
+rest stay open as judgement calls.
+
 4. **`_environment_rank` is a file-name heuristic.** Correct for every
    real ANP name seen (`..._Mar`, `..._Presal`, `..._pre_sal`, `Pré-Sal`,
    yearly `2012_producao_mar`), but `mar` is matched as a whole word and
-   `presal` as a substring of the joined words, without a comment saying
-   why; a hypothetical `producao_maritima.csv` would rank as terra.
+   `presal` as a substring of the joined words (now commented); a
+   hypothetical `producao_maritima.csv` would rank as terra.
    Revisit if ANP's naming drifts again.
 5. **`Store.production` duplicates `load_production`'s ten filters**
    (possible Middle Man): two signatures to keep in step. Acceptable while
    the module functions are `Store`'s internal pieces; collapse them if a
    filter is ever added.
 6. **Smaller judgement calls.** `_ingest_production` returns a
-   `(rows, first, last, partitions)` tuple that `IngestResult` then
-   rebuilds (data clump); `__main__` declares `--year/--month/--store`
+   `(rows, first, last)` tuple that `IngestResult` then rebuilds (data
+   clump); `__main__` declares `--year/--month/--store`
    once per subcommand where a shared parent parser would do;
    `_parse_naming_file` could be named `_parse_reporting_path`.
+
+## Fixed 2026-10-08 (store-centric API review)
+
+1. **A failed ingest didn't report flushed partitions** (regression of
+   July item 7). `Store.ingest` now adds an exception note listing the
+   partitions already written, keeping the original exception type, for
+   failures in production or in the entity step. The CLI prints the notes.
+2. **An empty entity download crashed after production was written**
+   (`pd.concat([])`). It now writes nothing and reports `entities == 0`,
+   so a `refresh=True` with an empty download keeps the stored entities.
+3. **Entity support was detected by override, not by contract.** `ingest`
+   now skips entities when `fetch_entities` raises `NotImplementedError`,
+   as the spec says, and the override check is gone.
 
 ## Open watch items
 

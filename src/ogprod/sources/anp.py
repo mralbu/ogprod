@@ -215,6 +215,9 @@ def _extract_csvs(zip_path: Path, target_dir: Path) -> list[Path]:
 
 def _environment_rank(path: Path) -> int:
     """0 for terra/unknown, 1 for mar, 2 for pré-sal, read from the file name."""
+    # Pré-sal is spelt "presal", "pre_sal" and "Pré-Sal" across years, so it
+    # is matched in the words re-joined; "mar" only as a whole word, so that
+    # it can't hit inside another word.
     words = re.split(r"[^a-z0-9]+", _normalize(Path(path).stem))
     if "presal" in "".join(words):
         return 2

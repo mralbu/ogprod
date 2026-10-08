@@ -87,3 +87,17 @@ def test_coverage_prints_table(tmp_path, capsys, data_dir):
     out = capsys.readouterr().out
     assert "producing_entities" in out
     assert "sodir" in out
+
+
+def test_ingest_failure_lists_partitions_already_written(tmp_path, capsys, data_dir, monkeypatch):
+    from ogprod import store
+
+    sample = data_dir / "sodir_field_production_monthly_sample.csv"
+    bad = tmp_path / "bogus.csv"
+    bad.write_text("a,b\n1,2\n")
+    monkeypatch.setattr(store, "_BATCH_ROWS", 1)
+    args = ["ingest", "sodir", "--files", str(sample), str(bad), "--no-entities"]
+    assert main([*args, "--store", str(tmp_path / "s")]) == 1
+    err = capsys.readouterr().err
+    assert "bogus.csv" in err
+    assert "source=sodir/year=2024/data.parquet" in err
