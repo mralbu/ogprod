@@ -353,46 +353,58 @@ class Store:
 
         Entities (well coordinates / field ring fences) are ingested too
         when the store has none for ``source`` yet, or when ``refresh``;
-        connectors without entity support are skipped. Pass
-        ``entities=False`` to skip them (e.g. offline with ``files``).
+        connectors whose ``fetch_entities`` raises ``NotImplementedError``
+        are skipped, and an empty entity download writes nothing
+        (``entities == 0``). Pass ``entities=False`` to skip them (e.g.
+        offline with ``files``).
 
-        If parsing fails midway, partitions already flushed stay written and
-        the error propagates; re-running the same ingest heals the store.
+        If anything fails midway, partitions already flushed stay written and
+        the error propagates with a note listing them; re-running the same
+        ingest heals the store.
         """
         connector = sources.get(source)
         if files is not None and options:
             raise TypeError(
                 f"{sorted(options)} select what to fetch; omit them when passing files="
             )
-        with tempfile.TemporaryDirectory(prefix="ogprod-") as tmp:
-            if files is None:
-                paths = connector.fetch(Path(tmp) / "production", client=client, **options)
-            else:
-                paths = [Path(f) for f in files]
-            rows, first, last, partitions = self._ingest_production(connector, paths)
-            entity_rows = None
-            if entities and self._wants_entities(connector, refresh):
-                entity_paths = connector.fetch_entities(Path(tmp) / "entities", client=client)
-                entity_rows = self._ingest_entities(connector, entity_paths)
+        written: list[Path] = []
+        try:
+            with tempfile.TemporaryDirectory(prefix="ogprod-") as tmp:
+                if files is None:
+                    paths = connector.fetch(Path(tmp) / "production", client=client, **options)
+                else:
+                    paths = [Path(f) for f in files]
+                rows, first, last = self._ingest_production(connector, paths, written)
+                entity_rows = None
+                if entities and (refresh or not _entities_file(self.root, source).exists()):
+                    entity_rows = self._ingest_entities(connector, Path(tmp), client)
+        except Exception as error:
+            if written:
+                listing = "\n".join(f"  {path}" for path in dict.fromkeys(written))
+                error.add_note(
+                    "partitions already written before the failure "
+                    f"(re-running the ingest heals the store):\n{listing}"
+                )
+            raise
         return IngestResult(
             source=source,
             rows=rows,
             first_period=first,
             last_period=last,
-            partitions=tuple(dict.fromkeys(partitions)),
+            partitions=tuple(dict.fromkeys(written)),
             entities=entity_rows,
         )
 
     def _ingest_production(
-        self, connector: base.Source, paths: list[Path]
-    ) -> tuple[int, pd.Timestamp | None, pd.Timestamp | None, list[Path]]:
+        self, connector: base.Source, paths: list[Path], written: list[Path]
+    ) -> tuple[int, pd.Timestamp | None, pd.Timestamp | None]:
         # Parse in restatement order and write in large batches:
         # combine_restatements lets a later file replace an earlier file's
         # rows within a batch, and since an upsert replaces stored rows with
         # incoming ones, writing batches in order keeps that across batches.
         # Each (source, year) partition is rewritten once per batch, not once
-        # per raw file.
-        written: list[Path] = []
+        # per raw file. Partitions are appended to the caller's ``written`` as
+        # they flush, so a later failure can still report them.
         rows = 0
         first: pd.Timestamp | None = None
         last: pd.Timestamp | None = None
@@ -418,14 +430,18 @@ class Store:
                 flush()
         if batch:
             flush()
-        return rows, first, last, written
+        return rows, first, last
 
-    def _wants_entities(self, connector: base.Source, refresh: bool) -> bool:
-        if type(connector).fetch_entities is base.Source.fetch_entities:
-            return False  # publisher has no entity download
-        return refresh or not _entities_file(self.root, connector.name).exists()
-
-    def _ingest_entities(self, connector: base.Source, paths: list[Path]) -> int:
+    def _ingest_entities(
+        self, connector: base.Source, tmp: Path, client: httpx.Client | None
+    ) -> int | None:
+        """Entity rows written; ``None`` when the connector has no entity download."""
+        try:
+            paths = connector.fetch_entities(tmp / "entities", client=client)
+        except NotImplementedError:
+            return None
+        if not paths:
+            return 0  # nothing to write; keep whatever entities are stored
         frames = [_parse_naming_file(connector.parse_entities, path) for path in paths]
         merged = frames[0] if len(frames) == 1 else pd.concat(frames, ignore_index=True)
         write_entities(cast(gpd.GeoDataFrame, merged), root=self.root)

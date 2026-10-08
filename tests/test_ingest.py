@@ -12,7 +12,7 @@ import pytest
 
 import ogprod
 from ogprod import store
-from ogprod.sources import anp, base, get
+from ogprod.sources import anp, base, get, sodir
 
 FIELD_GEOJSON = {
     "type": "FeatureCollection",
@@ -177,9 +177,50 @@ def test_ingest_parse_error_names_file_and_keeps_flushed_partitions(
     bad.write_text("a,b\n1,2\n")
     monkeypatch.setattr(store, "_BATCH_ROWS", 1)  # flush after every file
     db = ogprod.Store(tmp_path / "s")
-    with pytest.raises(ValueError, match="bogus.csv"):
+    with pytest.raises(ValueError, match="bogus.csv") as caught:
         db.ingest("sodir", files=[sample, bad], entities=False)
     assert len(db.production()) == 10
+    # The error carries the partitions the earlier flush already wrote.
+    (note,) = caught.value.__notes__
+    assert str(tmp_path / "s/production/source=sodir/year=2024/data.parquet") in note
+
+
+def test_entity_failure_notes_production_already_written(tmp_path, data_dir, monkeypatch):
+    def broken(self, dest, client=None):
+        raise ValueError("cadastre endpoint moved")
+
+    monkeypatch.setattr(sodir.Sodir, "fetch_entities", broken)
+    sample = data_dir / "sodir_field_production_monthly_sample.csv"
+    db = ogprod.Store(tmp_path)
+    with pytest.raises(ValueError, match="endpoint moved") as caught:
+        db.ingest("sodir", files=[sample])
+    assert "year=2024" in caught.value.__notes__[0]
+    assert len(db.production()) == 10
+
+
+def test_empty_entity_download_writes_nothing(tmp_path, data_dir, sodir_client, monkeypatch):
+    db = ogprod.Store(tmp_path)
+    db.ingest("sodir", client=sodir_client)  # stores one ring fence
+    monkeypatch.setattr(sodir.Sodir, "fetch_entities", lambda self, dest, client=None: [])
+    sample = data_dir / "sodir_field_production_monthly_sample.csv"
+
+    result = db.ingest("sodir", files=[sample], refresh=True)
+    assert result.rows == 10
+    assert result.entities == 0
+    assert len(db.entities()) == 1  # an empty download doesn't wipe stored entities
+
+
+def test_connector_raising_not_implemented_for_entities_is_skipped(tmp_path, data_dir, monkeypatch):
+    # The contract is the NotImplementedError, not whether the method is
+    # overridden: a connector may override fetch_entities and still lack data.
+    def unavailable(self, dest, client=None):
+        raise NotImplementedError("no geometry for this source")
+
+    monkeypatch.setattr(sodir.Sodir, "fetch_entities", unavailable)
+    sample = data_dir / "sodir_field_production_monthly_sample.csv"
+    result = ogprod.Store(tmp_path).ingest("sodir", files=[sample])
+    assert result.rows == 10
+    assert result.entities is None
 
 
 def test_ingest_skips_entities_for_connector_without_them(tmp_path, data_dir, monkeypatch):

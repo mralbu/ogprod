@@ -105,7 +105,7 @@ Design rules, enforced by `schema.validate_entities`:
   (raises `NotImplementedError` pointing at `docs_url`).
 - `fetch_entities(dest_dir, *, client=None) -> list[Path]` — network, downloads
   the publisher's geometry file(s). Also optional; `Store.ingest` skips
-  entities for connectors that don't override it.
+  entities when it raises `NotImplementedError`.
 
 `base.build_entities(...)` is the entities counterpart to `build_frame`:
 connectors hand it metadata series plus a geometry column, and it assembles
@@ -292,11 +292,14 @@ back from it. It's plain files, not a database server:
   rows with incoming ones. Keep-last applies only *across* files;
   `write_production` itself rejects a frame that repeats a key. A parse
   failure names the file and propagates; partitions already flushed stay
-  written. Returns an `IngestResult` (rows, period span, partitions,
+  written, and any failure after a flush (including in the entity step)
+  carries an exception note listing them, which the CLI prints. Returns an `IngestResult` (rows, period span, partitions,
   entity rows) — never the frame, so there is one way to read data.
 - **Entities on ingest.** Ingested when the store has none for the source
-  yet, or with `refresh=True`; skipped for connectors without an entity
-  download; `entities=False` turns them off (e.g. offline with `files`).
+  yet, or with `refresh=True`; skipped (`entities is None`) when the
+  connector's `fetch_entities` raises `NotImplementedError`; an empty
+  download writes nothing (`entities == 0`), so stored entities survive a
+  refresh; `entities=False` turns them off (e.g. offline with `files`).
 - **Production** is Parquet, hive-partitioned by `(source, year)`. DuckDB is
   the query engine (`production`, `sql`), never the storage container —
   every file is a plain Parquet file readable directly with pandas, and the

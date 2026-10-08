@@ -102,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         _run(args)
     except (ValueError, TypeError, NotImplementedError) as error:
         print(f"error: {error}", file=sys.stderr)
+        for note in getattr(error, "__notes__", []):
+            print(note, file=sys.stderr)
         return 1
     return 0
 
