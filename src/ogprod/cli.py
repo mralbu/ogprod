@@ -1,12 +1,16 @@
 """Command-line interface."""
 
+from __future__ import annotations
+
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 import click
 from click.shell_completion import get_completion_class
 
-from .core import greet
+from ogprod import sources
+from ogprod.store import Store
 
 APP_NAME = "ogprod"
 COMPLETE_VAR = f"_{APP_NAME.replace('-', '_').upper()}_COMPLETE"
@@ -25,11 +29,107 @@ def cli() -> None:
     """Public oil & gas production data pipeline and geospatial store."""
 
 
+@cli.command("sources")
+def list_sources() -> None:
+    """List registered data source connectors."""
+    for name in sources.available():
+        connector = sources.get(name)
+        click.echo(f"{name}\t{connector.entity_type.value}\t{connector.docs_url}")
+
+
 @cli.command()
-@click.argument("name", default="world")
-def hello(name: str) -> None:
-    """Greet NAME (an example command)."""
-    click.echo(greet(name))
+@click.argument("source")
+@click.option("--year", type=int, default=None, help="Ingest a specific production year.")
+@click.option(
+    "--environment",
+    type=click.Choice(["onshore", "offshore"], case_sensitive=False),
+    default=None,
+    help="Filter source files by onshore or offshore (when supported).",
+)
+@click.option("--recent", is_flag=True, help="Only fetch the current and previous year.")
+@click.option("--refresh", is_flag=True, help="Re-download files and geo layers already ingested.")
+@click.option("--no-geo", is_flag=True, help="Skip geospatial layers (fields, facilities, wells).")
+@click.option("--keep-raw", is_flag=True, help="Keep raw downloaded files under <data-dir>/raw/.")
+@click.option(
+    "--files",
+    "local_files",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    multiple=True,
+    help="Ingest local production file(s) instead of downloading.",
+)
+@click.option(
+    "--data-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Override the ogprod data directory (default: $OGPROD_DATA or XDG data dir).",
+)
+def ingest(
+    source: str,
+    year: int | None,
+    environment: str | None,
+    recent: bool,
+    refresh: bool,
+    no_geo: bool,
+    keep_raw: bool,
+    local_files: tuple[Path, ...],
+    data_dir: Path | None,
+) -> None:
+    """Download, normalize, and store production & geospatial data for SOURCE."""
+    store = Store(data_dir)
+    options: dict[str, Any] = {}
+    if environment is not None:
+        options["environment"] = environment
+    if recent:
+        options["recent"] = True
+
+    summary = store.ingest(
+        source,
+        year=year,
+        refresh=refresh,
+        geo_layers=not no_geo,
+        keep_raw=keep_raw,
+        files=list(local_files) if local_files else None,
+        **options,
+    )
+    geo_desc = ", ".join(f"{k}={v:,}" for k, v in summary.geo_counts.items()) or "unchanged"
+    click.echo(
+        f"{summary.source}: {summary.production_rows:,} rows "
+        f"({summary.files_ingested} file(s) ingested, {summary.files_skipped} skipped, "
+        f"{len(summary.partitions)} partition(s)); geo: {geo_desc}"
+    )
+
+
+@cli.command()
+@click.option(
+    "--data-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Override the ogprod data directory.",
+)
+def coverage(data_dir: Path | None) -> None:
+    """Print production and geospatial coverage per source."""
+    frame = Store(data_dir).coverage()
+    if frame.empty:
+        click.echo("Store is empty.")
+        return
+    click.echo(frame.to_string(index=False))
+
+
+@cli.command("sql")
+@click.argument("query")
+@click.option(
+    "--data-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Override the ogprod data directory.",
+)
+def run_sql(query: str, data_dir: Path | None) -> None:
+    """Run a DuckDB SQL QUERY over production, fields, facilities, and wells."""
+    frame = Store(data_dir).sql(query)
+    if frame.empty:
+        click.echo("(0 rows)")
+        return
+    click.echo(frame.to_string(index=False))
 
 
 @cli.command()

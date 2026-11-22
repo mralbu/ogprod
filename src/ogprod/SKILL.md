@@ -17,13 +17,25 @@ list every option.
 
 | Command | Description |
 |---|---|
-| `hello [NAME]` | Print a greeting for NAME (default: world) |
+| `sources` | List registered data source connectors |
+| `ingest SOURCE [OPTIONS]` | Download, normalize, and store production & geospatial data (`--year`, `--environment`, `--recent`, `--refresh`, `--no-geo`, `--keep-raw`, `--files`, `--data-dir`) |
+| `coverage [--data-dir DIR]` | Summarize stored production rows, periods, and geo counts per source |
+| `sql QUERY [--data-dir DIR]` | Run a DuckDB SQL query over `production`, `fields`, `facilities`, and `wells` |
 | `completion SHELL` | Print the completion script for bash, zsh or fish |
 | `skill [--install]` | Print this file, or install it as an agent skill |
+
+## Units
+
+All rates in `production` are calendar-day averages stored as `float32`:
+- `oil_prod`, `condensate_prod`, `ngl_prod`, `water_prod`, `water_inj`: `bbl/d`
+- `gas_prod`, `gas_inj`, `co2_inj`: `Mm³/d` (`10⁶ m³/d`)
 
 ## Examples
 
 ```sh
-ogprod hello
-ogprod hello Ada
+ogprod sources
+ogprod ingest anp --year 2026 --data-dir ./data
+ogprod ingest anp --recent --data-dir ./data
+ogprod coverage --data-dir ./data
+ogprod sql "SELECT field_name, sum(oil_prod) AS oil_bpd FROM production WHERE period = '2026-01-01' GROUP BY 1 ORDER BY 2 DESC LIMIT 10" --data-dir ./data
 ```

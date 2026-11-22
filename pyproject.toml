@@ -12,7 +12,13 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
 ]
-dependencies = ["click>=8.3"]
+dependencies = [
+    "click>=8.3",
+    "duckdb>=2.0.1",
+    "geopandas>=1.2.0",
+    "httpx>=0.28.1",
+    "pyarrow>=26.0.1",
+]
 
 [project.scripts]
 ogprod = "ogprod.cli:main"

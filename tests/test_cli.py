@@ -1,3 +1,7 @@
+"""Tests for the ogprod Click CLI."""
+
+from __future__ import annotations
+
 import re
 from pathlib import Path
 
@@ -5,6 +9,8 @@ import pytest
 from click.testing import CliRunner
 
 from ogprod.cli import APP_NAME, SHELLS, cli, skill_text
+
+DATA_DIR = Path(__file__).parent / "data"
 
 
 def invoke(*args: str) -> str:
@@ -21,8 +27,37 @@ def test_version() -> None:
     assert re.search(r"\d+\.\d+", invoke("--version"))
 
 
-def test_hello() -> None:
-    assert invoke("hello", "Ada") == "Hello, Ada!\n"
+def test_sources_lists_anp() -> None:
+    out = invoke("sources")
+    assert "anp\twell\t" in out
+
+
+def test_ingest_local_file_coverage_and_sql(tmp_path: Path) -> None:
+    csv_path = DATA_DIR / "anp_mar_2026_sample.csv"
+    data_dir = tmp_path / "data"
+
+    out = invoke(
+        "ingest",
+        "anp",
+        "--files",
+        str(csv_path),
+        "--no-geo",
+        "--data-dir",
+        str(data_dir),
+    )
+    assert "anp: 2 rows" in out
+
+    cov = invoke("coverage", "--data-dir", str(data_dir))
+    assert "anp" in cov
+    assert "2026-01-01" in cov
+
+    res = invoke(
+        "sql",
+        "SELECT count(*) AS n FROM production",
+        "--data-dir",
+        str(data_dir),
+    )
+    assert "2" in res
 
 
 @pytest.mark.parametrize("shell", SHELLS)
