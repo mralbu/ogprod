@@ -51,25 +51,25 @@ daily sources (NSTA well data), and possibly basin/region name harmonies
 - **ANP 2024+ gap.** Bulk files stop at 2023; recent data sits in the CDP
   application. Reverse-engineering CDP's export (or scraping its API)
   closes the two-year hole in the repo's biggest well-level source.
-- **Store metadata/manifest.** A small `manifest.json` per store (source →
-  last ingested period, row counts, ingest timestamps) would answer "how
-  fresh is my store?" without scanning Parquet, and gives `ingest` a way to
-  fetch only newer periods (incremental refresh) instead of re-downloading.
+- **Prebuilt mirror, manifest & automated refresh.** Spec written and
+  approved (`docs/superpowers/specs/2026-11-22-mirror-and-distribution-design.md`):
+  Hugging Face Dataset mirror (`origin="mirror"` default over `httpx2`),
+  `manifest.json` with SHA-256 + row/volume sanity gates, zstd + bounded
+  row-group Parquet, shared local/CI publish command, and scheduled
+  per-source rolling refresh (`update-data.yml`).
 - **Multi-value source pruning + entity pushdown** in the loaders — noted
   in follow-ups as fine at current scale; revisit when a second well-level
   source lands full-history.
-- **Compression/row-group tuning** for partitions once Petrinex-scale data
-  arrives (zstd, sorted row groups by entity_id for better pushdown).
 
-## Website (spec §4 — the exporter is the unbuilt half of the design)
+## Website (hybrid GitHub Pages + DuckDB-WASM)
 
-- **`ogprod export-site` step**: pre-aggregated rollup JSON
-  (country/basin/field × product × month), a PMTiles layer from the
-  entities GeoParquet, per-field sharded series JSON. The store was shaped
-  so this is a pure read-side transform.
-- **Static site itself**: map (MapLibre + PMTiles) with click-to-chart,
-  dashboard pages from the rollups. DuckDB-WASM over the hosted Parquet is
-  a free power-user add-on since the store is already plain Parquet.
+- **Hybrid serving** (architecture agreed in
+  `docs/superpowers/specs/2026-11-22-mirror-and-distribution-design.md`,
+  Milestone 2): `ogprod export-site` generates pre-aggregated rollup JSON
+  (country/basin/field × product × month) and `entities.pmtiles` deployed to
+  GitHub Pages via `actions/deploy-pages` (no `gh-pages` branch), while
+  individual well click-to-chart queries the zstd HF Parquet mirror directly
+  from the browser via DuckDB-WASM over HTTP Range + CORS.
 - Even before a site: a `just report` that renders a couple of matplotlib
   summary charts per source would make regressions in ingested data
   visible.
