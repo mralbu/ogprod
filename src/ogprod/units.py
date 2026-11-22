@@ -3,11 +3,12 @@
 Canonical storage units in ogprod are calendar-day average rates:
 
 - Liquids (oil, condensate, NGL, water produced & injected): ``bbl/d``
-- Gases (total gas produced, gas injected, CO₂ injected): ``e6m3/d`` (SI ``Mm³/d`` = 10⁶ m³/d)
+- Gases (total gas produced, gas injected, CO₂ injected): ``e3m3/d`` (10³ m³/d, thousand m³/day)
 
 Unit names use explicit ``e<power>`` prefixes (``e3m3``, ``e6m3``, ``e9m3``) to
-avoid the oilfield vs SI ambiguity of "M" (ANP writes ``Mm³`` for *mil* = 10³ m³,
-whereas SI ``Mm³`` is 10⁶ m³).
+avoid both the oilfield vs SI ambiguity of "M" (ANP writes ``Mm³`` for *mil* =
+10³ m³, whereas SI ``Mm³`` is 10⁶ m³) and ``km³`` (which in SI means cubic
+kilometer = 10⁹ m³).
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ VOLUME_TO_M3: dict[str, float] = {
 
 #: Canonical rate units for liquids and gases.
 LIQUID_RATE_UNIT = "bbl/d"
-GAS_RATE_UNIT = "e6m3/d"
+GAS_RATE_UNIT = "e3m3/d"
 
 
 def volume_factor(from_unit: str, to_unit: str = "m3") -> float:

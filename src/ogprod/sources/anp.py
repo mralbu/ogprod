@@ -218,10 +218,10 @@ def _sum_optional(a: pd.Series | None, b: pd.Series | None, length: int) -> pd.S
 def _compute_anp_rates(
     frame: pd.DataFrame, cols: dict[str, str], days: pd.Series
 ) -> dict[str, pd.Series]:
-    """Convert monthly ANP volumes (m³ liquids, e3m3 gas) to daily rates (bbl/d, Mm³/d)."""
+    """Convert monthly ANP volumes (m³ liquids, e3m3 gas) to daily rates (bbl/d, e3m3/d)."""
     n = len(frame)
     liq = units.BBL_PER_M3 / days
-    gas = 1.0 / (1000.0 * days)
+    gas = 1.0 / days
 
     def col_num(key: str) -> pd.Series | None:
         return parse_br_number(frame[cols[key]]) if key in cols else None
@@ -409,10 +409,8 @@ def _parse_facilities_csv(path: Path) -> gpd.GeoDataFrame:
             else pd.NA,
             "water_depth_m": parse_br_number(df[water_depth_col]) if water_depth_col else pd.NA,
             "oil_capacity_bpd": parse_br_number(df[oil_cap_col]) if oil_cap_col else pd.NA,
-            # ANP LPO gas capacity is in Mil m³/d (10³ m³/d) -> divide by 1000 for Mm³/d (10⁶ m³/d).
-            "gas_capacity_mm3d": (parse_br_number(df[gas_cap_col]) / 1000.0)
-            if gas_cap_col
-            else pd.NA,
+            # ANP LPO gas capacity is already in Mil m³/d (10³ m³/d = e3m3/d).
+            "gas_capacity_e3m3d": parse_br_number(df[gas_cap_col]) if gas_cap_col else pd.NA,
             "export_system": df[cols["sistema de escoamento"]]
             if "sistema de escoamento" in cols
             else pd.NA,

@@ -11,7 +11,7 @@ Public oil & gas production data pipeline, geospatial store, and web visualizati
 All production and injection columns are stored as **calendar-day average rates** in `float32`:
 
 - **Liquids** (`oil_prod`, `condensate_prod`, `ngl_prod`, `water_prod`, `water_inj`): **`bbl/d`**
-- **Gases** (`gas_prod`, `gas_inj`, `co2_inj`): **`Mm³/d`** (SI `10⁶ m³/d`, metadata key `e6m3/d`)
+- **Gases** (`gas_prod`, `gas_inj`, `co2_inj`): **`e3m3/d`** (`10³ m³/d`, thousand m³/day)
 
 Geospatial tables are stored as Hilbert-sorted **GeoParquet 1.1** (`EPSG:4326`, with `bbox` covering column):
 

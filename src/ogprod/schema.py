@@ -1,8 +1,8 @@
 """Canonical schemas and validators for ogprod v2.
 
 Production and injection data live in a single wide PyArrow schema with
-``float32`` calendar-day average rates (``bbl/d`` for liquids, ``e6m3/d`` =
-SI ``Mm³/d`` for gases) and unit metadata on every rate field. Spatial entities
+``float32`` calendar-day average rates (``bbl/d`` for liquids, ``e3m3/d`` =
+10³ m³/d for gases) and unit metadata on every rate field. Spatial entities
 are separated into three typed GeoParquet 1.1 tables: ``fields`` (polygons),
 ``facilities`` (points — platforms/FPSOs), and ``wells`` (points).
 """
@@ -144,11 +144,11 @@ GEO_SPECS: dict[GeoKind, GeoTableSpec] = {
             "start_year",
             "water_depth_m",
             "oil_capacity_bpd",
-            "gas_capacity_mm3d",
+            "gas_capacity_e3m3d",
             "export_system",
             "geometry",
         ),
-        float32_columns=("water_depth_m", "oil_capacity_bpd", "gas_capacity_mm3d"),
+        float32_columns=("water_depth_m", "oil_capacity_bpd", "gas_capacity_e3m3d"),
         int32_columns=("start_year",),
         geometry_types=frozenset({"Point"}),
     ),

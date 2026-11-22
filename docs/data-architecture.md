@@ -69,14 +69,14 @@ Default local root: `$OGPROD_DATA` (fallback `$XDG_DATA_HOME/ogprod`, else `~/.l
 | `oil_prod` | `float32` | `bbl/d` | yes | Daily average crude oil production |
 | `condensate_prod` | `float32` | `bbl/d` | yes | Daily average condensate production |
 | `ngl_prod` | `float32` | `bbl/d` | yes | Daily average NGL production (e.g. Sodir) |
-| `gas_prod` | `float32` | `Mm³/d` (`10⁶ m³/d`) | yes | Daily average total gas production (associated + non-associated) |
+| `gas_prod` | `float32` | `e3m3/d` (`10³ m³/d`) | yes | Daily average total gas production (associated + non-associated) |
 | `water_prod` | `float32` | `bbl/d` | yes | Daily average produced water |
 | `water_inj` | `float32` | `bbl/d` | yes | Daily average water injection (secondary recovery + disposal) |
-| `gas_inj` | `float32` | `Mm³/d` (`10⁶ m³/d`) | yes | Daily average hydrocarbon gas injection |
-| `co2_inj` | `float32` | `Mm³/d` (`10⁶ m³/d`) | yes | Daily average CO₂ injection |
+| `gas_inj` | `float32` | `e3m3/d` (`10³ m³/d`) | yes | Daily average hydrocarbon gas injection |
+| `co2_inj` | `float32` | `e3m3/d` (`10³ m³/d`) | yes | Daily average CO₂ injection |
 
 Design rules:
-- **Gas unit clarity:** `gas_prod`, `gas_inj`, and `co2_inj` use **SI `Mm³/d` = million `m³/d` (`10⁶ m³/d`, key `"e6m3/d"`)**. Note that ANP CSV headers write `Mm³` for Brazilian *Mil m³* (`10³ m³`), so ANP gas values are divided by `1,000 × days_in_month` on parse.
+- **Gas unit clarity:** `gas_prod`, `gas_inj`, and `co2_inj` use **`e3m3/d`** (`10³ m³/d`, thousand `m³/day`). We avoid bare `Mm³/d` (ambiguous internationally: `10³ m³` in Brazil vs `10⁶ m³` in SI/Europe) and `km³/d` (cubic kilometer = `10⁹ m³` in SI). ANP's `Mm³` CSV columns (*Mil m³*) are already in `10³ m³`, so parsing simply divides by calendar `days_in_month`.
 - **`NULL` vs `0.0`:** `NULL` means unreported; `0.0` means reported zero.
 - **No double-counted rollups in Layer 1:** Well-level sources (ANP) store well rows carrying `field_id` and `facility_id`; field- and platform-level rates sum cleanly in SQL or Layer 2 `rollups/`. Field-level-only sources (Sodir) store `entity_type = "field"`.
 - **Upsert semantics:** Regulators restate prior months. Writing a batch replaces stored rows matching `(source, entity_type, entity_id, field_id, facility_id, period)` within each affected `(source, year)` partition, sorted by `(entity_type, entity_id, period)` and written atomically via temp file + `os.replace`.
@@ -96,7 +96,7 @@ All spatial tables are written as **GeoParquet 1.1** in **`EPSG:4326`**:
 `source`, `field_id`, `field_code`, `field_name`, `basin`, `region`, `environment`, `operator`, `status`, `primary_fluid`, `discovery_date`, `production_start_date`, `water_depth_m` (`float32`), `area_km2` (`float32`), `geometry`.
 
 #### `geo/facilities/source=<src>.parquet` (`Point` — Platforms, FPSOs, UEPs)
-`source`, `facility_id`, `facility_code`, `facility_name`, `facility_type`, `fields`, `basin`, `operator`, `status`, `start_year` (`int32`), `water_depth_m` (`float32`), `oil_capacity_bpd` (`float32`), `gas_capacity_mm3d` (`float32`), `export_system`, `geometry`.
+`source`, `facility_id`, `facility_code`, `facility_name`, `facility_type`, `fields`, `basin`, `operator`, `status`, `start_year` (`int32`), `water_depth_m` (`float32`), `oil_capacity_bpd` (`float32`), `gas_capacity_e3m3d` (`float32`), `export_system`, `geometry`.
 
 #### `geo/wells/source=<src>.parquet` (`Point`)
 `source`, `well_id`, `well_name`, `field_id`, `field_name`, `basin`, `region`, `environment`, `operator`, `status`, `lift_method`, `spud_date`, `completion_date`, `production_start`, `production_end`, `geometry`.
@@ -112,7 +112,7 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
 | Dataset | Live Endpoint | Notes | Target Table |
 |---|---|---|---|
 | Well production & injection (`mar` 1941–2026, `terra` 1941–2026) | `.../arquivos-producao-de-petroleo-e-gas-natural-nacional/{pm,pt}/**/*.csv` (127 files, discovered from page HTML) | Unified 21-column CSV; newer files wrap headers in `[...]`. Drops unused exotic injection columns (`vapor`, `polímeros`, `nitrogênio`, `outros`). | `production` |
-| Platforms / FPSOs (`lpo`) | `.../lpo/dados-abertos-plataformas-operacao.csv` (~20 KB) | Coordinates (`LATITUDE`/`LONGITUDE`), FPSO classification, water depth, oil (`bbl/d`) & gas (`Mil m³/d` → `Mm³/d`) capacities. | `geo/facilities` |
+| Platforms / FPSOs (`lpo`) | `.../lpo/dados-abertos-plataformas-operacao.csv` (~20 KB) | Coordinates (`LATITUDE`/`LONGITUDE`), FPSO classification, water depth, oil (`bbl/d`) & gas (`Mil m³/d` = `e3m3/d`) capacities. | `geo/facilities` |
 | Field polygons + metadata | WFS `BD_ANP:CAMPOS_PRODUCAO_SIRGAS` (`propertyName=...`) + `extracao-campo.csv` + `extracao-campo-devolvido.csv` | Polygons dissolved by field key; relinquished historical fields kept as metadata rows. | `geo/fields` |
 | Well coordinates + lifecycle | `informacoes-sobre-pocos/situacao-pocos-1939-2026.csv` (~6.4 MB, single file with DMS coordinates, status, lift method, dates) — or WFS `BD_ANP:POCOS_SIRGAS` (`propertyName=...`) | Drops unused columns immediately; DMS coordinates parsed cleanly to `EPSG:4326` `Point`. | `geo/wells` |
 

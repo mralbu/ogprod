@@ -99,18 +99,18 @@ def test_parse_anp_production_and_injection_rates() -> None:
     assert buz["facility_id"] == "FPSO ALMIRANTE BARROSO"
     assert buz["environment"] == "offshore"
     assert math.isclose(float(buz["oil_prod"]), 15898.73 * units.BBL_PER_M3 / 31, rel_tol=1e-4)
-    # 3100 e3m3 / 1000 / 31 == 0.1 Mm3/d
-    assert math.isclose(float(buz["gas_prod"]), 0.1, rel_tol=1e-4)
+    # 3100 e3m3 / 31 days == 100.0 e3m3/d
+    assert math.isclose(float(buz["gas_prod"]), 100.0, rel_tol=1e-4)
     # water_inj = (1589.87 + 317.97) m3 * BBL_PER_M3 / 31
     assert math.isclose(
         float(buz["water_inj"]), (1589.87 + 317.97) * units.BBL_PER_M3 / 31, rel_tol=1e-4
     )
-    assert math.isclose(float(buz["gas_inj"]), 620.0 / 1000.0 / 31, rel_tol=1e-4)
-    assert math.isclose(float(buz["co2_inj"]), 310.0 / 1000.0 / 31, rel_tol=1e-4)
+    assert math.isclose(float(buz["gas_inj"]), 620.0 / 31, rel_tol=1e-4)
+    assert math.isclose(float(buz["co2_inj"]), 310.0 / 31, rel_tol=1e-4)
 
     mnt = df.loc["7-MNT-1-BAS"]
     assert math.isclose(float(mnt["condensate_prod"]), 158.99 * units.BBL_PER_M3 / 31, rel_tol=1e-4)
-    assert math.isclose(float(mnt["gas_prod"]), 0.2, rel_tol=1e-4)
+    assert math.isclose(float(mnt["gas_prod"]), 200.0, rel_tol=1e-4)
 
 
 def test_parse_anp_merges_state_cross_join_and_warns_gas_gap() -> None:
@@ -124,7 +124,7 @@ def test_parse_anp_merges_state_cross_join_and_warns_gas_gap() -> None:
     assert row["facility_id"] == ""  # Não Informado normalized to empty key
     # Oil kept once (not doubled), gas recovered from the other copy.
     assert math.isclose(float(row["oil_prod"]), 158.99 * units.BBL_PER_M3 / 31, rel_tol=1e-4)
-    assert math.isclose(float(row["gas_prod"]), 31.0 / 1000.0 / 31, rel_tol=1e-4)
+    assert math.isclose(float(row["gas_prod"]), 1.0, rel_tol=1e-4)
 
 
 def test_parse_anp_rejects_conflicting_duplicate_rows() -> None:
@@ -172,7 +172,7 @@ def test_anp_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
     # Verify joins across production, facilities, fields, and wells.
     fac = db.facilities(source="anp")
     assert fac.loc[0, "facility_id"] == "FPSO ALMIRANTE BARROSO"
-    assert math.isclose(float(fac.loc[0, "gas_capacity_mm3d"]), 6.291, rel_tol=1e-4)
+    assert math.isclose(float(fac.loc[0, "gas_capacity_e3m3d"]), 6291.0, rel_tol=1e-4)
 
     wells = db.wells(source="anp").set_index("well_id")
     assert math.isclose(wells.loc["1-AP-1-AP"].geometry.y, -0.5, rel_tol=1e-6)
@@ -185,5 +185,5 @@ def test_anp_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
     # Verify manifest recorded SHA-256 and units.
     manifest = json.loads((tmp_path / "store" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["units"]["oil_prod"] == "bbl/d"
-    assert manifest["units"]["gas_prod"] == "e6m3/d"
+    assert manifest["units"]["gas_prod"] == "e3m3/d"
     assert "pm/producao-mar-2026.csv" in manifest["sources"]["anp"]["files"]

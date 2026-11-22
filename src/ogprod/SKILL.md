@@ -28,7 +28,7 @@ list every option.
 
 All rates in `production` are calendar-day averages stored as `float32`:
 - `oil_prod`, `condensate_prod`, `ngl_prod`, `water_prod`, `water_inj`: `bbl/d`
-- `gas_prod`, `gas_inj`, `co2_inj`: `Mm³/d` (`10⁶ m³/d`)
+- `gas_prod`, `gas_inj`, `co2_inj`: `e3m3/d` (`10³ m³/d`, thousand m³/day)
 
 ## Examples
 
