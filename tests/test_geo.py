@@ -14,7 +14,7 @@ from ogprod import geo, schema
 def test_write_geoparquet_drops_unused_columns_and_writes_v11_bbox(tmp_path: Path) -> None:
     gdf = gpd.GeoDataFrame(
         {
-            "source": ["anp", "anp", "anp"],
+            "source": ["brazil", "brazil", "brazil"],
             "facility_id": ["FPSO B", "FPSO A", "FPSO C"],
             "facility_name": ["FPSO B", "FPSO A", "FPSO C"],
             "oil_capacity_bpd": [180000.0, 225000.0, 150000.0],
@@ -52,7 +52,7 @@ def test_prepare_geo_repairs_invalid_polygon_and_reprojects() -> None:
     )
     assert not bowtie.is_valid
     gdf = gpd.GeoDataFrame(
-        {"source": ["anp"], "field_id": ["TUPI"], "field_name": ["TUPI"]},
+        {"source": ["brazil"], "field_id": ["TUPI"], "field_name": ["TUPI"]},
         geometry=[bowtie],
         crs="EPSG:3857",
     )

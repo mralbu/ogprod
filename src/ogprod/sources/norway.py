@@ -159,7 +159,7 @@ def _parse_fields_geojson(path: Path) -> gpd.GeoDataFrame:
     )
     out = gpd.GeoDataFrame(
         {
-            "source": "sodir",
+            "source": "norway",
             "field_id": dissolved["_fid"],
             "field_code": dissolved["_fid"],
             "field_name": dissolved[cols["fldname"]].astype("string"),
@@ -190,7 +190,7 @@ def _parse_facilities_geojson(path: Path) -> gpd.GeoDataFrame:
     fid = _clean_int_id(gdf[cols["fclnpdidfacility"]])
     out = gpd.GeoDataFrame(
         {
-            "source": "sodir",
+            "source": "norway",
             "facility_id": fid,
             "facility_code": fid,
             "facility_name": gdf[cols["fclname"]].astype("string"),
@@ -224,7 +224,7 @@ def _parse_wells_geojson(path: Path) -> gpd.GeoDataFrame:
     wid = _clean_int_id(gdf[cols["wlbnpdidwellbore"]])
     out = gpd.GeoDataFrame(
         {
-            "source": "sodir",
+            "source": "norway",
             "well_id": wid,
             "well_name": gdf[cols["wlbwellborename"]].astype("string"),
             "field_id": _clean_int_id(gdf[cols["fldnpdidfield"]])
@@ -255,10 +255,13 @@ def _parse_wells_geojson(path: Path) -> gpd.GeoDataFrame:
 
 
 @base.register
-class Sodir(base.Source):
+class Norway(base.Source):
     """Norway Sodir (ex-NPD) FactPages & FactMaps connector."""
 
-    name = "sodir"
+    name = "norway"
+    country = "Norway"
+    country_code = "NO"
+    publisher = "Sodir"
     entity_type = schema.EntityType.FIELD
     docs_url = _DOCS_URL
 
@@ -272,7 +275,9 @@ class Sodir(base.Source):
     ) -> list[base.RemoteFile]:
         """Return the single FactPages ``field_production_monthly`` CSV."""
         if environment is not None and environment.strip().lower() == "onshore":
-            raise ValueError("sodir covers Norwegian offshore fields only (no onshore data)")
+            raise ValueError(
+                "norway (Sodir) covers Norwegian offshore fields only (no onshore data)"
+            )
         del client, year, recent  # single full-history CSV covers all years
         return [
             base.RemoteFile(

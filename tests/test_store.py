@@ -17,7 +17,7 @@ from ogprod.store import load_geo, load_production, write_geo, write_production
 
 def _make_table(rows: list[tuple[str, date, float, float]]) -> pa.Table:
     return base.build_production_table(
-        source="anp",
+        source="brazil",
         entity_type=schema.EntityType.WELL,
         entity_id=pd.Series([r[0] for r in rows]),
         entity_name=pd.Series([r[0] for r in rows]),
@@ -46,7 +46,7 @@ def test_upsert_replaces_restated_month_and_isolates_other_years(tmp_path: Path)
     parts = write_production(initial, root=tmp_path)
     assert len(parts) == 2
 
-    part_2025 = tmp_path / "store" / "production" / "source=anp" / "year=2025" / "data.parquet"
+    part_2025 = tmp_path / "store" / "production" / "source=brazil" / "year=2025" / "data.parquet"
     bytes_2025_before = part_2025.read_bytes()
 
     # Restate 2026-01 and add 2026-02.
@@ -60,7 +60,7 @@ def test_upsert_replaces_restated_month_and_isolates_other_years(tmp_path: Path)
     assert len(rewritten) == 1
     assert part_2025.read_bytes() == bytes_2025_before
 
-    df = load_production(source="anp", root=tmp_path)
+    df = load_production(source="brazil", root=tmp_path)
     assert len(df) == 3
     jan_2026 = df.loc[df["period"] == pd.Timestamp("2026-01-01"), "oil_prod"].iloc[0]
     assert jan_2026 == 1250.0
@@ -74,7 +74,7 @@ def test_store_filters_sql_and_geo_coverage(tmp_path: Path) -> None:
     )
     fac = gpd.GeoDataFrame(
         {
-            "source": ["anp"],
+            "source": ["brazil"],
             "facility_id": ["FPSO A"],
             "facility_name": ["FPSO A"],
             "oil_capacity_bpd": [180000.0],
@@ -84,12 +84,12 @@ def test_store_filters_sql_and_geo_coverage(tmp_path: Path) -> None:
     )
     write_geo(fac, schema.GeoKind.FACILITIES, root=tmp_path)
 
-    filtered = db.production(source="anp", field_id="TUPI", start="2026-01", end="2026-01")
+    filtered = db.production(source="brazil", field_id="TUPI", start="2026-01", end="2026-01")
     assert len(filtered) == 1
     assert filtered["oil_prod"].dtype == "float32"
 
     assert len(db.production(field_id=[])) == 0
-    assert len(load_geo(schema.GeoKind.FACILITIES, source="anp", root=tmp_path)) == 1
+    assert len(load_geo(schema.GeoKind.FACILITIES, source="brazil", root=tmp_path)) == 1
     assert len(db.wells()) == 0
 
     joined = db.sql(
@@ -103,7 +103,7 @@ def test_store_filters_sql_and_geo_coverage(tmp_path: Path) -> None:
     assert joined["oil_capacity_bpd"].iloc[0] == 180000.0
 
     cov = db.coverage()
-    assert cov.loc[0, "source"] == "anp"
+    assert cov.loc[0, "source"] == "brazil"
     assert cov.loc[0, "rows"] == 1
     assert cov.loc[0, "facilities"] == 1
     assert cov.loc[0, "fields"] == 0

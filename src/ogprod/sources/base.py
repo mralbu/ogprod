@@ -257,6 +257,9 @@ class Source(ABC):
     """Abstract base class for a public oil & gas data connector."""
 
     name: str
+    country: str
+    country_code: str
+    publisher: str
     entity_type: schema.EntityType
     docs_url: str
 

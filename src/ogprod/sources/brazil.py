@@ -393,7 +393,7 @@ def _parse_facilities_csv(path: Path) -> gpd.GeoDataFrame:
 
     out = gpd.GeoDataFrame(
         {
-            "source": "anp",
+            "source": "brazil",
             "facility_id": fac_ids,
             "facility_code": df[cols["sigla da instalacao"]]
             if "sigla da instalacao" in cols
@@ -443,7 +443,7 @@ def _parse_fields_wfs(wfs_path: Path) -> gpd.GeoDataFrame:
 
     return gpd.GeoDataFrame(
         {
-            "source": "anp",
+            "source": "brazil",
             "field_id": dissolved["_field_id"],
             "field_code": dissolved[cols["cod_campo"]].astype("string")
             if "cod_campo" in cols
@@ -515,7 +515,7 @@ def _enrich_fields_from_csv(
     missing = meta.loc[~meta["field_id"].isin(enriched["field_id"])].copy()
     if len(missing) == 0:
         return enriched
-    missing["source"] = "anp"
+    missing["source"] = "brazil"
     extra = gpd.GeoDataFrame(
         missing,
         geometry=gpd.GeoSeries([None] * len(missing), crs=schema.GEO_CRS),
@@ -556,7 +556,7 @@ def _parse_wells_csv(path: Path) -> gpd.GeoDataFrame:
 
     out = gpd.GeoDataFrame(
         {
-            "source": "anp",
+            "source": "brazil",
             "well_id": names,
             "well_name": names,
             "field_id": field_id.mask(field_id == "", pd.NA),
@@ -590,10 +590,13 @@ def _parse_wells_csv(path: Path) -> gpd.GeoDataFrame:
 
 
 @base.register
-class ANP(base.Source):
+class Brazil(base.Source):
     """Brazil ANP open-data connector (1941-present)."""
 
-    name = "anp"
+    name = "brazil"
+    country = "Brazil"
+    country_code = "BR"
+    publisher = "ANP"
     entity_type = schema.EntityType.WELL
     docs_url = _PORTAL_URL
 

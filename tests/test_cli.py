@@ -29,9 +29,9 @@ def test_version() -> None:
 
 def test_sources_lists_all_connectors() -> None:
     out = invoke("sources")
-    assert "anp\twell\t" in out
-    assert "mexico\tfield\t" in out
-    assert "sodir\tfield\t" in out
+    assert "brazil\tBrazil\tANP\twell\t" in out
+    assert "mexico\tMexico\tSENER / CNIH\tfield\t" in out
+    assert "norway\tNorway\tSodir\tfield\t" in out
 
 
 def test_ingest_local_file_coverage_and_sql(tmp_path: Path) -> None:
@@ -40,17 +40,17 @@ def test_ingest_local_file_coverage_and_sql(tmp_path: Path) -> None:
 
     out = invoke(
         "ingest",
-        "anp",
+        "brazil",
         "--files",
         str(csv_path),
         "--no-geo",
         "--data-dir",
         str(data_dir),
     )
-    assert "anp: 2 rows" in out
+    assert "brazil: 2 rows" in out
 
     cov = invoke("coverage", "--data-dir", str(data_dir))
-    assert "anp" in cov
+    assert "brazil" in cov
     assert "2026-01-01" in cov
 
     res = invoke(

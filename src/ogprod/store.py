@@ -58,7 +58,7 @@ def _partition_path(root: Path, source: str, year: int) -> Path:
 
 
 def _geo_path(root: Path, kind: schema.GeoKind, source: str) -> Path:
-    return store_dir(root) / "geo" / kind.value / f"source={source}.parquet"
+    return store_dir(root) / "geo" / kind.value / f"{source}.parquet"
 
 
 def load_manifest(root: str | Path | None = None) -> dict[str, Any]:
@@ -202,9 +202,9 @@ def load_geo(
     """Load one geospatial table (``fields``, ``facilities``, or ``wells``)."""
     folder = store_dir(root) / "geo" / kind.value
     if source is not None:
-        files = [folder / f"source={source}.parquet"]
+        files = [folder / f"{source}.parquet"]
     elif folder.exists():
-        files = sorted(folder.glob("source=*.parquet"))
+        files = sorted(folder.glob("*.parquet"))
     else:
         files = []
     existing = [f for f in files if f.exists()]
@@ -332,7 +332,7 @@ def _register_store_views(con: duckdb.DuckDBPyConnection, root: Path) -> None:
 
     for kind in schema.GeoKind:
         folder = store_dir(root) / "geo" / kind.value
-        geo_files = sorted(folder.glob("source=*.parquet")) if folder.exists() else []
+        geo_files = sorted(folder.glob("*.parquet")) if folder.exists() else []
         if geo_files:
             con.register(kind.value, con.read_parquet([str(f) for f in geo_files]))
         else:
@@ -404,6 +404,10 @@ class Store:
 
         manifest = load_manifest(self.root)
         src_entry = manifest.setdefault("sources", {}).setdefault(source, {"files": {}})
+        src_entry["country"] = connector.country
+        src_entry["country_code"] = connector.country_code
+        src_entry["publisher"] = connector.publisher
+        src_entry["docs_url"] = connector.docs_url
 
         with tempfile.TemporaryDirectory(prefix="ogprod-") as tmp:
             work_dir = (self.root / "raw" / source) if keep_raw else Path(tmp)

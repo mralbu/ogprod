@@ -1,4 +1,4 @@
-"""Tests for the Brazil ANP connector (offline parsing, DMS coords, mock HTTP ingest)."""
+"""Tests for the Brazil (ANP) connector (offline parsing, DMS coords, mock HTTP ingest)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from ogprod import Store, schema, units
-from ogprod.sources import anp
+from ogprod.sources import brazil
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -78,13 +78,13 @@ def test_parse_dms_coord_exact_for_all_hemispheres(
     prefix = "-" if sign < 0 else ""
     text = f"{prefix}{deg:02d}:{minutes:02d}:{seconds:06.3f}".replace(".", ",")
     expected = sign * (deg + minutes / 60.0 + seconds / 3600.0)
-    parsed = anp.parse_dms_coord(text)
+    parsed = brazil.parse_dms_coord(text)
     assert parsed is not None
     assert math.isclose(parsed, expected, rel_tol=1e-6, abs_tol=1e-6)
 
 
-def test_parse_anp_production_and_injection_rates() -> None:
-    connector = anp.ANP()
+def test_parse_brazil_production_and_injection_rates() -> None:
+    connector = brazil.Brazil()
     table = connector.parse_production(DATA_DIR / "anp_mar_2026_sample.csv")
     df = table.to_pandas().set_index("entity_id")
 
@@ -95,6 +95,7 @@ def test_parse_anp_production_and_injection_rates() -> None:
 
     # Jan 2026 has 31 days. 15898.73 m3 == 100,000 bbl -> 100,000 / 31 bbl/d.
     buz = df.loc["7-BUZ-1-RJS"]
+    assert buz["source"] == "brazil"
     assert buz["field_id"] == "BUZIOS"
     assert buz["facility_id"] == "FPSO ALMIRANTE BARROSO"
     assert buz["environment"] == "offshore"
@@ -113,8 +114,8 @@ def test_parse_anp_production_and_injection_rates() -> None:
     assert math.isclose(float(mnt["gas_prod"]), 200.0, rel_tol=1e-4)
 
 
-def test_parse_anp_merges_state_cross_join_and_warns_gas_gap() -> None:
-    connector = anp.ANP()
+def test_parse_brazil_merges_state_cross_join_and_warns_gas_gap() -> None:
+    connector = brazil.Brazil()
     with pytest.warns(UserWarning, match="2003-07..2005-06"):
         table = connector.parse_production(DATA_DIR / "anp_2004_duplicate_sample.csv")
     df = table.to_pandas()
@@ -127,14 +128,14 @@ def test_parse_anp_merges_state_cross_join_and_warns_gas_gap() -> None:
     assert math.isclose(float(row["gas_prod"]), 1.0, rel_tol=1e-4)
 
 
-def test_parse_anp_rejects_conflicting_duplicate_rows() -> None:
+def test_parse_brazil_rejects_conflicting_duplicate_rows() -> None:
     raw_text = (DATA_DIR / "anp_2004_duplicate_sample.csv").read_text(encoding="utf-8")
     bad_csv = raw_text.replace('"158,99","0,00","0,000"', '"999,00","0,00","0,000"')
     with pytest.raises(schema.SchemaError, match="conflicting duplicate"):
-        anp.ANP().parse_production(io.BytesIO(bad_csv.encode("utf-8")))
+        brazil.Brazil().parse_production(io.BytesIO(bad_csv.encode("utf-8")))
 
 
-def test_anp_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
+def test_brazil_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
     portal_html = (
         '<a href="https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/'
         "arquivos-fase-de-desenvolvimento-e-producao/"
@@ -161,29 +162,37 @@ def test_anp_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     db = Store(tmp_path)
-    summary = db.ingest("anp", year=2026, client=client)
+    summary = db.ingest("brazil", year=2026, client=client)
 
     assert summary.files_ingested == 1
     assert summary.production_rows == 2
     assert summary.geo_counts == {"fields": 2, "facilities": 1, "wells": 3}
     # Lean default: raw/ directory is NOT kept on disk.
     assert not (tmp_path / "raw").exists()
+    # Clean country-named GeoParquet files.
+    assert (tmp_path / "store" / "geo" / "fields" / "brazil.parquet").exists()
+    assert (tmp_path / "store" / "geo" / "facilities" / "brazil.parquet").exists()
+    assert (tmp_path / "store" / "geo" / "wells" / "brazil.parquet").exists()
 
     # Verify joins across production, facilities, fields, and wells.
-    fac = db.facilities(source="anp")
+    fac = db.facilities(source="brazil")
     assert fac.loc[0, "facility_id"] == "FPSO ALMIRANTE BARROSO"
     assert math.isclose(float(fac.loc[0, "gas_capacity_e3m3d"]), 6291.0, rel_tol=1e-4)
 
-    wells = db.wells(source="anp").set_index("well_id")
+    wells = db.wells(source="brazil").set_index("well_id")
     assert math.isclose(wells.loc["1-AP-1-AP"].geometry.y, -0.5, rel_tol=1e-6)
     assert wells.loc["1-NO-COORD-BA"].geometry is None
 
-    fields = db.fields(source="anp").set_index("field_id")
+    fields = db.fields(source="brazil").set_index("field_id")
     assert fields.loc["BUZIOS", "region"] == "Rio de Janeiro"
     assert fields.loc["CANDEIAS HIST"].geometry is None
 
-    # Verify manifest recorded SHA-256 and units.
+    # Verify manifest recorded SHA-256, publisher attribution, and units.
     manifest = json.loads((tmp_path / "store" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["units"]["oil_prod"] == "bbl/d"
     assert manifest["units"]["gas_prod"] == "e3m3/d"
-    assert "pm/producao-mar-2026.csv" in manifest["sources"]["anp"]["files"]
+    br_meta = manifest["sources"]["brazil"]
+    assert br_meta["country"] == "Brazil"
+    assert br_meta["country_code"] == "BR"
+    assert br_meta["publisher"] == "ANP"
+    assert "pm/producao-mar-2026.csv" in br_meta["files"]

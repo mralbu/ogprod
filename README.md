@@ -15,24 +15,24 @@ All production and injection columns are stored as **calendar-day average rates*
 
 Geospatial tables are stored as Hilbert-sorted **GeoParquet 1.1** (`EPSG:4326`, with `bbox` covering column):
 
-- `store/geo/fields/source=<src>.parquet` (`Polygon` / `MultiPolygon`)
-- `store/geo/facilities/source=<src>.parquet` (`Point` — platforms / FPSOs)
-- `store/geo/wells/source=<src>.parquet` (`Point`)
+- `store/geo/fields/<source>.parquet` (`Polygon` / `MultiPolygon`, e.g. `brazil.parquet`)
+- `store/geo/facilities/<source>.parquet` (`Point` — platforms / FPSOs)
+- `store/geo/wells/<source>.parquet` (`Point`)
 
 ## Built-in Sources
 
-| Source | Country / Regulator | Production Grain | GeoParquet 1.1 Layers |
-|---|---|---|---|
-| `anp` | Brazil — ANP (1941–present) | Well (oil, cond, gas, water + water/gas/CO₂ inj) | Fields, FPSOs/platforms (with capacities), wells |
-| `sodir` | Norway — Sodir (1971–present) | Field (oil, cond, NGL, gas, water) | Fields, facilities/platforms, wellbores |
-| `mexico` | Mexico — SENER / CNIH SIH (1960–present) | Field (default) + well CSV/ZIP parser | Fields, installations/platforms, wells |
+| Source | Country | Publisher | Production Grain | GeoParquet 1.1 Layers |
+|---|---|---|---|---|
+| `brazil` | Brazil (`BR`) | ANP (1941–present) | Well (oil, cond, gas, water + water/gas/CO₂ inj) | Fields, FPSOs/platforms (with capacities), wells |
+| `norway` | Norway (`NO`) | Sodir (1971–present) | Field (oil, cond, NGL, gas, water) | Fields, facilities/platforms, wellbores |
+| `mexico` | Mexico (`MX`) | SENER / CNIH SIH (1960–present) | Field (default) + well CSV/ZIP parser | Fields, installations/platforms, wells |
 
 ## Quickstart
 
 ```sh
 uv run ogprod sources
-uv run ogprod ingest anp --year 2026 --data-dir ./data
-uv run ogprod ingest sodir --data-dir ./data
+uv run ogprod ingest brazil --year 2026 --data-dir ./data
+uv run ogprod ingest norway --data-dir ./data
 uv run ogprod ingest mexico --data-dir ./data
 uv run ogprod coverage --data-dir ./data
 uv run ogprod sql "SELECT source, field_name, round(sum(oil_prod), 0) AS oil_bpd FROM production WHERE period = '2025-01-01' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 10" --data-dir ./data
@@ -44,11 +44,11 @@ Python API:
 import ogprod
 
 db = ogprod.Store("./data")
-db.ingest("anp", year=2026)
-db.ingest("sodir")
+db.ingest("brazil", year=2026)
+db.ingest("norway")
 db.ingest("mexico")
 
-df = db.production(source="anp", start="2026-01")
+df = db.production(source="brazil", start="2026-01")
 fields = db.fields()  # GeoParquet 1.1 polygons
 facilities = db.facilities()  # GeoParquet 1.1 FPSOs/platforms
 wells = db.wells()  # GeoParquet 1.1 well points

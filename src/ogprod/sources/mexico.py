@@ -423,6 +423,9 @@ class Mexico(base.Source):
     """Mexico SENER / CNIH (ex-CNH) SIH production and Mapa Hidrocarburos connector."""
 
     name = "mexico"
+    country = "Mexico"
+    country_code = "MX"
+    publisher = "SENER / CNIH"
     entity_type = schema.EntityType.FIELD
     docs_url = _DOCS_URL
 

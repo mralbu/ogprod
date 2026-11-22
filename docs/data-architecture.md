@@ -19,9 +19,9 @@ Regulator Portals (CSV / WFS / GeoJSON — requesting only needed columns where 
 │ Layer 1 — Canonical Store  (data/store/)                                │
 │   manifest.json                                    (URLs, SHA-256, cov) │
 │   production/source=<src>/year=<yyyy>/data.parquet (wide, float32, ZSTD)│
-│   geo/wells/source=<src>.parquet                   (GeoParquet 1.1)     │
-│   geo/fields/source=<src>.parquet                  (GeoParquet 1.1)     │
-│   geo/facilities/source=<src>.parquet              (GeoParquet 1.1)     │
+│   geo/wells/<src>.parquet                          (GeoParquet 1.1)     │
+│   geo/fields/<src>.parquet                         (GeoParquet 1.1)     │
+│   geo/facilities/<src>.parquet                     (GeoParquet 1.1)     │
 └─────────────────────────────────────────────────────────────────────────┘
         │
         ▼  `ogprod export-web` (read-only derived extracts for static hosting)
@@ -37,11 +37,11 @@ Regulator Portals (CSV / WFS / GeoJSON — requesting only needed columns where 
 ### Space-saving choices
 
 - **No permanent raw hoard by default:** `ingest` streams remote files to a temporary directory, projects strictly the canonical columns, writes compressed Parquet/GeoParquet, and deletes the temporary raw file (`--keep-raw` is available if you want raw files retained for inspection).
-- **WFS column projection:** GeoServer WFS queries request only the required attributes via `propertyName=...`, and parsers drop any unused upstream fields immediately.
+- **WFS / ArcGIS column projection:** GeoServer WFS queries request only the required attributes via `propertyName=...`, FactMaps ArcGIS queries use `outFields=...`, and parsers drop any unused upstream fields immediately.
 - **`float32` rates & metrics + ZSTD:** All production/injection rates and physical dimensions (`water_depth_m`, `area_km2`, capacities) use `float32` (~7.2 significant digits — far finer than meter accuracy; DuckDB accumulates `SUM(FLOAT)` in `float64`), paired with ZSTD level-6 compression and dictionary-encoded strings.
-- **Incremental refreshes via `manifest.json`:** Records `(url, sha256, bytes, ingested_at)` per source file so historical years aren't re-downloaded unless `--refresh` is requested.
+- **Incremental refreshes via `manifest.json`:** Records `(url, sha256, bytes, ingested_at)` and publisher attribution (`country`, `country_code`, `publisher`, `docs_url`) per source so historical years aren't re-downloaded unless `--refresh` is requested.
 
-Default local root: `$OGPROD_DATA` (fallback `$XDG_DATA_HOME/ogprod`, else `~/.local/share/ogprod`). Inside a repo checkout, `--data-dir ./data` overrides it (`data/` is gitignored).
+Default local root: `$OGPROD_DATA` (fallback `$XDG_DATA_HOME/ogprod`, else `~/.local/share/ogprod`). Inside a repo checkout, `--data-dir ./data` overrides it (`/data/` is gitignored).
 
 ---
 
@@ -53,7 +53,7 @@ Default local root: `$OGPROD_DATA` (fallback `$XDG_DATA_HOME/ogprod`, else `~/.l
 
 | Column | Arrow Type | Unit | Nullable | Description |
 |---|---|---|---|---|
-| `source` | `string` | — | no | Connector ID (`"anp"`, `"sodir"`, `"mexico"`) |
+| `source` | `string` | — | no | Country / jurisdiction slug (`"brazil"`, `"norway"`, `"mexico"`; future sub-national sources like `"us-gom"`) |
 | `entity_type` | `string` | — | no | Reporting grain: `"well"` or `"field"` |
 | `entity_id` | `string` | — | no | Source-native identifier (`Poço` for ANP, `NPDID` for Sodir) |
 | `entity_name` | `string` | — | no | Human-readable entity name |
@@ -78,12 +78,12 @@ Default local root: `$OGPROD_DATA` (fallback `$XDG_DATA_HOME/ogprod`, else `~/.l
 Design rules:
 - **Gas unit clarity:** `gas_prod`, `gas_inj`, and `co2_inj` use **`e3m3/d`** (`10³ m³/d`, thousand `m³/day`). We avoid bare `Mm³/d` (ambiguous internationally: `10³ m³` in Brazil vs `10⁶ m³` in SI/Europe) and `km³/d` (cubic kilometer = `10⁹ m³` in SI). ANP's `Mm³` CSV columns (*Mil m³*) are already in `10³ m³`, so parsing simply divides by calendar `days_in_month`.
 - **`NULL` vs `0.0`:** `NULL` means unreported; `0.0` means reported zero.
-- **No double-counted rollups in Layer 1:** Well-level sources (ANP) store well rows carrying `field_id` and `facility_id`; field- and platform-level rates sum cleanly in SQL or Layer 2 `rollups/`. Field-level-only sources (Sodir) store `entity_type = "field"`.
-- **Upsert semantics:** Regulators restate prior months. Writing a batch replaces stored rows matching `(source, entity_type, entity_id, field_id, facility_id, period)` within each affected `(source, year)` partition, sorted by `(entity_type, entity_id, period)` and written atomically via temp file + `os.replace`.
+- **No double-counted rollups in Layer 1:** Well-level sources (Brazil/ANP) store well rows carrying `field_id` and `facility_id`; field- and platform-level rates sum cleanly in SQL or Layer 2 `rollups/`. Field-level-only sources (Norway/Sodir) store `entity_type = "field"`.
+- **Upsert semantics:** Regulators restate prior months. Writing a batch replaces stored rows matching `(source, entity_type, entity_id, field_id, facility_id, period)` within each affected `(source, year)` partition, sorted by `(entity_type, entity_id, period)` and written atomically via temp file + `Path.replace`.
 
 ---
 
-### 2.2 Spatial / Entity Tables (`store/geo/<kind>/source=<src>.parquet`)
+### 2.2 Spatial / Entity Tables (`store/geo/<kind>/<source>.parquet`)
 
 All spatial tables are written as **GeoParquet 1.1** in **`EPSG:4326`**:
 - Invalid polygons repaired with `make_valid()`.
@@ -92,13 +92,13 @@ All spatial tables are written as **GeoParquet 1.1** in **`EPSG:4326`**:
 - Only canonical columns are kept — unused GeoServer/CSV columns are dropped.
 - Non-null geometries are sorted by **Hilbert curve distance** and written with a GeoParquet 1.1 **`bbox` covering struct** (`{xmin, ymin, xmax, ymax}`) and ZSTD level-6 compression.
 
-#### `geo/fields/source=<src>.parquet` (`Polygon` / `MultiPolygon`)
+#### `geo/fields/<source>.parquet` (`Polygon` / `MultiPolygon`)
 `source`, `field_id`, `field_code`, `field_name`, `basin`, `region`, `environment`, `operator`, `status`, `primary_fluid`, `discovery_date`, `production_start_date`, `water_depth_m` (`float32`), `area_km2` (`float32`), `geometry`.
 
-#### `geo/facilities/source=<src>.parquet` (`Point` — Platforms, FPSOs, UEPs)
+#### `geo/facilities/<source>.parquet` (`Point` — Platforms, FPSOs, UEPs)
 `source`, `facility_id`, `facility_code`, `facility_name`, `facility_type`, `fields`, `basin`, `operator`, `status`, `start_year` (`int32`), `water_depth_m` (`float32`), `oil_capacity_bpd` (`float32`), `gas_capacity_e3m3d` (`float32`), `export_system`, `geometry`.
 
-#### `geo/wells/source=<src>.parquet` (`Point`)
+#### `geo/wells/<source>.parquet` (`Point`)
 `source`, `well_id`, `well_name`, `field_id`, `field_name`, `basin`, `region`, `environment`, `operator`, `status`, `lift_method`, `spud_date`, `completion_date`, `production_start`, `production_end`, `geometry`.
 
 ---

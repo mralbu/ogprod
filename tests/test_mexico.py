@@ -153,6 +153,7 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
 
     assert summary.production_rows == 2
     assert summary.geo_counts == {"fields": 1, "facilities": 1, "wells": 1}
+    assert (tmp_path / "data" / "store" / "geo" / "fields" / "mexico.parquet").exists()
 
     fields = db.fields(source="mexico").set_index("field_id")
     assert fields.loc["MALOOB", "environment"] == "offshore"
@@ -167,5 +168,9 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
     assert wells.loc["CHINWOL-1EXP", "field_id"] == "CHINWOL"
 
     manifest = json.loads((tmp_path / "data" / "store" / "manifest.json").read_text("utf-8"))
-    assert "PRODUCCION_CAMPOS.csv" in manifest["sources"]["mexico"]["files"]
+    mx_meta = manifest["sources"]["mexico"]
+    assert mx_meta["country"] == "Mexico"
+    assert mx_meta["country_code"] == "MX"
+    assert mx_meta["publisher"] == "SENER / CNIH"
+    assert "PRODUCCION_CAMPOS.csv" in mx_meta["files"]
     assert schema.GeoKind.FIELDS.value in summary.geo_counts

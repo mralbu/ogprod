@@ -31,7 +31,7 @@ def test_normalize_key_accents_and_none() -> None:
 
 def _valid_production_table(**overrides: object) -> pa.Table:
     cols: dict[str, object] = {
-        "source": ["anp"],
+        "source": ["brazil"],
         "entity_type": ["well"],
         "entity_id": ["7-TPI-1-RJS"],
         "entity_name": ["7-TPI-1-RJS"],
@@ -85,19 +85,19 @@ def test_validate_production_rejects_bad_day_duplicates_and_float64() -> None:
 
 def test_validate_geo_rejects_wrong_geometry_crs_and_bounds() -> None:
     bad_geom = schema.empty_geo(schema.GeoKind.WELLS)
-    bad_geom.loc[0, ["source", "well_id", "well_name"]] = ["anp", "W1", "W1"]
+    bad_geom.loc[0, ["source", "well_id", "well_name"]] = ["brazil", "W1", "W1"]
     bad_geom.loc[0, "geometry"] = shapely.box(-42, -24, -41, -23)
     with pytest.raises(schema.SchemaError, match="geometry must be"):
         schema.validate_geo(bad_geom, schema.GeoKind.WELLS)
 
     out_of_bounds = schema.empty_geo(schema.GeoKind.FACILITIES)
-    out_of_bounds.loc[0, ["source", "facility_id", "facility_name"]] = ["anp", "F1", "F1"]
+    out_of_bounds.loc[0, ["source", "facility_id", "facility_name"]] = ["brazil", "F1", "F1"]
     out_of_bounds.loc[0, "geometry"] = shapely.Point(500000.0, 7500000.0)
     with pytest.raises(schema.SchemaError, match="outside lon/lat bounds"):
         schema.validate_geo(out_of_bounds, schema.GeoKind.FACILITIES)
 
     wrong_crs = gpd.GeoDataFrame(
-        {"source": ["anp"], "well_id": ["W1"], "well_name": ["W1"]},
+        {"source": ["brazil"], "well_id": ["W1"], "well_name": ["W1"]},
         geometry=[shapely.Point(-42.0, -24.0)],
         crs="EPSG:3857",
     )

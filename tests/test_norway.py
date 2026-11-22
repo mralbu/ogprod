@@ -1,7 +1,8 @@
-"""Tests for Norway Sodir connector (field production + FactMaps fields/facilities/wells)."""
+"""Tests for Norway (Sodir) connector (field production + FactMaps fields/facilities/wells)."""
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -9,7 +10,7 @@ import httpx
 import pytest
 
 from ogprod import Store, units
-from ogprod.sources import sodir
+from ogprod.sources import norway
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -91,8 +92,8 @@ SODIR_WELLS_GEOJSON = {
 }
 
 
-def test_parse_sodir_production_units_and_schema() -> None:
-    table = sodir.Sodir().parse_production(DATA_DIR / "sodir_field_production_sample.csv")
+def test_parse_norway_production_units_and_schema() -> None:
+    table = norway.Norway().parse_production(DATA_DIR / "sodir_field_production_sample.csv")
     df = table.to_pandas().set_index("entity_id")
 
     assert len(df) == 2
@@ -101,6 +102,7 @@ def test_parse_sodir_production_units_and_schema() -> None:
 
     # Jan 2026 = 31 days.
     js = df.loc["26376286"]
+    assert js["source"] == "norway"
     assert js["entity_type"] == "field"
     assert js["field_id"] == "26376286"
     assert js["environment"] == "offshore"
@@ -116,14 +118,14 @@ def test_parse_sodir_production_units_and_schema() -> None:
     assert math.isclose(float(troll["gas_prod"]), 100_000.0, rel_tol=1e-4)
 
 
-def test_sodir_rejects_onshore_and_foreign_csv() -> None:
+def test_norway_rejects_onshore_and_foreign_csv() -> None:
     with pytest.raises(ValueError, match="offshore"):
-        sodir.Sodir().discover_production(environment="onshore")
+        norway.Norway().discover_production(environment="onshore")
     with pytest.raises(ValueError, match="not a Sodir"):
-        sodir.Sodir().parse_production(DATA_DIR / "anp_mar_2026_sample.csv")
+        norway.Norway().parse_production(DATA_DIR / "anp_mar_2026_sample.csv")
 
 
-def test_sodir_end_to_end_mock_ingest(tmp_path: Path) -> None:
+def test_norway_end_to_end_mock_ingest(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         if "field_production_monthly" in url:
@@ -140,17 +142,24 @@ def test_sodir_end_to_end_mock_ingest(tmp_path: Path) -> None:
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     db = Store(tmp_path)
-    summary = db.ingest("sodir", client=client)
+    summary = db.ingest("norway", client=client)
 
     assert summary.production_rows == 2
     assert summary.geo_counts == {"fields": 2, "facilities": 1, "wells": 1}
+    assert (tmp_path / "store" / "geo" / "fields" / "norway.parquet").exists()
 
-    fields = db.fields(source="sodir").set_index("field_id")
+    fields = db.fields(source="norway").set_index("field_id")
     assert fields.loc["26376286", "discovery_date"] == "2010-01-01"
     assert fields.loc["46437"].geometry is None
 
-    fac = db.facilities(source="sodir").set_index("facility_id")
+    fac = db.facilities(source="norway").set_index("facility_id")
     assert fac.loc["271245", "start_year"] == 1988
 
-    wells = db.wells(source="sodir").set_index("well_id")
+    wells = db.wells(source="norway").set_index("well_id")
     assert wells.loc["2", "field_id"] == "26376286"
+
+    manifest = json.loads((tmp_path / "store" / "manifest.json").read_text(encoding="utf-8"))
+    no_meta = manifest["sources"]["norway"]
+    assert no_meta["country"] == "Norway"
+    assert no_meta["country_code"] == "NO"
+    assert no_meta["publisher"] == "Sodir"

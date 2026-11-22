@@ -34,7 +34,10 @@ def list_sources() -> None:
     """List registered data source connectors."""
     for name in sources.available():
         connector = sources.get(name)
-        click.echo(f"{name}\t{connector.entity_type.value}\t{connector.docs_url}")
+        click.echo(
+            f"{name}\t{connector.country}\t{connector.publisher}\t"
+            f"{connector.entity_type.value}\t{connector.docs_url}"
+        )
 
 
 @cli.command()
