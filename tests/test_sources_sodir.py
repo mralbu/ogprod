@@ -1,7 +1,7 @@
 import json
 
 import geopandas as gpd
-import httpx
+import httpx2
 import pandas as pd
 import pytest
 from shapely.geometry import Polygon
@@ -210,7 +210,7 @@ def test_parse_entities_rejects_other_files(tmp_path):
 def test_fetch_entities_downloads_field_geojson(tmp_path):
     def handler(request):
         assert "MapServer/7100/query" in str(request.url)
-        return httpx.Response(
+        return httpx2.Response(
             200,
             json={
                 "type": "FeatureCollection",
@@ -227,7 +227,7 @@ def test_fetch_entities_downloads_field_geojson(tmp_path):
             },
         )
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = httpx2.Client(transport=httpx2.MockTransport(handler))
     paths = get("sodir").fetch_entities(tmp_path, client=client)
     assert len(paths) == 1
     with paths[0].open() as fh:

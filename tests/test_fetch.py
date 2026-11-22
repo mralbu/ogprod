@@ -1,6 +1,6 @@
 """Offline tests for connector ``fetch`` implementations.
 
-All HTTP is served by ``httpx.MockTransport`` with canned publisher responses,
+All HTTP is served by ``httpx2.MockTransport`` with canned publisher responses,
 so these tests exercise the real URL discovery, download, and unpacking logic
 without touching the network.
 """
@@ -8,7 +8,7 @@ without touching the network.
 import io
 import zipfile
 
-import httpx
+import httpx2
 import pytest
 
 from ogprod.sources import anp, argentina, get
@@ -58,16 +58,16 @@ def argentina_csv(data_dir) -> bytes:
 
 
 @pytest.fixture
-def argentina_client(argentina_csv) -> httpx.Client:
-    def handler(request: httpx.Request) -> httpx.Response:
+def argentina_client(argentina_csv) -> httpx2.Client:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/api/3/action/package_show":
             assert request.url.params["id"] == "produccion-de-petroleo-y-gas-por-pozo"
-            return httpx.Response(200, json=ARG_PACKAGE_SHOW)
+            return httpx2.Response(200, json=ARG_PACKAGE_SHOW)
         if request.url.path.endswith("/download/pozos-2024.csv"):
-            return httpx.Response(200, content=argentina_csv)
-        return httpx.Response(404)
+            return httpx2.Response(200, content=argentina_csv)
+        return httpx2.Response(404)
 
-    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    return httpx2.Client(transport=httpx2.MockTransport(handler), follow_redirects=True)
 
 
 def test_argentina_fetch_resolves_year_resource(tmp_path, argentina_client):
@@ -85,15 +85,15 @@ def test_argentina_fetch_unknown_year(tmp_path, argentina_client):
 
 
 @pytest.fixture
-def sodir_client(data_dir) -> httpx.Client:
+def sodir_client(data_dir) -> httpx2.Client:
     csv = (data_dir / "sodir_field_production_monthly_sample.csv").read_bytes()
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.url.host == "factpages.sodir.no"
         assert "field_production_monthly" in str(request.url)
-        return httpx.Response(200, content=csv, headers={"content-type": "text/csv"})
+        return httpx2.Response(200, content=csv, headers={"content-type": "text/csv"})
 
-    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    return httpx2.Client(transport=httpx2.MockTransport(handler), follow_redirects=True)
 
 
 def test_sodir_fetch_downloads_full_table(tmp_path, sodir_client):
@@ -124,7 +124,7 @@ ANP_PAGE = f"""
 
 
 @pytest.fixture
-def anp_client(data_dir) -> httpx.Client:
+def anp_client(data_dir) -> httpx2.Client:
     csv = (data_dir / "anp_pocos_sample.csv").read_bytes()
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -133,12 +133,12 @@ def anp_client(data_dir) -> httpx.Client:
         archive.writestr("leia-me.txt", "notas")
     zip_bytes = buffer.getvalue()
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith(".zip"):
-            return httpx.Response(200, content=zip_bytes)
-        return httpx.Response(200, text=ANP_PAGE)
+            return httpx2.Response(200, content=zip_bytes)
+        return httpx2.Response(200, text=ANP_PAGE)
 
-    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    return httpx2.Client(transport=httpx2.MockTransport(handler), follow_redirects=True)
 
 
 def test_anp_fetch_extracts_monthly_zip(tmp_path, anp_client):

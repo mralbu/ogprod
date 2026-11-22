@@ -24,8 +24,8 @@ ogprod.available()
 # ['anp', 'argentina', 'sodir']
 
 db = ogprod.Store()          # ~/.local/share/ogprod/store, or $OGPROD_STORE
-db.ingest("sodir")           # fetch + parse + upsert, plus field ring fences
-db.ingest("anp", year=2023, month=6)
+db.ingest("sodir")           # sync prebuilt Parquet + field ring fences from mirror
+db.ingest("anp", year=2023)  # or pass origin="publisher" to fetch live from the regulator
 
 oil = db.production(source="anp", product="oil", start="2023-06")
 oil.groupby("field")["volume"].sum()   # one row per (well, month, product); always m³
@@ -37,27 +37,34 @@ db.sql("SELECT source, sum(volume) FROM production GROUP BY source")
 ogprod.convert(1.0, "m3", "bbl")       # oilfield units at the edge
 ```
 
-`ingest` resolves publishers' overlapping files for you (ANP's pré-sal file
-restates part of the mar file; concatenating them by hand double-counts), and
-re-running it picks up restated history. Entities (well coordinates, field
-ring fences) come in on a source's first ingest; `refresh=True` re-downloads
-them. Files you downloaded yourself go in with `db.ingest("anp", files=[...])`.
+By default `ingest` pulls prebuilt zstd Parquet partitions and entities from
+the public Hugging Face mirror (`mralbu/ogprod`, overridable via `mirror=` or
+`$OGPROD_MIRROR`) over plain anonymous HTTPS — no account or token required —
+skipping local files whose SHA-256 already matches. Pass `origin="publisher"`
+to fetch live raw files directly from a regulator portal (e.g.
+`db.ingest("anp", origin="publisher", year=2023, month=6)`), or `files=[...]`
+to ingest raw files you downloaded yourself. On publisher/file ingests,
+`ogprod` resolves overlapping files automatically (ANP's pré-sal file restates
+part of the mar file) and upserts restated history cleanly.
 
 The same from the shell (`just ingest ...` in this repo):
 
 ```sh
 python -m ogprod ingest sodir
-python -m ogprod ingest anp --year 2023 --month 6
+python -m ogprod ingest anp --year 2022 2023
+python -m ogprod ingest anp --origin publisher --year 2023 --month 6
 python -m ogprod coverage
 ```
 
-The store is plain hive-partitioned Parquet (GeoParquet for entities), so
-DuckDB, pandas or QGIS can also open the files directly.
+The store is plain hive-partitioned zstd Parquet (GeoParquet for entities), so
+DuckDB, pandas or QGIS can also open the files directly — and power users can
+query the mirror directly from DuckDB over HTTPS (see
+[docs/downloading.md](docs/downloading.md)).
 
 Worked examples live in [notebooks/](notebooks/) — one per source, from fetch
 to charts (`uv run --group notebooks jupyter lab` to run them). The canonical
-schema, unit handling, and how to add a new source connector are documented in
-[docs/design.md](docs/design.md).
+schema, unit handling, mirror contract, and how to add a new source connector
+are documented in [docs/design.md](docs/design.md).
 
 ## Built-in sources
 
@@ -84,7 +91,7 @@ Requires [uv](https://docs.astral.sh/uv/) and [just](https://just.systems/)
 ```sh
 just sync        # install dependencies
 just fetch ...   # download raw files into data/, e.g. `just fetch sodir`
-just ingest ...  # fetch + parse + upsert into the store, e.g. `just ingest sodir`
+just ingest ...  # sync from mirror or ingest into the store, e.g. `just ingest sodir`
 just test        # pytest
 just lint        # ruff check + format check
 just fmt         # auto-format
@@ -98,17 +105,21 @@ Project layout:
 src/ogprod/
   schema.py        # canonical production + entities schemas, validation
   units.py         # volume unit conversion (everything stored in m³)
-  store.py         # Store: ingest pipeline, Parquet/GeoParquet upsert, DuckDB queries
+  mirror.py        # HF mirror layout, manifest v1, verified download, sanity-gate helpers
+  store.py         # Store: mirror/publisher ingest, zstd Parquet/GeoParquet upsert, DuckDB queries
   __main__.py      # `python -m ogprod ingest|coverage|fetch ...` CLI
   sources/
     base.py        # Source ABC, registry, canonical-frame/entities builders
     anp.py         # Brazil, well-level (+ well cadastre entities)
     argentina.py   # Argentina, well-level (+ wells listing entities)
     sodir.py       # Norway, field-level (+ FactMaps ring-fence entities)
+scripts/
+  publish_mirror.py  # shared maintainer/CI tool to sanity-gate and push to HF mirror
+  ci_refresh.py      # fault-isolated weekly rolling refresh driver
 tests/             # pytest suite with fixture files mirroring real formats
 notebooks/         # executed example notebooks, one per source
 docs/
-  downloading.md   # where to download each source's files, and how to load them
+  downloading.md   # mirror sync, per-source downloads, and manual fallbacks
   data-sources.md  # research: who publishes production data worldwide
-  design.md        # architecture and how to add a connector
+  design.md        # architecture, mirror contract, and how to add a connector
 ```

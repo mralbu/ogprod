@@ -22,13 +22,14 @@ import tempfile
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, Literal, TypeVar, cast
 
 import duckdb
 import geopandas as gpd
-import httpx
+import httpx2
 import pandas as pd
 
+from ogprod import mirror as mirror_mod
 from ogprod import schema, sources
 from ogprod.sources import base
 
@@ -39,6 +40,12 @@ _Frame = TypeVar("_Frame", bound=pd.DataFrame)
 #: size — bounds memory on whole-archive ingests while rewriting each
 #: (source, year) partition far less than once per raw file.
 _BATCH_ROWS = 2_000_000
+
+#: Parquet encoding shared by local stores and the canonical mirror: zstd
+#: saves 20-25% losslessly over snappy, and bounded row groups over
+#: entity_id-sorted production files keep single-well HTTP Range reads tiny.
+_PARQUET_COMPRESSION = "zstd"
+_PRODUCTION_ROW_GROUP_SIZE = 128_000
 
 #: Upsert key within a (source, year) partition — ``schema.PRODUCTION_KEY``
 #: minus the partition's source; rows are also kept sorted by it.
@@ -71,11 +78,18 @@ def _partition_path(root: Path, source: str, year: int) -> Path:
     return root / "production" / f"source={source}" / f"year={year}" / "data.parquet"
 
 
-def _atomic_write_parquet(frame, path: Path) -> None:
+def _atomic_write_parquet(frame, path: Path, *, row_group_size: int | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    frame.to_parquet(tmp, index=False)
-    os.replace(tmp, path)
+    kwargs: dict[str, Any] = {"index": False, "compression": _PARQUET_COMPRESSION}
+    if row_group_size is not None:
+        kwargs["row_group_size"] = row_group_size
+    try:
+        frame.to_parquet(tmp, **kwargs)
+        os.replace(tmp, path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def write_production(frame: pd.DataFrame, root: str | Path | None = None) -> list[Path]:
@@ -88,18 +102,18 @@ def write_production(frame: pd.DataFrame, root: str | Path | None = None) -> lis
     """
     schema.validate(frame)
     written = []
-    base = resolve_root(root)
+    base_dir = resolve_root(root)
     frame = frame.copy()
     frame["year"] = frame["period"].dt.year
     for (source, year), group in frame.groupby(["source", "year"]):  # type: ignore
-        path = _partition_path(base, str(source), int(year))
+        path = _partition_path(base_dir, str(source), int(year))
         merged = group
         if path.exists():
             existing = pd.read_parquet(path)
             kept = existing[~_key_index(existing).isin(_key_index(group))]
             merged = pd.concat([kept, group], ignore_index=True)
         merged = merged.sort_values(_KEY, ignore_index=True)[list(schema.CANONICAL_COLUMNS)]
-        _atomic_write_parquet(merged, path)
+        _atomic_write_parquet(merged, path, row_group_size=_PRODUCTION_ROW_GROUP_SIZE)
         written.append(path)
     return written
 
@@ -128,10 +142,10 @@ def write_entities(entities: gpd.GeoDataFrame, root: str | Path | None = None) -
     per source beats merge logic.
     """
     schema.validate_entities(entities)
-    base = resolve_root(root)
+    base_dir = resolve_root(root)
     written = []
     for source, group in entities.groupby("source"):
-        path = _entities_file(base, str(source))
+        path = _entities_file(base_dir, str(source))
         group = group.reset_index(drop=True)[list(schema.ENTITY_COLUMNS)]
         _atomic_write_parquet(group, path)
         written.append(path)
@@ -335,49 +349,80 @@ class Store:
         self,
         source: str,
         *,
+        origin: Literal["mirror", "publisher"] = "mirror",
+        revision: str = "main",
+        mirror: str | None = None,
         files: Sequence[str | Path] | None = None,
         entities: bool = True,
         refresh: bool = False,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
         **options: Any,
     ) -> IngestResult:
-        """Fetch, parse and upsert ``source`` into the store.
+        """Sync or fetch, parse and upsert ``source`` into the store.
 
-        Without ``files``, raw files are downloaded into a temporary directory
-        (removed afterwards); ``options`` (``year``, ``month``) go to the
-        connector's fetch, and an option it doesn't take raises ``TypeError``.
-        With ``files``, those already-downloaded files are ingested instead.
-        Files are parsed in the connector's restatement order, so a file that
-        restates another's rows (ANP's pré-sal over mar) wins rather than
-        double-counting.
+        By default (``origin="mirror"``), downloads prebuilt canonical Parquet
+        partitions and entities from the public mirror over anonymous HTTPS via
+        ``httpx2``, skipping any local file whose SHA-256 already matches
+        ``manifest.json`` (unless ``refresh=True``). Mirror ingests accept
+        ``year=`` (an ``int``, iterable of ``int``, or ``None`` for all
+        mirrored years) and ``revision=`` (e.g. ``"main"`` or a monthly tag).
+
+        Pass ``origin="publisher"`` to fetch live raw files directly from the
+        regulator portal into a temporary directory (removed afterwards),
+        parse in the connector's restatement order, and upsert; ``options``
+        (``year``, ``month``) go to the connector's fetch. With ``files=``,
+        those already-downloaded local files are parsed and upserted instead.
 
         Entities (well coordinates / field ring fences) are ingested too
-        when the store has none for ``source`` yet, or when ``refresh``;
-        connectors whose ``fetch_entities`` raises ``NotImplementedError``
-        are skipped, and an empty entity download writes nothing
-        (``entities == 0``). Pass ``entities=False`` to skip them (e.g.
-        offline with ``files``).
+        when missing locally (or when ``refresh=True``); pass
+        ``entities=False`` to skip them.
 
         If anything fails midway, partitions already flushed stay written and
         the error propagates with a note listing them; re-running the same
         ingest heals the store.
         """
+        if origin not in ("mirror", "publisher"):
+            raise ValueError(f"origin must be 'mirror' or 'publisher', got {origin!r}")
         connector = sources.get(source)
-        if files is not None and options:
-            raise TypeError(
-                f"{sorted(options)} select what to fetch; omit them when passing files="
-            )
+        requested_years: list[int] | None = None
+        if files is not None:
+            if options:
+                raise TypeError(
+                    f"{sorted(options)} select what to fetch; omit them when passing files="
+                )
+            if revision != "main" or mirror is not None:
+                raise TypeError(
+                    "revision= and mirror= apply only when origin='mirror' without files="
+                )
+        elif origin == "publisher":
+            if revision != "main" or mirror is not None:
+                raise TypeError("revision= and mirror= apply only when origin='mirror'")
+        else:
+            requested_years = _parse_mirror_options(options)
+
         written: list[Path] = []
         try:
-            with tempfile.TemporaryDirectory(prefix="ogprod-") as tmp:
-                if files is None:
-                    paths = connector.fetch(Path(tmp) / "production", client=client, **options)
-                else:
-                    paths = [Path(f) for f in files]
-                rows, first, last = self._ingest_production(connector, paths, written)
-                entity_rows = None
-                if entities and (refresh or not _entities_file(self.root, source).exists()):
-                    entity_rows = self._ingest_entities(connector, Path(tmp), client)
+            if files is None and origin == "mirror":
+                rows, first, last, entity_rows = self._ingest_mirror(
+                    source=source,
+                    revision=revision,
+                    mirror=mirror,
+                    years=requested_years,
+                    entities=entities,
+                    refresh=refresh,
+                    client=client,
+                    written=written,
+                )
+            else:
+                with tempfile.TemporaryDirectory(prefix="ogprod-") as tmp:
+                    if files is None:
+                        paths = connector.fetch(Path(tmp) / "production", client=client, **options)
+                    else:
+                        paths = [Path(f) for f in files]
+                    rows, first, last = self._ingest_production(connector, paths, written)
+                    entity_rows = None
+                    if entities and (refresh or not _entities_file(self.root, source).exists()):
+                        entity_rows = self._ingest_entities(connector, Path(tmp), client)
         except Exception as error:
             if written:
                 listing = "\n".join(f"  {path}" for path in dict.fromkeys(written))
@@ -394,6 +439,108 @@ class Store:
             partitions=tuple(dict.fromkeys(written)),
             entities=entity_rows,
         )
+
+    def _ingest_mirror(
+        self,
+        *,
+        source: str,
+        revision: str,
+        mirror: str | None,
+        years: list[int] | None,
+        entities: bool,
+        refresh: bool,
+        client: httpx2.Client | None,
+        written: list[Path],
+    ) -> tuple[int, pd.Timestamp | None, pd.Timestamp | None, int | None]:
+        mirror_base = mirror_mod.resolve_mirror(mirror)
+        with base.open_client(client) as http:
+            manifest = mirror_mod.fetch_manifest(http, mirror_base, revision)
+            sources_map = manifest["sources"]
+            if source not in sources_map:
+                raise ValueError(
+                    f"source {source!r} is not available on mirror {mirror_base!r}; "
+                    "pass origin='publisher' to fetch from the regulator"
+                )
+            source_entry = sources_map[source]
+            prod_entries: dict[str, dict[str, Any]] = source_entry.get("production") or {}
+            available_years = {int(year_key): entry for year_key, entry in prod_entries.items()}
+
+            if years is None:
+                target_years = sorted(available_years)
+            else:
+                missing = sorted(set(years) - set(available_years))
+                if missing:
+                    avail_list = sorted(available_years)
+                    span = f"{avail_list[0]}..{avail_list[-1]}" if avail_list else "none"
+                    raise ValueError(
+                        f"year(s) {missing} for {source!r} not available on mirror "
+                        f"(available: {span}, years: {avail_list}); "
+                        "pass origin='publisher' to fetch from the regulator"
+                    )
+                target_years = sorted(set(years))
+
+            # Validate every manifest path stays inside self.root before writing anything.
+            partition_targets = {
+                year: mirror_mod.validate_relative_path(self.root, available_years[year]["path"])
+                for year in target_years
+            }
+            entities_entry: dict[str, Any] | None = source_entry.get("entities")
+            entities_target = (
+                mirror_mod.validate_relative_path(self.root, entities_entry["path"])
+                if entities and entities_entry is not None
+                else None
+            )
+
+            rows = 0
+            first: pd.Timestamp | None = None
+            last: pd.Timestamp | None = None
+            for year in target_years:
+                entry = available_years[year]
+                target = partition_targets[year]
+                if refresh or not (
+                    target.exists() and mirror_mod.sha256_file(target) == entry["sha256"]
+                ):
+                    url = mirror_mod.file_url(mirror_base, revision, entry["path"])
+                    mirror_mod.download_verified(
+                        http,
+                        url,
+                        target,
+                        expected_sha256=entry["sha256"],
+                        expected_bytes=int(entry["bytes"]),
+                    )
+                    written.append(target)
+                rows += int(entry["rows"])
+                if entry.get("first_period") is not None:
+                    low = cast(pd.Timestamp, pd.Timestamp(entry["first_period"]))
+                    first = low if first is None else min(first, low)
+                if entry.get("last_period") is not None:
+                    high = cast(pd.Timestamp, pd.Timestamp(entry["last_period"]))
+                    last = high if last is None else max(last, high)
+
+            entity_rows: int | None = None
+            if (
+                entities
+                and entities_entry is not None
+                and entities_target is not None
+                and (
+                    refresh
+                    or not (
+                        entities_target.exists()
+                        and mirror_mod.sha256_file(entities_target) == entities_entry["sha256"]
+                    )
+                )
+            ):
+                url = mirror_mod.file_url(mirror_base, revision, entities_entry["path"])
+                mirror_mod.download_verified(
+                    http,
+                    url,
+                    entities_target,
+                    expected_sha256=entities_entry["sha256"],
+                    expected_bytes=int(entities_entry["bytes"]),
+                )
+                entity_rows = int(entities_entry["rows"])
+
+            return rows, first, last, entity_rows
 
     def _ingest_production(
         self, connector: base.Source, paths: list[Path], written: list[Path]
@@ -433,7 +580,7 @@ class Store:
         return rows, first, last
 
     def _ingest_entities(
-        self, connector: base.Source, tmp: Path, client: httpx.Client | None
+        self, connector: base.Source, tmp: Path, client: httpx2.Client | None
     ) -> int | None:
         """Entity rows written; ``None`` when the connector has no entity download."""
         try:
@@ -537,3 +684,27 @@ def _parse_naming_file(parse: Callable[[Path], _Frame], path: Path) -> _Frame:
         return parse(path)
     except ValueError as error:
         raise ValueError(f"{error} (while parsing {path})") from error
+
+
+def _parse_mirror_options(options: dict[str, Any]) -> list[int] | None:
+    """Validate ``**options`` for ``origin='mirror'`` and return requested years."""
+    if "month" in options:
+        raise TypeError("mirror partitions are yearly; omit `month` or pass `origin='publisher'`")
+    unknown = sorted(set(options) - {"year"})
+    if unknown:
+        raise TypeError(f"unsupported mirror ingest option(s): {unknown}")
+    year = options.get("year")
+    if year is None:
+        return None
+    if isinstance(year, bool):
+        raise TypeError(f"year must be an int or iterable of ints, got {year!r}")
+    if isinstance(year, int):
+        return [year]
+    if isinstance(year, (str, bytes)) or not isinstance(year, Iterable):
+        raise TypeError(f"year must be an int or iterable of ints, got {year!r}")
+    parsed: list[int] = []
+    for item in year:
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise TypeError(f"year must contain ints, got {item!r}")
+        parsed.append(item)
+    return parsed

@@ -1,0 +1,81 @@
+name: Update data mirror
+
+# Weekly rolling refresh of active regulators into the Hugging Face Dataset
+# mirror (mralbu/ogprod). Runs after smoke.yml (Mondays 06:17 UTC) with
+# per-source fault isolation: healthy sources still publish even if one
+# regulator portal fails or trips the sanity gate.
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Comma-separated sources to refresh (default: scheduled active sources)"
+        required: false
+        type: string
+      years:
+        description: "Optional comma-separated years override for backfills (e.g. 2024,2025)"
+        required: false
+        type: string
+      force:
+        description: "Bypass publish sanity gate drop/empty checks"
+        required: false
+        default: false
+        type: boolean
+      tag:
+        description: "Optional Hugging Face git tag to create after commit (e.g. 2026-11)"
+        required: false
+        type: string
+      dry_run:
+        description: "Inspect and run sanity gate without pushing"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: mirror-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.refresh.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --group publish
+      - name: Refresh active sources and publish mirror
+        id: refresh
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          INPUT_SOURCES: ${{ inputs.sources }}
+          INPUT_YEARS: ${{ inputs.years }}
+          INPUT_FORCE: ${{ inputs.force }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [[ -n "$INPUT_SOURCES" ]]; then
+            args+=(--sources "$INPUT_SOURCES")
+          fi
+          if [[ -n "$INPUT_YEARS" ]]; then
+            args+=(--years "$INPUT_YEARS")
+          fi
+          if [[ "$INPUT_FORCE" == "true" ]]; then
+            args+=(--force)
+          fi
+          if [[ -n "$INPUT_TAG" ]]; then
+            args+=(--tag "$INPUT_TAG")
+          fi
+          if [[ "$INPUT_DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          uv run --group publish python scripts/ci_refresh.py "${args[@]}"
+      # Milestone 2 will chain deploy-site.yml when steps.refresh.outputs.changed == 'true'.
