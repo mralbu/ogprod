@@ -1,20 +1,13 @@
-# Python
 __pycache__/
 *.py[cod]
-*.egg-info/
+.venv/
+.direnv/
 dist/
 build/
-
-# Environments
-.venv/
-
-# Tool caches
+*.egg-info/
 .pytest_cache/
+.hypothesis/
 .ruff_cache/
-.ty_cache/
-
-# Data downloads (raw source files can be huge; keep them out of git)
-/data/
-
-# Jupyter
-.ipynb_checkpoints/
+.coverage
+htmlcov/
+.DS_Store

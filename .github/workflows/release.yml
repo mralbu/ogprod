@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  UV_LOCKED: "1" # fail if uv.lock is out of date with pyproject.toml
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # api-check compares with the previous release tag
+
+      - uses: astral-sh/setup-uv@v7
+
+      - uses: extractions/setup-just@v4
+
+      - name: Tag matches the project version
+        run: |
+          version=$(uv version --short)
+          if [[ "v$version" != "$GITHUB_REF_NAME" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the project version $version"
+            exit 1
+          fi
+
+      - run: just sync
+
+      - run: just check
+
+      - run: just api-check
+
+      - run: just build
+
+      - run: just smoke
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # create the GitHub release
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create the GitHub release
+        run: |
+          flags=(--verify-tag --generate-notes)
+          if [[ $GITHUB_REF_NAME =~ (a|b|rc|dev)[0-9]+$ ]]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

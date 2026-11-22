@@ -1,24 +1,8 @@
-"""ogprod — organize public oil & gas production data.
+"""Public oil & gas production data pipeline and geospatial store."""
 
-Normalizes well- and field-level production published by regulators worldwide
-(ANP, Argentina's Secretaría de Energía, Norway's Sodir, ...) into one
-canonical long-format table, kept in a local Parquet store::
+from importlib.metadata import version
 
-    import ogprod
+from .core import greet
 
-    db = ogprod.Store()
-    db.ingest("sodir")
-    oil = db.production(source="sodir", product="oil", start="2020-01")
-
-Connector internals live in :mod:`ogprod.sources`, the canonical schema in
-:mod:`ogprod.schema`.
-"""
-
-from ogprod.schema import Product, SchemaError
-from ogprod.sources import available
-from ogprod.store import Store
-from ogprod.units import convert
-
-__version__ = "0.2.0"
-
-__all__ = ["Product", "SchemaError", "Store", "available", "convert"]
+__version__ = version("ogprod")
+__all__ = ["__version__", "greet"]

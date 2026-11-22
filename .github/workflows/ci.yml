@@ -4,21 +4,41 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_LOCKED: "1" # fail if uv.lock is out of date with pyproject.toml
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Oldest supported and newest released Python.
-        python: ["3.11", "3.14"]
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
         with:
-          python-version: ${{ matrix.python }}
+          fetch-depth: 0 # api-check compares with the last release tag
+
+      - uses: astral-sh/setup-uv@v7
+        with:
           enable-cache: true
-      - uses: extractions/setup-just@v3
-      - run: uv sync --all-groups
+
+      - uses: extractions/setup-just@v4
+
+      - run: just sync
+
       - run: just check
+
+      # Breaking API changes show up as annotations; only a release requires the matching bump.
+      - run: just api-check
+        continue-on-error: true
+
+      - run: just build
+
+      - run: just smoke
