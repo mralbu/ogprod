@@ -35,7 +35,8 @@ All rates in `production` are calendar-day averages stored as `float32`:
 ```sh
 ogprod sources
 ogprod ingest anp --year 2026 --data-dir ./data
-ogprod ingest anp --recent --data-dir ./data
+ogprod ingest sodir --data-dir ./data
+ogprod ingest mexico --data-dir ./data
 ogprod coverage --data-dir ./data
-ogprod sql "SELECT field_name, sum(oil_prod) AS oil_bpd FROM production WHERE period = '2026-01-01' GROUP BY 1 ORDER BY 2 DESC LIMIT 10" --data-dir ./data
+ogprod sql "SELECT source, field_name, round(sum(oil_prod), 0) AS oil_bpd FROM production WHERE period = '2025-01-01' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 10" --data-dir ./data
 ```

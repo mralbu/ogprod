@@ -27,9 +27,11 @@ def test_version() -> None:
     assert re.search(r"\d+\.\d+", invoke("--version"))
 
 
-def test_sources_lists_anp() -> None:
+def test_sources_lists_all_connectors() -> None:
     out = invoke("sources")
     assert "anp\twell\t" in out
+    assert "mexico\tfield\t" in out
+    assert "sodir\tfield\t" in out
 
 
 def test_ingest_local_file_coverage_and_sql(tmp_path: Path) -> None:

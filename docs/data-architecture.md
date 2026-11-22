@@ -122,11 +122,22 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
 3. Never impute the `2003-07 .. 2005-06` gas gap (~5% of wells reporting gas); emit a warning and record in `manifest.json`.
 
 ### 3.2 Priority 2 — Norway (Sodir)
-- Production: FactPages `field_production_monthly` CSV (1971–present, ~2 MB) → `entity_type = "field"`.
-- Geo: FactMaps ArcGIS `MapServer/7100` (field polygons), fixed/moveable facilities, and wellbores.
+
+- **Production:** FactPages `field_production_monthly` CSV (1971–present, single ~2 MB file): oil, condensate, NGL, produced water (`Mill Sm³` → `bbl/d`), and gas (`Bill Sm³` → `e3m3/d`). Grain: `entity_type = "field"`, `entity_id = NPDID`.
+- **Geo (FactMaps ArcGIS DataService, requesting only needed attributes via `outFields=` and paginating with `resultOffset`):**
+  - `geo/fields`: layer `7100` (`field`, 142 fields, dissolved by `fldNpdidField`).
+  - `geo/facilities`: layer `6000` (`facility`, ~1,229 platforms/FPSOs/subsea templates with water depth & startup year).
+  - `geo/wells`: layer `5000` (`wellbore`, ~9,884 wellbores paginated in chunks of 2,000, linked to `field_id`).
 
 ### 3.3 Priority 3 — Mexico (SENER / ex-CNH SIH)
-- Production & spatial layers via `sih-hidrocarburos.energia.gob.mx` and `mapa-hidrocarburos.energia.gob.mx` (audited live before implementing `sources/mexico.py`).
+
+- **Production (`sih-hidrocarburos.energia.gob.mx/downloads/`):**
+  - `PRODUCCION_CAMPOS.csv` (1960–present, ~18 MB, default on `ingest mexico`): field-level daily rates — oil, condensate, water (`Mbd` = thousand bbl/d → `bbl/d`), associated + non-associated gas (`MMpcd` = million scf/d → `e3m3/d`).
+  - `PRODUCCION_POZOS.zip` / `POZOS_COMPILADO.csv` (1930–present, ~155 MB): well-level daily rates, auto-detected by `parse_production` when ingested via `--files`.
+- **Geo (`mapa-hidrocarburos.energia.gob.mx` public shapefile export API):**
+  - `geo/fields`: `cmp_cmp_rsv` (477 field polygons, `EPSG:4326`; drops 1P/2P/3P reserve columns).
+  - `geo/facilities`: `v_iftep_instalaciones` (1,363 platforms/installations, `EPSG:4326`).
+  - `geo/wells`: 6 regional well layers (`v_zon_pozos_{burgos,tampico,ver,cuenca_sur,agu_som,agu_pro}`).
 
 ---
 
