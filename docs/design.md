@@ -121,8 +121,8 @@ the GeoDataFrame, reprojects to EPSG:4326 if needed, and validates.
   Downloads the publisher's raw file(s) into `dest_dir` and returns their
   paths (a list, because ANP splits one month across terra/mar/pré-sal CSVs).
   All three built-in connectors implement it. `client` takes an injected
-  `httpx.Client`, which is how the tests exercise fetch offline against an
-  `httpx.MockTransport`. Per-source options (`year`, `month`) are explicit
+  `httpx2.Client`, which is how the tests exercise fetch offline against an
+  `httpx2.MockTransport`. Per-source options (`year`, `month`) are explicit
   keyword parameters with no `**kwargs` catch-all, so a misspelt option
   raises `TypeError` instead of silently widening the download. Connectors
   without a stable download URL leave the base implementation, which raises
@@ -269,20 +269,34 @@ back from it. It's plain files, not a database server:
   entities/anp.parquet                            # GeoParquet, one file per source
 ```
 
-- **Interface.** `Store(root=None)` with `ingest(source, *, files=None,
-  entities=True, refresh=False, client=None, **options)`, `production(...)`,
-  `entities(...)`, `sql(query)` and `coverage()`. The top-level package
-  exports only `Store`, `available`, `convert`, `Product` and `SchemaError`.
-  The module-level functions in `store.py` (`write_production`,
-  `write_entities`, `combine_restatements`, `load_production`,
-  `load_entities`, `sql`, `resolve_root`) are `Store`'s internal pieces,
-  tested directly in `test_store.py`.
-- **Ingest.** Without `files`, the connector's `fetch` downloads into a
-  temporary directory (removed afterwards) with `options` passed through;
-  with `files`, those paths are used (and `options` is a `TypeError`). Paths
-  go through `connector.restatement_order`, are parsed in that order, and
-  are written in large batches (each `(source, year)` partition rewritten
-  once per batch of ~2M rows, not once per raw file).
+- **Interface.** `Store(root=None)` with `ingest(source, *, origin="mirror",
+  revision="main", mirror=None, files=None, entities=True, refresh=False,
+  client=None, **options)`, `production(...)`, `entities(...)`, `sql(query)`
+  and `coverage()`. The top-level package exports only `Store`, `available`,
+  `convert`, `Product` and `SchemaError`. The module-level functions in
+  `store.py` (`write_production`, `write_entities`, `combine_restatements`,
+  `load_production`, `load_entities`, `sql`, `resolve_root`) are `Store`'s
+  internal pieces, tested directly in `test_store.py`. `Store` stays strictly
+  local-first: `production()`, `entities()`, `sql()`, and `coverage()` always
+  read local disk (no remote-read mode).
+- **Ingest (`origin="mirror"`, default).** Pulls prebuilt canonical Parquet
+  partitions and entities over anonymous HTTPS via `httpx2` (no HF token and
+  no `huggingface_hub` runtime dependency) from the mirror resolved via
+  `mirror=` → `$OGPROD_MIRROR` → `mralbu/ogprod` (`ogprod.mirror.resolve_mirror`).
+  Fetches `manifest.json` (schema v1) at `revision`, rejects unsupported
+  `schema_version` or unsafe paths, and accepts `year=` (`int`, iterable of
+  `int`, or `None` for all mirrored years; `month=` raises `TypeError`
+  pointing to `origin="publisher"`). Any local partition or entity file whose
+  SHA-256 matches the manifest is skipped unless `refresh=True`; otherwise the
+  file streams to `.tmp`, verifies exact `bytes` and `sha256` (deleting `.tmp`
+  on mismatch), and atomically replaces the target via `os.replace`.
+- **Ingest (`origin="publisher"` or `files=`).** Without `files`, the
+  connector's `fetch` downloads live raw files into a temporary directory
+  (removed afterwards) with `options` passed through; with `files`, those
+  local paths are used (and `options`, non-default `revision`, or `mirror`
+  raise `TypeError`). Paths go through `connector.restatement_order`, are
+  parsed in that order, and are written in large batches (each `(source, year)`
+  partition rewritten once per batch of ~2M rows, not once per raw file).
   `combine_restatements` builds each batch: a later file's row replaces an
   earlier file's row with the same key, so ANP's terra/mar/pré-sal split
   upserts correctly instead of double-counting — the pré-sal file's rows (a
@@ -292,28 +306,37 @@ back from it. It's plain files, not a database server:
   rows with incoming ones. Keep-last applies only *across* files;
   `write_production` itself rejects a frame that repeats a key. A parse
   failure names the file and propagates; partitions already flushed stay
-  written, and any failure after a flush (including in the entity step)
-  carries an exception note listing them, which the CLI prints. Returns an `IngestResult` (rows, period span, partitions,
+  written, and any failure after a flush (including in the entity step or
+  during a mirror sync) carries an exception note listing them, which the CLI
+  prints. Returns an `IngestResult` (rows, period span, partitions written,
   entity rows) — never the frame, so there is one way to read data.
-- **Entities on ingest.** Ingested when the store has none for the source
-  yet, or with `refresh=True`; skipped (`entities is None`) when the
-  connector's `fetch_entities` raises `NotImplementedError`; an empty
-  download writes nothing (`entities == 0`), so stored entities survive a
-  refresh; `entities=False` turns them off (e.g. offline with `files`).
-- **Production** is Parquet, hive-partitioned by `(source, year)`. DuckDB is
+- **Entities on ingest.** On mirror ingests, entities follow the same
+  checksum-skip rule (`IngestResult.entities is None` when skipped or absent
+  from the manifest). On publisher/file ingests, entities are ingested when
+  the store has none for the source yet, or with `refresh=True`; skipped
+  (`entities is None`) when the connector's `fetch_entities` raises
+  `NotImplementedError`; an empty download writes nothing (`entities == 0`),
+  so stored entities survive a refresh; `entities=False` turns them off (e.g.
+  offline with `files`).
+- **Production** is zstd-compressed Parquet (`compression="zstd"`,
+  `row_group_size=128_000`), hive-partitioned by `(source, year)` and sorted
+  by `("entity_id", "period", "product", "field")`. Bounded row groups over
+  `entity_id`-sorted partitions give tight per-group min/max statistics for
+  fast local filtering and small HTTP Range reads from the mirror. DuckDB is
   the query engine (`production`, `sql`), never the storage container —
   every file is a plain Parquet file readable directly with pandas, and the
-  same layout could be served statically. `write_production(frame)` groups
-  incoming rows by `(source, year)`; for each affected partition it reads the
-  existing file, drops stored rows whose `(entity_id, period, product,
-  field)` appears in the incoming batch, concatenates, and rewrites the
-  partition atomically (temp file + `os.replace`). Partitions outside the
-  incoming batch are untouched. `field` is part of the key because ANP
-  reports a well's month split across several fields (e.g. ATAPU and
-  ATAPU_ECO) — distinct volumes that must all survive an upsert.
-- **Entities** are GeoParquet, one file per source, whole-file replaced by
-  `write_entities` — entity tables are small (10³–10⁵ rows), so merge logic
-  isn't worth having.
+  same layout is served directly from the Hugging Face mirror.
+  `write_production(frame)` groups incoming rows by `(source, year)`; for
+  each affected partition it reads the existing file, drops stored rows whose
+  `(entity_id, period, product, field)` appears in the incoming batch,
+  concatenates, and rewrites the partition atomically (temp file +
+  `os.replace`). Partitions outside the incoming batch are untouched. `field`
+  is part of the key because ANP reports a well's month split across several
+  fields (e.g. ATAPU and ATAPU_ECO) — distinct volumes that must all survive
+  an upsert.
+- **Entities** are zstd-compressed GeoParquet, one file per source, whole-file
+  replaced by `write_entities` — entity tables are small (10³–10⁵ rows), so
+  merge logic isn't worth having.
 - **Read side.** `production(source=..., field=..., product=..., start=...,
   end=...)` and `entities(source=..., entity_type=...)` return
   pandas/geopandas frames with the canonical columns; `sql(...)` is a DuckDB
@@ -326,19 +349,47 @@ back from it. It's plain files, not a database server:
   endpoints, so its contents can't be assumed re-downloadable.
 - **Single writer, idempotent.** Each partition write is atomic, but a
   multi-partition write interrupted midway leaves some partitions updated
-  and others not — re-running the same ingest heals the store (upserts are
-  idempotent). Two concurrent writers to the same partition race
-  read-modify-write; the store assumes one writer at a time.
+  and others not — re-running the same ingest heals the store (upserts and
+  checksum-skipped mirror syncs are idempotent). Two concurrent writers to
+  the same partition race read-modify-write; the store assumes one writer at
+  a time.
 - **CLI** (`__main__.py`) is a thin adapter: `python -m ogprod ingest
-  <source> [--year --month] [--files ...] [--no-entities] [--refresh]
+  <source> [--origin mirror|publisher] [--year ...] [--month ...]
+  [--revision ...] [--mirror ...] [--files ...] [--no-entities] [--refresh]
   [--store]` calls `Store.ingest`; `coverage` prints `Store.coverage()`;
   `fetch <source> [--entities] [--dest]` downloads raw files only.
 
+## Canonical mirror & publish pipeline
+
+The public Hugging Face Dataset mirror (`mralbu/ogprod`) mirrors the exact
+local `Store` hive layout plus a single `manifest.json` (schema v1) indexing
+per-partition `path`, `sha256`, `bytes`, `rows`, `first_period`,
+`last_period`, `totals_m3`, and `updated_at` (plus per-source `entities`).
+Shared manifest, hashing, verification, stats, sanity-gate, and merge logic
+lives in `src/ogprod/mirror.py`.
+
+Both maintainers (for full-history seeds, backfills, and manual exports such
+as ANP 2024+ CDP) and GitHub Actions run the same publish tool:
+`uv run --group publish python scripts/publish_mirror.py` (which uses
+`huggingface-hub` from the optional `publish` dependency group). It skips
+unchanged SHA-256s, enforces a sanity gate (>15% production row or
+per-product total drop, >10% entity drop, empty files; `--force` to
+override), merges only changed entries into a copy of the remote
+`manifest.json` without deleting untouched partitions, pushes atomically via
+`HfApi.create_commit(..., parent_commit=...)`, supports `--dry-run` and
+`--tag`, and emits `changed=true|false` to `$GITHUB_OUTPUT`.
+
+`.github/workflows/update-data.yml` runs `scripts/ci_refresh.py` weekly under
+`concurrency: mirror-publish` (Sodir full history, Argentina current +
+previous year, ANP skipped on schedule) with per-source fault isolation:
+healthy sources still publish atomically even if another regulator fails to
+fetch or trips the sanity gate, after which the workflow exits non-zero to
+alert the maintainer.
+
 ### Website data contract (future work)
 
-A future static site (map + dashboards) will read from derived extracts, not
-the store directly — pre-aggregated JSON rollups, a PMTiles layer for entity
-geometry, and per-field sharded JSON for click-to-chart series. The contract
-is specified but not yet built; see
-[`docs/superpowers/specs/2026-07-10-storage-design.md`](superpowers/specs/2026-07-10-storage-design.md)
-§4.
+Milestone 2 will pair GitHub Pages (`site/`, pre-aggregated `rollups/*.json`,
+and `entities.pmtiles`) with browser DuckDB-WASM querying the zstd
+`entity_id`-sorted Parquet partitions on Hugging Face directly via HTTP Range
++ CORS. See
+[`docs/superpowers/specs/2026-11-22-mirror-and-distribution-design.md`](superpowers/specs/2026-11-22-mirror-and-distribution-design.md).

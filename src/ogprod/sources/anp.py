@@ -26,7 +26,7 @@ from datetime import date
 from pathlib import Path
 
 import geopandas as gpd
-import httpx
+import httpx2
 import pandas as pd
 
 from ogprod import units
@@ -430,7 +430,7 @@ class ANP(base.Source):
         *,
         year: int | None = None,
         month: int | None = None,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
     ) -> list[Path]:
         """Download bulk zip(s) and extract their CSVs.
 
@@ -495,7 +495,7 @@ class ANP(base.Source):
         )
 
     def fetch_entities(
-        self, dest_dir: str | Path, *, client: httpx.Client | None = None
+        self, dest_dir: str | Path, *, client: httpx2.Client | None = None
     ) -> list[Path]:
         """Download the well cadastre CSV (one row per drilled well, with coordinates)."""
         dest_dir = Path(dest_dir)

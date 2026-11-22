@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import IO, Any, ClassVar, TypeVar
 
 import geopandas as gpd
-import httpx
+import httpx2
 import pandas as pd
 
 from ogprod import schema
@@ -25,22 +25,22 @@ from ogprod import schema
 RawFile = str | Path | IO[str] | IO[bytes]
 
 _USER_AGENT = "ogprod/0.2"
-_TIMEOUT = httpx.Timeout(120.0)
+_TIMEOUT = httpx2.Timeout(120.0)
 
 
 @contextmanager
-def open_client(client: httpx.Client | None) -> Iterator[httpx.Client]:
+def open_client(client: httpx2.Client | None) -> Iterator[httpx2.Client]:
     """Yield ``client`` as-is, or a temporary one with ogprod defaults."""
     if client is not None:
         yield client
         return
-    with httpx.Client(
+    with httpx2.Client(
         follow_redirects=True, timeout=_TIMEOUT, headers={"User-Agent": _USER_AGENT}
     ) as owned:
         yield owned
 
 
-def download(client: httpx.Client, url: str, dest: Path) -> Path:
+def download(client: httpx2.Client, url: str, dest: Path) -> Path:
     """Stream ``url`` into ``dest`` and return ``dest``."""
     with client.stream("GET", url) as response:
         response.raise_for_status()
@@ -64,14 +64,14 @@ class Source(ABC):
     def parse(self, raw: RawFile) -> pd.DataFrame:
         """Parse a raw file from this source into a canonical DataFrame."""
 
-    def fetch(self, dest_dir: str | Path, *, client: httpx.Client | None = None) -> list[Path]:
+    def fetch(self, dest_dir: str | Path, *, client: httpx2.Client | None = None) -> list[Path]:
         """Download raw file(s) into ``dest_dir`` and return their paths.
 
         Returns a list because some publishers split one period across several
         files (ANP's terra/mar/pré-sal). Each returned path can be passed to
         ``parse``. Connectors without a stable download URL leave this
         unimplemented and document where to fetch files manually; ``client``
-        lets callers inject a configured ``httpx.Client`` (tests use a mock
+        lets callers inject a configured ``httpx2.Client`` (tests use a mock
         transport). Overrides declare their options (``year``, ``month``) as
         explicit keywords with no ``**kwargs`` catch-all, so a misspelt option
         raises ``TypeError`` instead of silently widening the download.
@@ -98,7 +98,7 @@ class Source(ABC):
         raise NotImplementedError(f"{self.name} has no entity parser; see {self.docs_url}")
 
     def fetch_entities(
-        self, dest_dir: str | Path, *, client: httpx.Client | None = None
+        self, dest_dir: str | Path, *, client: httpx2.Client | None = None
     ) -> list[Path]:
         """Download the publisher's entity/geometry file(s) into ``dest_dir``."""
         raise NotImplementedError(f"{self.name} has no automated entity fetch; see {self.docs_url}")

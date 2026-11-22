@@ -282,3 +282,26 @@ def test_sql_entities_geometry_typed_blob_on_empty_store(root):
         "SELECT column_type FROM (DESCRIBE entities) WHERE column_name = 'geometry'", root=root
     )
     assert described["column_type"].iloc[0] == "BLOB"
+
+
+def test_parquet_uses_zstd_and_bounded_row_groups(root, monkeypatch):
+    import pyarrow.parquet as pq
+
+    assert store._PRODUCTION_ROW_GROUP_SIZE == 128_000
+    monkeypatch.setattr(store, "_PRODUCTION_ROW_GROUP_SIZE", 10)
+    frame = production_frame([{"entity_id": f"W-{i:03d}", "volume": float(i)} for i in range(25)])
+    (prod_path,) = store.write_production(frame, root=root)
+
+    prod_meta = pq.ParquetFile(prod_path).metadata
+    assert prod_meta.num_row_groups == 3
+    for rg_idx in range(prod_meta.num_row_groups):
+        rg = prod_meta.row_group(rg_idx)
+        assert rg.num_rows <= 10
+        for col_idx in range(rg.num_columns):
+            assert rg.column(col_idx).compression == "ZSTD"
+
+    entity_paths = store.write_entities(entities_frame(), root=root)
+    for ent_path in entity_paths:
+        ent_meta = pq.ParquetFile(ent_path).metadata
+        for col_idx in range(ent_meta.row_group(0).num_columns):
+            assert ent_meta.row_group(0).column(col_idx).compression == "ZSTD"

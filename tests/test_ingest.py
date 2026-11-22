@@ -1,12 +1,12 @@
 """Tests for :class:`ogprod.Store` — the ingest pipeline and its read side.
 
-HTTP goes through an injected ``httpx.MockTransport``; nothing touches the
+HTTP goes through an injected ``httpx2.MockTransport``; nothing touches the
 network.
 """
 
 from pathlib import Path
 
-import httpx
+import httpx2
 import pandas as pd
 import pytest
 
@@ -35,23 +35,23 @@ def requests() -> list[str]:
 
 
 @pytest.fixture
-def sodir_client(data_dir, requests) -> httpx.Client:
+def sodir_client(data_dir, requests) -> httpx2.Client:
     csv = (data_dir / "sodir_field_production_monthly_sample.csv").read_bytes()
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request.url.host)
         if request.url.host == "factpages.sodir.no":
-            return httpx.Response(200, content=csv)
+            return httpx2.Response(200, content=csv)
         if request.url.host == "factmaps.sodir.no":
-            return httpx.Response(200, json=FIELD_GEOJSON)
-        return httpx.Response(404)
+            return httpx2.Response(200, json=FIELD_GEOJSON)
+        return httpx2.Response(404)
 
-    return httpx.Client(transport=httpx.MockTransport(handler))
+    return httpx2.Client(transport=httpx2.MockTransport(handler))
 
 
 def test_ingest_fetches_production_and_entities(tmp_path, sodir_client):
     db = ogprod.Store(tmp_path)
-    result = db.ingest("sodir", client=sodir_client)
+    result = db.ingest("sodir", origin="publisher", client=sodir_client)
 
     assert result.source == "sodir"
     assert result.rows == len(db.production()) == 10
@@ -64,14 +64,14 @@ def test_ingest_fetches_production_and_entities(tmp_path, sodir_client):
 
 def test_ingest_skips_stored_entities_unless_refresh(tmp_path, sodir_client, requests):
     db = ogprod.Store(tmp_path)
-    db.ingest("sodir", client=sodir_client)
+    db.ingest("sodir", origin="publisher", client=sodir_client)
     requests.clear()
 
-    again = db.ingest("sodir", client=sodir_client)
+    again = db.ingest("sodir", origin="publisher", client=sodir_client)
     assert again.entities is None
     assert requests == ["factpages.sodir.no"]
 
-    refreshed = db.ingest("sodir", refresh=True, client=sodir_client)
+    refreshed = db.ingest("sodir", origin="publisher", refresh=True, client=sodir_client)
     assert refreshed.entities == 1
     assert "factmaps.sodir.no" in requests
 
@@ -80,7 +80,7 @@ def test_ingest_files_without_entities_is_offline(tmp_path, data_dir):
     def offline(request):
         raise AssertionError(f"unexpected request to {request.url}")
 
-    client = httpx.Client(transport=httpx.MockTransport(offline))
+    client = httpx2.Client(transport=httpx2.MockTransport(offline))
     sample = data_dir / "sodir_field_production_monthly_sample.csv"
     result = ogprod.Store(tmp_path).ingest("sodir", files=[sample], entities=False, client=client)
     assert result.rows == 10
@@ -95,7 +95,7 @@ def test_ingest_rejects_fetch_options_with_files(tmp_path, data_dir):
 
 def test_ingest_rejects_options_the_connector_does_not_take(tmp_path, sodir_client):
     with pytest.raises(TypeError):
-        ogprod.Store(tmp_path).ingest("sodir", year=2024, client=sodir_client)
+        ogprod.Store(tmp_path).ingest("sodir", origin="publisher", year=2024, client=sodir_client)
 
 
 def _anp_files(tmp_path, data_dir) -> dict[str, Path]:
@@ -200,7 +200,7 @@ def test_entity_failure_notes_production_already_written(tmp_path, data_dir, mon
 
 def test_empty_entity_download_writes_nothing(tmp_path, data_dir, sodir_client, monkeypatch):
     db = ogprod.Store(tmp_path)
-    db.ingest("sodir", client=sodir_client)  # stores one ring fence
+    db.ingest("sodir", origin="publisher", client=sodir_client)  # stores one ring fence
     monkeypatch.setattr(sodir.Sodir, "fetch_entities", lambda self, dest, client=None: [])
     sample = data_dir / "sodir_field_production_monthly_sample.csv"
 
@@ -252,7 +252,7 @@ def test_coverage(tmp_path, sodir_client):
     ]
     assert empty.empty
 
-    db.ingest("sodir", client=sodir_client)
+    db.ingest("sodir", origin="publisher", client=sodir_client)
     row = db.coverage().iloc[0]
     assert row["source"] == "sodir"
     assert row["rows"] == 10

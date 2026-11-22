@@ -66,11 +66,71 @@ def test_ingest_maps_flags_to_store(monkeypatch):
     assert calls == {
         "root": Path("s"),
         "source": "anp",
+        "origin": "mirror",
+        "revision": "main",
+        "mirror": None,
         "files": None,
         "entities": True,
         "refresh": True,
         "year": 2023,
     }
+
+
+def test_ingest_maps_mirror_and_multi_year_flags(monkeypatch):
+    calls = {}
+
+    def fake_ingest(self, source, **kwargs):
+        calls.update(root=self.root, source=source, **kwargs)
+        return "ok"
+
+    monkeypatch.setattr(ogprod.Store, "ingest", fake_ingest)
+    code = main(
+        [
+            "ingest",
+            "anp",
+            "--year",
+            "2022",
+            "--year",
+            "2023",
+            "--revision",
+            "2026-11",
+            "--mirror",
+            "custom/repo",
+            "--store",
+            "s",
+        ]
+    )
+    assert code == 0
+    assert calls["origin"] == "mirror"
+    assert calls["revision"] == "2026-11"
+    assert calls["mirror"] == "custom/repo"
+    assert calls["year"] == [2022, 2023]
+
+    calls.clear()
+    code = main(["ingest", "anp", "--year", "2021", "2022", "--store", "s"])
+    assert code == 0
+    assert calls["year"] == [2021, 2022]
+
+
+def test_ingest_publisher_origin_flag(monkeypatch):
+    calls = {}
+
+    def fake_ingest(self, source, **kwargs):
+        calls.update(source=source, **kwargs)
+        return "ok"
+
+    monkeypatch.setattr(ogprod.Store, "ingest", fake_ingest)
+    code = main(["ingest", "anp", "--origin", "publisher", "--year", "2023", "--month", "6"])
+    assert code == 0
+    assert calls["origin"] == "publisher"
+    assert calls["year"] == 2023
+    assert calls["month"] == 6
+
+
+def test_ingest_mirror_rejects_month(capsys):
+    code = main(["ingest", "anp", "--year", "2023", "--month", "6", "--store", "s"])
+    assert code == 1
+    assert "origin='publisher'" in capsys.readouterr().err
 
 
 def test_ingest_errors_are_reported(tmp_path, capsys, data_dir):

@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 
 import geopandas as gpd
-import httpx
+import httpx2
 import pandas as pd
 
 from ogprod import units
@@ -53,7 +53,7 @@ _WELLS_RESOURCE_NAME = "Listado de pozos cargados por empresas operadoras"
 _ENTITY_REQUIRED = ("idpozo", "coordenadax", "coordenaday")
 
 
-def _csv_resources(http: httpx.Client) -> list[dict]:
+def _csv_resources(http: httpx2.Client) -> list[dict]:
     """The dataset's CSV resources from the portal's CKAN ``package_show``."""
     response = http.get(_PACKAGE_SHOW_URL, params={"id": _DATASET_ID})
     response.raise_for_status()
@@ -64,9 +64,9 @@ def _csv_resources(http: httpx.Client) -> list[dict]:
     ]
 
 
-def _download_resource(http: httpx.Client, resource: dict, dest_dir: Path) -> list[Path]:
+def _download_resource(http: httpx2.Client, resource: dict, dest_dir: Path) -> list[Path]:
     url = resource["url"]
-    dest = dest_dir / httpx.URL(url).path.rsplit("/", 1)[-1]
+    dest = dest_dir / httpx2.URL(url).path.rsplit("/", 1)[-1]
     return [base.download(http, url, dest)]
 
 
@@ -81,7 +81,7 @@ class Argentina(base.Source):
         dest_dir: str | Path,
         *,
         year: int | None = None,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
     ) -> list[Path]:
         """Download the per-year Capítulo IV CSV for ``year``."""
         if year is None:
@@ -138,7 +138,7 @@ class Argentina(base.Source):
         )
 
     def fetch_entities(
-        self, dest_dir: str | Path, *, client: httpx.Client | None = None
+        self, dest_dir: str | Path, *, client: httpx2.Client | None = None
     ) -> list[Path]:
         """Download the wells listing CSV (coordinates for every reported well)."""
         dest_dir = Path(dest_dir)

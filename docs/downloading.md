@@ -15,17 +15,35 @@ import ogprod
 ogprod.available()                      # ['anp', 'argentina', 'sodir']
 
 db = ogprod.Store()                     # ~/.local/share/ogprod/store, or $OGPROD_STORE
-db.ingest("sodir")                      # download, parse, upsert (+ entities, first time)
-frame = db.production(source="sodir")
+db.ingest("sodir")                      # pull prebuilt Parquet + entities from the mirror
+db.ingest("anp", year=[2022, 2023])     # selective yearly partitions from the mirror
+
+# Fetch live directly from the regulator portal instead of the mirror:
+db.ingest("anp", origin="publisher", year=2023, month=1)
+
+# Pin to a specific mirror revision/tag (e.g. a monthly snapshot):
+db.ingest("sodir", revision="2026-11")
 
 # Files you downloaded by hand (e.g. a CDP export) go in the same way:
 db.ingest("anp", files=["2023_01_producao_Mar.csv"], entities=False)
+
+frame = db.production(source="sodir")
 ```
 
-Parsing reads each file, matches its columns, converts every volume to m³,
-drops rows with no volume, and runs `schema.validate`; ingest then resolves
-overlapping files (ANP's pré-sal restates mar) and upserts. Frames have the
-canonical columns documented in [design.md](design.md#canonical-schema).
+By default (`origin="mirror"`), `Store.ingest` downloads prebuilt canonical
+zstd Parquet partitions and entities from the public Hugging Face Dataset
+mirror (`mralbu/ogprod`, overridable via `mirror=` or `$OGPROD_MIRROR`) over
+plain anonymous HTTPS (`httpx2`, no token required). Local files whose SHA-256
+already matches `manifest.json` are skipped unless `refresh=True`. Mirror
+partitions are yearly — pass `year=` as an `int`, iterable of `int`, or omit
+it for all mirrored years; passing `month=` on `origin="mirror"` raises
+`TypeError` directing you to `origin="publisher"`.
+
+With `origin="publisher"` (or `files=`), parsing reads each raw file, matches
+its columns, converts every volume to m³, drops rows with no volume, and runs
+`schema.validate`; ingest then resolves overlapping files (ANP's pré-sal
+restates mar) and upserts. Frames have the canonical columns documented in
+[design.md](design.md#canonical-schema).
 
 Under the store, every connector splits two concerns (`sources/base.py`),
 reachable through `ogprod.sources.get(name)` when you want raw files or a
@@ -48,17 +66,19 @@ frame = sources.get("sodir").parse(paths[0])      # one file, not stored
 The CLI mirrors this (`just ingest ...` / `just fetch ...` inside this repo):
 
 ```sh
-python -m ogprod ingest sodir                       # into the store
-python -m ogprod ingest anp --year 2023 --month 1
-python -m ogprod ingest anp --files a.csv b.csv     # files downloaded by hand
-python -m ogprod coverage                           # what the store holds
-python -m ogprod fetch argentina --year 2024        # raw files into data/, no ingest
-python -m ogprod fetch sodir --entities --dest raw/ # raw entity file (FactMaps GeoJSON)
+python -m ogprod ingest sodir                                      # sync from mirror (default)
+python -m ogprod ingest anp --year 2022 2023 --revision main       # selective mirror years
+python -m ogprod ingest anp --origin publisher --year 2023 --month 1  # live regulator fetch
+python -m ogprod ingest anp --files a.csv b.csv                    # files downloaded by hand
+python -m ogprod coverage                                          # what the store holds
+python -m ogprod fetch argentina --year 2024                       # raw files into data/, no ingest
+python -m ogprod fetch sodir --entities --dest raw/                # raw entity file (FactMaps GeoJSON)
 ```
 
 `fetch` prints the downloaded paths, one per line. `ingest` brings in each
-source's entity geometry (well coordinates or field ring fences) on its first
-run; `--refresh` re-downloads it and `--no-entities` skips it.
+source's entity geometry (well coordinates or field ring fences) automatically;
+`--refresh` forces re-download (even when local checksums match) and
+`--no-entities` skips entities.
 
 Not every source has entity geometry wired up the same way as production —
 see the per-source notes below for what the entity download fetches and its
@@ -67,15 +87,33 @@ manual fallback.
 All three fetch implementations were verified against live downloads in July
 2026, with parsed totals cross-checked against published country figures.
 
+### Querying the mirror directly with DuckDB (power-user recipe)
+
+`ogprod.Store` is strictly local-first, but because the mirror stores plain
+zstd Parquet files in the exact same hive layout, DuckDB can query individual
+partitions directly over HTTPS without downloading the whole store:
+
+```sql
+SELECT field, sum(volume) AS oil_m3
+FROM read_parquet(
+  'https://huggingface.co/datasets/mralbu/ogprod/resolve/main/production/source=sodir/year=2024/data.parquet'
+)
+WHERE product = 'oil'
+GROUP BY field
+ORDER BY oil_m3 DESC
+LIMIT 10;
+```
+
 ## Per-source download
 
 ### `anp` — Brazil, well-level (monthly)
 
 ```python
-db.ingest("anp", year=2023, month=1)   # monthly, 2021-2023
-db.ingest("anp", year=2021)            # every month of a year
-db.ingest("anp", year=2019)            # yearly, 2005-2020
-db.ingest("anp")                       # everything, 2005-2023 (~70 MB download)
+db.ingest("anp", year=2023)                               # from mirror (yearly partition)
+db.ingest("anp", origin="publisher", year=2023, month=1)  # live monthly zip, 2021-2023
+db.ingest("anp", origin="publisher", year=2021)           # live whole year
+db.ingest("anp", origin="publisher", year=2019)           # live yearly zip, 2005-2020
+db.ingest("anp", origin="publisher")                      # live everything, 2005-2023 (~70 MB)
 ```
 
 `fetch` scrapes the [gov.br open-data page](https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/producao-de-petroleo-e-gas-natural-por-poco)
@@ -238,6 +276,23 @@ Keep `fetch` and `parse` separate so parsing stays testable offline: `fetch`
 returns paths, and `parse` (driven by `Store.ingest`) takes it from there. If
 the publisher's files overlap, override `restatement_order` so the restating
 file is parsed last. Accept a `client`
-keyword and test the fetch against an `httpx.MockTransport` with canned
+keyword and test the fetch against an `httpx2.MockTransport` with canned
 publisher responses (see `tests/test_fetch.py`); verify the URL and the
 downloaded file end to end against the live portal before wiring it in.
+
+## Publishing to the Hugging Face mirror (maintainers)
+
+Both CI (`.github/workflows/update-data.yml`) and local maintainer backfills
+use the same script with the `publish` dependency group:
+
+```sh
+HF_TOKEN=... uv run --group publish python scripts/publish_mirror.py \
+  --store ~/.local/share/ogprod/store \
+  --source sodir --source argentina \
+  --dry-run
+```
+
+Omit `--dry-run` to push changed partitions and an updated `manifest.json` in
+one atomic Hugging Face commit (pass `--tag YYYY-MM` to create a pinned
+release tag, or `--force` to override sanity-gate drop checks).
+

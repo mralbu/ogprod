@@ -15,9 +15,10 @@ from ogprod import sources
 from ogprod.store import Store
 
 _PER_SOURCE_OPTIONS = (
-    "Per-source options: sodir takes none (whole history); "
+    "Mirror origin (default) accepts --year (one or more years) and --revision. "
+    "Publisher origin (--origin publisher): sodir takes no period flags; "
     "argentina takes --year; anp takes --year (plus --month for 2021-2023) "
-    "or no flags to download the whole 2005-2023 archive."
+    "or no flags for the whole 2005-2023 archive."
 )
 
 
@@ -30,17 +31,41 @@ def build_parser() -> argparse.ArgumentParser:
 
     ingest = commands.add_parser(
         "ingest",
-        help="fetch, parse and upsert a source into the local store",
+        help="sync from the mirror or fetch, parse and upsert a source into the local store",
         description=(
-            "Download a source's raw files (or take --files), parse them, and "
-            "upsert the result into the store. Entities are ingested too the "
-            "first time, or again with --refresh."
+            "Pull prebuilt Parquet from the mirror (default, --origin mirror) or "
+            "download raw files from the regulator (--origin publisher) or local "
+            "--files, parse them, and upsert into the store."
         ),
         epilog=_PER_SOURCE_OPTIONS,
     )
     ingest.add_argument("source", choices=sources.available())
-    ingest.add_argument("--year", type=int, help="production year (anp, argentina)")
-    ingest.add_argument("--month", type=int, help="production month (anp monthly files)")
+    ingest.add_argument(
+        "--origin",
+        choices=("mirror", "publisher"),
+        default="mirror",
+        help="where to pull data from (default: mirror)",
+    )
+    ingest.add_argument(
+        "--revision",
+        default="main",
+        help="mirror git revision or tag (default: main)",
+    )
+    ingest.add_argument(
+        "--mirror",
+        default=None,
+        help="mirror Hugging Face repo id or base URL (default: $OGPROD_MIRROR or mralbu/ogprod)",
+    )
+    ingest.add_argument(
+        "--year",
+        type=int,
+        nargs="+",
+        action="extend",
+        help="production year(s) (pass one or more for mirror; single year for publisher)",
+    )
+    ingest.add_argument(
+        "--month", type=int, help="production month (publisher origin only, e.g. anp monthly files)"
+    )
     ingest.add_argument(
         "--files", type=Path, nargs="+", help="ingest these downloaded files instead of fetching"
     )
@@ -48,7 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-entities", action="store_true", help="skip entity geometry (wells / ring fences)"
     )
     ingest.add_argument(
-        "--refresh", action="store_true", help="re-download entities even if already stored"
+        "--refresh",
+        action="store_true",
+        help="force re-download even if already stored / checksum matches",
     )
     ingest.add_argument("--store", type=Path, default=None, dest="store_root", help=store_help)
 
@@ -74,13 +101,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _options(args: argparse.Namespace) -> dict:
-    return {key: value for key in ("year", "month") if (value := getattr(args, key)) is not None}
+    options: dict = {}
+    for key in ("year", "month"):
+        value = getattr(args, key)
+        if value is None:
+            continue
+        if key == "year" and isinstance(value, list) and len(value) == 1:
+            value = value[0]
+        options[key] = value
+    return options
 
 
 def _run(args: argparse.Namespace) -> None:
     if args.command == "ingest":
         result = Store(args.store_root).ingest(
             args.source,
+            origin=args.origin,
+            revision=args.revision,
+            mirror=args.mirror,
             files=args.files,
             entities=not args.no_entities,
             refresh=args.refresh,
@@ -100,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         _run(args)
-    except (ValueError, TypeError, NotImplementedError) as error:
+    except (ValueError, TypeError, NotImplementedError, RuntimeError) as error:
         print(f"error: {error}", file=sys.stderr)
         for note in getattr(error, "__notes__", []):
             print(note, file=sys.stderr)
