@@ -1,0 +1,10 @@
+COMISIÓN NACIONAL DE HIDROCARBUROS,,,,,,,,,,
+PRODUCCION POR CAMPO,,,,,,,,,,
+"Datos de producción mensual de aceite, gas, condensado y agua por campo y ubicación.",,,,,,,,,,
+Datos a enero - 2025.,,,,,,,,,,
+Fuente: Comisión Nacional de Hidrocarburos con información propia y de Petróleos Mexicanos.,,,,,,,,,,
+Notas: Las unidades corresponden a Miles de barriles diarios (Mbd) y Millones de pies cúbicos diarios (MMpcd).,,,,,,,,,,
+,,,,,,,,,,
+FECHA,CAMPO_OFICIAL,CAMPO_SIH,UBICACION,HIDROCARBUROS_LIQUIDOS_MBD,PETROLEO_MBD,CONDENSADO_MBD,GAS_ASOC_MMPCD,GAS_NASOC_MMPCD,NITROGENO_MMPCD,AGUA_MBD
+01/2025,Maloob,MALOOB,Aguas someras,250.5,250.5,0.0,100.0,0.0,50.0,40.0
+01/2025,Quesqui,QUESQUI,Terrestre,120.0,20.0,100.0,50.0,50.0,0.0,5.0
