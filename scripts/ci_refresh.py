@@ -55,6 +55,15 @@ def _emit_output(key: str, value: str) -> None:
         handle.write(f"{key}={value}\n")
 
 
+def _log_source_audit(db: store.Store, source: str) -> None:
+    report = db.audit(source=source)
+    for finding in report.findings:
+        print(
+            f"[audit:{finding.severity}] {finding.source} ({finding.check}): {finding.message}",
+            file=sys.stderr,
+        )
+
+
 def run_refresh(
     selected_sources: list[str],
     *,
@@ -89,6 +98,7 @@ def run_refresh(
                 f"[ok] {src}: {summary.production_rows:,} rows, "
                 f"{len(summary.partitions)} partition(s), geo={summary.geo_counts}"
             )
+            _log_source_audit(target_db, src)
             succeeded.append(src)
         except Exception as err:
             failed[src] = f"{type(err).__name__}: {err}"

@@ -16,7 +16,10 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from ogprod.audit import AuditReport
 
 import duckdb
 import geopandas as gpd
@@ -131,8 +134,14 @@ def _sort_production(table: pa.Table) -> pa.Table:
     return table.sort_by(order)
 
 
-def write_production(table: pa.Table, root: str | Path | None = None) -> list[Path]:
-    """Atomically upsert a validated production Arrow table by ``(source, year)``."""
+def _write_production_parts(
+    table: pa.Table,
+    root: str | Path | None = None,
+    *,
+    replace: bool = False,
+    replace_years: set[int] | None = None,
+    already_replaced: set[Path] | None = None,
+) -> list[Path]:
     validated = schema.validate_production(table)
     if validated.num_rows == 0:
         return []
@@ -153,12 +162,31 @@ def write_production(table: pa.Table, root: str | Path | None = None) -> list[Pa
     for (src, year), indices in sorted(indices_by_part.items()):
         part = validated.take(indices)
         path = _partition_path(base_root, src, year)
+        should_replace = replace or (
+            already_replaced is not None
+            and path not in already_replaced
+            and (replace_years is None or year in replace_years)
+        )
         merged = (
-            _merge_partition(pq.read_table(path), part) if path.exists() else _sort_production(part)
+            _sort_production(part)
+            if should_replace or not path.exists()
+            else _merge_partition(pq.read_table(path), part)
         )
         _atomic_write_parquet(merged, path)
+        if should_replace and already_replaced is not None:
+            already_replaced.add(path)
         written.append(path)
     return written
+
+
+def write_production(
+    table: pa.Table,
+    root: str | Path | None = None,
+    *,
+    replace: bool = False,
+) -> list[Path]:
+    """Atomically upsert (or replace) a validated production Arrow table by ``(source, year)``."""
+    return _write_production_parts(table, root=root, replace=replace)
 
 
 def combine_tables(tables: Sequence[pa.Table]) -> pa.Table:
@@ -375,6 +403,23 @@ def _should_skip_remote(
     return remote.year_max is not None and remote.year_max < current_year - 1
 
 
+def _resolve_refresh_replacement(
+    *,
+    refresh: bool,
+    years: list[int] | None,
+    options: dict[str, Any],
+) -> tuple[bool, set[int] | None]:
+    """Decide which year partitions can be cleanly replaced without losing partial-filter rows."""
+    if not refresh or options.get("environment") is not None:
+        return False, None
+    if years is not None:
+        return True, set(years)
+    if options.get("recent"):
+        current_year = datetime.now(tz=UTC).year
+        return True, {current_year - 1, current_year}
+    return True, None
+
+
 def _discover_for_years(
     connector: base.Source,
     http: httpx2.Client,
@@ -538,6 +583,9 @@ class Store:
         if files is not None:
             return self._ingest_local_files(connector, [Path(f) for f in files])
         years = mirror_mod.normalize_years(year)
+        replace_mode, replace_years = _resolve_refresh_replacement(
+            refresh=refresh, years=years, options=options
+        )
         with base.open_client(client) as http:
             remotes = _discover_for_years(connector, http, years, options)
             return self._ingest_remote_files(
@@ -547,6 +595,8 @@ class Store:
                 work_dir=work_dir / "production",
                 recorded=src_entry.setdefault("files", {}),
                 refresh=refresh,
+                replace_mode=replace_mode,
+                replace_years=replace_years,
             )
 
     def _ingest_local_files(
@@ -574,6 +624,8 @@ class Store:
         work_dir: Path,
         recorded: dict[str, Any],
         refresh: bool,
+        replace_mode: bool = False,
+        replace_years: set[int] | None = None,
     ) -> tuple[int, int, int, list[Path]]:
         current_year = datetime.now(tz=UTC).year
         ingested = 0
@@ -581,6 +633,7 @@ class Store:
         rows = 0
         partitions: list[Path] = []
         batch: list[pa.Table] = []
+        already_replaced: set[Path] | None = set() if replace_mode else None
 
         for remote in remotes:
             if _should_skip_remote(remote, recorded, refresh=refresh, current_year=current_year):
@@ -598,17 +651,42 @@ class Store:
             }
             ingested += 1
             if sum(t.num_rows for t in batch) >= _BATCH_ROWS:
-                rows, partitions = self._flush_batch(batch, rows, partitions)
+                rows, partitions = self._flush_batch(
+                    batch,
+                    rows,
+                    partitions,
+                    replace_years=replace_years,
+                    already_replaced=already_replaced,
+                )
                 batch = []
         if batch:
-            rows, partitions = self._flush_batch(batch, rows, partitions)
+            rows, partitions = self._flush_batch(
+                batch,
+                rows,
+                partitions,
+                replace_years=replace_years,
+                already_replaced=already_replaced,
+            )
         return ingested, skipped, rows, partitions
 
     def _flush_batch(
-        self, batch: list[pa.Table], rows: int, partitions: list[Path]
+        self,
+        batch: list[pa.Table],
+        rows: int,
+        partitions: list[Path],
+        *,
+        replace_years: set[int] | None = None,
+        already_replaced: set[Path] | None = None,
     ) -> tuple[int, list[Path]]:
         combined = combine_tables(batch)
-        partitions.extend(write_production(combined, root=self.root))
+        partitions.extend(
+            _write_production_parts(
+                combined,
+                root=self.root,
+                replace_years=replace_years,
+                already_replaced=already_replaced,
+            )
+        )
         return rows + combined.num_rows, partitions
 
     def _ingest_geo_layers(
@@ -688,4 +766,21 @@ class Store:
             FULL OUTER JOIN w ON coalesce(p.source, f.source, fac.source) = w.source
             ORDER BY 1
             """
+        )
+
+    def audit(
+        self,
+        *,
+        source: str | None = None,
+        reference_date: date | None = None,
+        stale_months: int = 6,
+    ) -> AuditReport:
+        """Audit stored Parquet and GeoParquet tables for data-quality issues."""
+        from ogprod.audit import audit_store
+
+        return audit_store(
+            self.root,
+            source=source,
+            reference_date=reference_date,
+            stale_months=stale_months,
         )

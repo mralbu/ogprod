@@ -107,3 +107,60 @@ def test_store_filters_sql_and_geo_coverage(tmp_path: Path) -> None:
     assert cov.loc[0, "rows"] == 1
     assert cov.loc[0, "facilities"] == 1
     assert cov.loc[0, "fields"] == 0
+
+
+def test_refresh_replaces_requested_year_without_wiping_spillover_or_other_env(
+    tmp_path: Path,
+) -> None:
+    import httpx2
+
+    # Seed 2017 onshore + 2018 stale row with old facility key.
+    seed = base.build_production_table(
+        source="brazil",
+        entity_type=schema.EntityType.WELL,
+        entity_id=pd.Series(["W-ON-17", "W-STALE-18"]),
+        entity_name=pd.Series(["W-ON-17", "W-STALE-18"]),
+        period=pd.Series([date(2017, 1, 1), date(2018, 1, 1)]),
+        field_id=pd.Series(["F1", "F1"]),
+        field_name=pd.Series(["F1", "F1"]),
+        facility_id=pd.Series(["", "OLD STALE FAC"]),
+        facility_name=pd.Series([pd.NA, "OLD STALE FAC"]),
+        environment=pd.Series(["onshore", "offshore"]),
+        rates={"oil_prod": pd.Series([100.0, 999.0])},
+    )
+    write_production(seed, root=tmp_path)
+
+    portal_html = (
+        '<a href="https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/'
+        "arquivos-fase-de-desenvolvimento-e-producao/"
+        'arquivos-producao-de-petroleo-e-gas-natural-nacional/pm/producao-mar-2017-2018.csv">m</a>'
+    )
+    csv_body = (
+        (
+            "Ano,Mês/Ano,Estado,Bacia,Campo,Poço,Ambiente,Instalação,Produção de Óleo (m³)\n"
+            "2017,01/2017,Rio de Janeiro,Santos,F1,W-OFF-17,Mar,FPSO A,158,99\n"
+            "2018,01/2018,Rio de Janeiro,Santos,F1,W-FRESH-18,Mar,FPSO A,317,97\n"
+        )
+        .replace("158,99", '"158,99"')
+        .replace("317,97", '"317,97"')
+    )
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        url = str(request.url)
+        if url.endswith("fase-de-desenvolvimento-e-producao"):
+            return httpx2.Response(200, text=portal_html)
+        if url.endswith("producao-mar-2017-2018.csv"):
+            return httpx2.Response(200, text=csv_body)
+        return httpx2.Response(404)
+
+    db = Store(tmp_path)
+    client = httpx2.Client(transport=httpx2.MockTransport(handler))
+    db.ingest(
+        "brazil", year=2018, origin="publisher", refresh=True, geo_layers=False, client=client
+    )
+
+    df_2018 = db.production(source="brazil", start="2018-01", end="2018-12")
+    assert list(df_2018["entity_id"]) == ["W-FRESH-18"]  # stale row cleanly purged
+
+    df_2017 = db.production(source="brazil", start="2017-01", end="2017-12")
+    assert set(df_2017["entity_id"]) == {"W-ON-17", "W-OFF-17"}  # spillover year merged, not wiped

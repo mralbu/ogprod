@@ -108,3 +108,22 @@ def test_validate_geo_rejects_wrong_geometry_crs_and_bounds() -> None:
         schema.validate_geo(
             wrong_crs[list(schema.GEO_SPECS[schema.GeoKind.WELLS].columns)], schema.GeoKind.WELLS
         )
+
+
+def test_validate_production_rejects_infinite_rates() -> None:
+    import math
+    from datetime import date
+
+    import pandas as pd
+
+    from ogprod.sources import base
+
+    with pytest.raises(schema.SchemaError, match="NaN or Inf"):
+        base.build_production_table(
+            source="brazil",
+            entity_type=schema.EntityType.WELL,
+            entity_id=pd.Series(["W1"]),
+            entity_name=pd.Series(["W1"]),
+            period=pd.Series([date(2026, 1, 1)]),
+            rates={"oil_prod": pd.Series([math.inf])},
+        )

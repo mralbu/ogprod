@@ -176,3 +176,43 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
     assert mx_meta["publisher"] == "SENER / CNIH"
     assert "PRODUCCION_CAMPOS.csv" in mx_meta["files"]
     assert schema.GeoKind.FIELDS.value in summary.geo_counts
+
+
+def test_mexico_field_id_normalization_and_bad_fecha_rejected() -> None:
+    import io
+
+    csv_ok = (
+        "FECHA,CAMPO_OFICIAL,CAMPO_SIH,UBICACION,PETROLEO_MBD,GAS_ASOC_MMPCD\n"
+        "01/2025,Tupilco Profundo,TUPILCOPROFUNDO,Terrestre,50.0,10.0\n"
+        "01/2025,Chiapas-Copano,CHIAPAS COPANO,Terrestre,20.0,5.0\n"
+    )
+    df = mexico.Mexico().parse_production(io.BytesIO(csv_ok.encode("utf-8"))).to_pandas()
+    assert set(df["field_id"]) == {"TUPILCO PROFUNDO", "CHIAPAS COPANO"}
+
+    csv_bad = "FECHA,CAMPO_OFICIAL,CAMPO_SIH,UBICACION,PETROLEO_MBD\n2025-01,Maloob,MALOOB,Mar,10\n"
+    with pytest.raises(ValueError, match="unparseable FECHA"):
+        mexico.Mexico().parse_production(io.BytesIO(csv_bad.encode("utf-8")))
+
+
+def test_mexico_wells_cleans_no_disponible_sentinel(tmp_path: Path) -> None:
+    well_zip = _write_shp_zip(
+        gpd.GeoDataFrame(
+            {
+                "pozo": ["EXPL-1", "PROD-1"],
+                "campo": ["NO DISPONIBLE", "Tupilco-Profundo"],
+                "entidad": ["TABASCO", "TABASCO"],
+                "ubicacin": ["TERRESTRE", "TERRESTRE"],
+                "estado_act": ["CERRADO", "PRODUCTOR"],
+                "fecha_inic": ["01-ENE-2020", "01-FEB-2020"],
+                "fecha_fin_": ["01-MAR-2020", "01-ABR-2020"],
+            },
+            geometry=[shapely.Point(-93.1, 18.1), shapely.Point(-93.2, 18.2)],
+            crs="EPSG:4326",
+        ),
+        tmp_path / "pozos.zip",
+        "pozos",
+    )
+    wells = mexico.Mexico().parse_geo(schema.GeoKind.WELLS, [well_zip]).set_index("well_id")
+    assert wells["field_id"].isna().loc["EXPL-1"]
+    assert wells["field_name"].isna().loc["EXPL-1"]
+    assert wells.loc["PROD-1", "field_id"] == "TUPILCO PROFUNDO"

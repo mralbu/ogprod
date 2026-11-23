@@ -60,6 +60,11 @@ _PROD_LINK_RE = re.compile(
     r'arquivos-producao-de-petroleo-e-gas-natural-nacional/(?P<env>pm|pt)/[^"]+\.csv)"',
     re.IGNORECASE,
 )
+_WELLS_LINK_RE = re.compile(
+    r'href="(?P<url>https://www\.gov\.br/anp/[^"]*'
+    r'informacoes-sobre-pocos/situacao-pocos[^"]*\.csv)"',
+    re.IGNORECASE,
+)
 
 # Relative and absolute tolerances when merging known ANP duplicate well-months.
 # 0.5 bbl/d (~2.4 m³/month) covers 1-2 m³ rounding differences between ANP's pre-2005
@@ -81,6 +86,34 @@ _STATE_SUFFIX: dict[str, str] = {
     "santa catarina": "SC",
     "sao paulo": "SP",
     "sergipe": "SE",
+}
+
+# Portuguese 3-letter month abbreviations used in ANP CSVs (e.g. 'out/2025', 'dez/2025').
+_PT_MONTHS: dict[str, str] = {
+    "jan": "01",
+    "fev": "02",
+    "mar": "03",
+    "abr": "04",
+    "mai": "05",
+    "jun": "06",
+    "jul": "07",
+    "ago": "08",
+    "set": "09",
+    "out": "10",
+    "nov": "11",
+    "dez": "12",
+}
+
+_MISSING_SENTINELS = frozenset({"", "NAO INFORMADO", "(NAO CADASTRADO)"})
+
+# Trailing platform/hull code tags in pre-2022 ANP CSVs (e.g. 'PETROBRAS 66 (P-66)').
+_FACILITY_CODE_SUFFIX_RE = re.compile(r"\s*\((?:P-\d+|MV-\d+)\)\s*$")
+
+# Known pre-2022 ANP production facility spelling drifts vs LPO canonical names.
+_FACILITY_ALIASES: dict[str, str] = {
+    "FPSO CIDADE DE ILHA BELA": "FPSO CIDADE DE ILHABELA",
+    "PLATAFORMA DE PAMPO-1": "PLATAFORMA DE PAMPO 1",
+    "FPSO CIDADE DE CARAGUATATUBA": "FPSO CIDADE DE CARAGUATATUBA - CCG (MV-27)",
 }
 
 
@@ -223,14 +256,46 @@ def _read_csv_auto(raw: base.RawFile) -> pd.DataFrame:
     raise ValueError("could not decode ANP CSV as utf-8-sig or cp1252")
 
 
+_PT_PERIOD_RE = re.compile(r"^([a-z]{3})[/-](\d{4})$")
+
+
+def _normalize_month_year_text(value: object) -> object:
+    if pd.isna(value):
+        return pd.NA
+    text = str(value).strip()
+    if not text:
+        return pd.NA
+    match = _PT_PERIOD_RE.match(text.lower())
+    if match and match.group(1) in _PT_MONTHS:
+        return f"{_PT_MONTHS[match.group(1)]}/{match.group(2)}"
+    return text
+
+
+def _parse_anp_period_series(series: pd.Series) -> pd.Series:
+    """Parse ANP month/year strings (``MM/YYYY``, ``mmm/YYYY`` PT, ``YYYY-MM``) to Timestamp."""
+    norm = series.map(_normalize_month_year_text).astype("string")
+    parsed = pd.to_datetime(norm, format="%m/%Y", errors="coerce")
+    unresolved = norm.notna() & parsed.isna()
+    if unresolved.any():
+        iso_cand = norm.loc[unresolved].str.replace("/", "-", regex=False)
+        parsed = parsed.copy()
+        parsed.loc[unresolved] = pd.to_datetime(iso_cand, format="%Y-%m", errors="coerce")
+    return parsed
+
+
 def _extract_period(frame: pd.DataFrame, cols: dict[str, str]) -> pd.Series:
-    if "mes/ano" in cols:
-        text = frame[cols["mes/ano"]].astype("string").str.strip()
-        return pd.to_datetime(text, format="%m/%Y", errors="coerce")
-    if "periodo" in cols:
-        text = frame[cols["periodo"]].astype("string").str.strip().str.replace("/", "-")
-        return pd.to_datetime(text, format="%Y-%m", errors="coerce")
-    raise ValueError("ANP production CSV missing 'Mês/Ano' or 'Período' column")
+    raw_col = cols.get("mes/ano") or cols.get("periodo")
+    if raw_col is None:
+        raise ValueError("ANP production CSV missing 'Mês/Ano' or 'Período' column")
+    raw_text = frame[raw_col].astype("string").str.strip()
+    parsed = _parse_anp_period_series(raw_text)
+    bad_mask = raw_text.notna() & (raw_text != "") & parsed.isna()
+    if bad_mask.any():
+        samples = raw_text.loc[bad_mask].drop_duplicates().head(5).tolist()
+        raise ValueError(
+            f"ANP production CSV has {int(bad_mask.sum())} unparseable period value(s): {samples}"
+        )
+    return parsed
 
 
 def _sum_optional(a: pd.Series | None, b: pd.Series | None, length: int) -> pd.Series:
@@ -294,6 +359,16 @@ def _state_matches_well(well: pd.Series, state: pd.Series) -> pd.Series:
     return suffix == norm_state
 
 
+def _canonicalize_facility_id(norm_id: str) -> str:
+    if norm_id in _MISSING_SENTINELS:
+        return ""
+    if norm_id in _FACILITY_ALIASES:
+        return _FACILITY_ALIASES[norm_id]
+    if " - " not in norm_id:
+        return _FACILITY_CODE_SUFFIX_RE.sub("", norm_id).strip()
+    return norm_id
+
+
 def _clean_facility(series: pd.Series | None, length: int) -> tuple[pd.Series, pd.Series]:
     if series is None:
         empty = pd.Series([""] * length, dtype="string")
@@ -301,10 +376,17 @@ def _clean_facility(series: pd.Series | None, length: int) -> tuple[pd.Series, p
         return empty, nulls
     raw_name = series.astype("string").str.strip()
     norm_id = raw_name.map(lambda v: schema.normalize_key(None if pd.isna(v) else str(v)))
-    missing = norm_id.isin({"", "NAO INFORMADO"})
-    fac_id = norm_id.mask(missing, "").astype("string")
-    fac_name = raw_name.mask(missing, pd.NA).astype("string")
+    fac_id = norm_id.map(_canonicalize_facility_id).astype("string")
+    fac_name = raw_name.mask(fac_id == "", pd.NA).astype("string")
     return fac_id, fac_name
+
+
+def _clean_region(series: pd.Series | None, length: int) -> pd.Series:
+    if series is None:
+        return pd.Series([pd.NA] * length, dtype="string")
+    raw = series.astype("string").str.strip()
+    norm = raw.map(lambda v: schema.normalize_key(None if pd.isna(v) else str(v)))
+    return raw.mask(norm.isin(_MISSING_SENTINELS), pd.NA).astype("string")
 
 
 def _drop_empty_unassigned_facility(work: pd.DataFrame, rate_cols: list[str]) -> pd.DataFrame:
@@ -370,14 +452,21 @@ def _warn_known_gaps(table: pa.Table) -> None:
 
 
 def _parse_br_date(series: pd.Series) -> pd.Series:
+    """Parse Brazilian ``DD/MM/YYYY`` or ``DD-MM-YYYY`` (or ISO ``YYYY-MM-DD``) dates to ISO."""
     text = series.astype("string").str.strip()
-    parsed = pd.to_datetime(text, format="%d/%m/%Y", errors="coerce")
+    slash = text.str.replace("-", "/", regex=False)
+    parsed = pd.to_datetime(slash, format="%d/%m/%Y", errors="coerce")
+    unresolved = text.notna() & (text != "") & parsed.isna()
+    if unresolved.any():
+        parsed = parsed.copy()
+        parsed.loc[unresolved] = pd.to_datetime(
+            text.loc[unresolved], format="%Y-%m-%d", errors="coerce"
+        )
     return parsed.dt.strftime("%Y-%m-%d").astype("string")
 
 
 def _parse_month_year(series: pd.Series) -> pd.Series:
-    text = series.astype("string").str.strip()
-    parsed = pd.to_datetime(text, format="%m/%Y", errors="coerce")
+    parsed = _parse_anp_period_series(series)
     return parsed.dt.strftime("%Y-%m-%d").astype("string")
 
 
@@ -488,8 +577,10 @@ def _parse_fields_wfs(wfs_path: Path) -> gpd.GeoDataFrame:
             "operator": dissolved[cols["operador_c"]] if "operador_c" in cols else pd.NA,
             "status": dissolved[cols["etapa"]] if "etapa" in cols else pd.NA,
             "primary_fluid": dissolved[cols["fluido_pri"]] if "fluido_pri" in cols else pd.NA,
-            "discovery_date": dissolved[cols["dat_descob"]] if "dat_descob" in cols else pd.NA,
-            "production_start_date": dissolved[cols["dat_inicio"]]
+            "discovery_date": _parse_br_date(dissolved[cols["dat_descob"]])
+            if "dat_descob" in cols
+            else pd.NA,
+            "production_start_date": _parse_br_date(dissolved[cols["dat_inicio"]])
             if "dat_inicio" in cols
             else pd.NA,
             "water_depth_m": dissolved[cols["med_lamina"]] if "med_lamina" in cols else pd.NA,
@@ -500,48 +591,48 @@ def _parse_fields_wfs(wfs_path: Path) -> gpd.GeoDataFrame:
     )
 
 
+def _read_fields_meta_csv(path: Path) -> pd.DataFrame | None:
+    df = _read_csv_auto(path)
+    cols = {_norm_header(c): c for c in df.columns}
+    if "campo" not in cols:
+        return None
+    status_col = cols.get("situacao_campo") or cols.get("situacao")
+    return pd.DataFrame(
+        {
+            "field_id": df[cols["campo"]].map(
+                lambda v: schema.normalize_key(None if pd.isna(v) else str(v))
+            ),
+            "field_code": df[cols["codigo_campo"]] if "codigo_campo" in cols else pd.NA,
+            "field_name": df[cols["campo"]],
+            "basin": df[cols["bacia"]] if "bacia" in cols else pd.NA,
+            "region": df[cols["estado"]] if "estado" in cols else pd.NA,
+            "environment": _normalize_environment(
+                df[cols["ambiente"]] if "ambiente" in cols else None, len(df)
+            ),
+            "operator": df[cols["operador"]] if "operador" in cols else pd.NA,
+            "status": df[status_col] if status_col else "Devolvido",
+            "production_start_date": _parse_br_date(df[cols["data_inicio_producao"]])
+            if "data_inicio_producao" in cols
+            else pd.NA,
+        }
+    )
+
+
 def _enrich_fields_from_csv(
     base_fields: gpd.GeoDataFrame, csv_paths: list[Path]
 ) -> gpd.GeoDataFrame:
-    """Add region/dates and relinquished historical fields (null geometry) from ANP CSVs."""
-    frames: list[pd.DataFrame] = []
-    for path in csv_paths:
-        df = _read_csv_auto(path)
-        cols = {_norm_header(c): c for c in df.columns}
-        if "campo" not in cols:
-            continue
-        frames.append(
-            pd.DataFrame(
-                {
-                    "field_id": df[cols["campo"]].map(
-                        lambda v: schema.normalize_key(None if pd.isna(v) else str(v))
-                    ),
-                    "field_code": df[cols["codigo_campo"]] if "codigo_campo" in cols else pd.NA,
-                    "field_name": df[cols["campo"]],
-                    "basin": df[cols["bacia"]] if "bacia" in cols else pd.NA,
-                    "region": df[cols["estado"]] if "estado" in cols else pd.NA,
-                    "environment": _normalize_environment(
-                        df[cols["ambiente"]] if "ambiente" in cols else None, len(df)
-                    ),
-                    "operator": df[cols["operador"]] if "operador" in cols else pd.NA,
-                    "status": df[cols["situacao_campo"]]
-                    if "situacao_campo" in cols
-                    else "Devolvido",
-                    "production_start_date": _parse_br_date(df[cols["data_inicio_producao"]])
-                    if "data_inicio_producao" in cols
-                    else pd.NA,
-                }
-            )
-        )
+    """Add region/env/dates and relinquished historical fields (null geometry) from ANP CSVs."""
+    frames = [frame for path in csv_paths if (frame := _read_fields_meta_csv(path)) is not None]
     if not frames:
         return base_fields
     meta = pd.concat(frames, ignore_index=True)
     meta = meta.loc[meta["field_id"] != ""].drop_duplicates(subset=["field_id"], keep="first")
 
-    # Fill missing region on WFS rows and append fields absent from WFS (e.g. relinquished fields).
-    region_lookup = meta.set_index("field_id")["region"]
+    # Backfill missing metadata on WFS rows and append fields absent from WFS (e.g. relinquished).
+    lookup = meta.set_index("field_id")
     enriched = base_fields.copy()
-    enriched["region"] = enriched["region"].fillna(enriched["field_id"].map(region_lookup))
+    for col in ("region", "environment", "operator", "production_start_date"):
+        enriched[col] = enriched[col].fillna(enriched["field_id"].map(lookup[col]))
 
     missing = meta.loc[~meta["field_id"].isin(enriched["field_id"])].copy()
     if len(missing) == 0:
@@ -641,9 +732,7 @@ class Brazil(base.Source):
     ) -> list[base.RemoteFile]:
         """Discover onshore and offshore production CSVs from ANP's portal page."""
         with base.open_client(client) as http:
-            response = http.get(_PORTAL_URL)
-            response.raise_for_status()
-            html = response.text
+            html = base.get_with_retry(http, _PORTAL_URL).text
 
         seen: set[str] = set()
         remotes: list[base.RemoteFile] = []
@@ -678,11 +767,16 @@ class Brazil(base.Source):
                 f"not an ANP production CSV; missing 'Poço' column: {sorted(frame.columns)}"
             )
 
+        raw_rows = len(frame)
         period = _extract_period(frame, cols)
         valid = period.notna() & frame[cols["poco"]].notna()
         frame = frame.loc[valid].reset_index(drop=True)
         period = period.loc[valid].reset_index(drop=True)
         if len(frame) == 0:
+            if raw_rows > 0:
+                raise ValueError(
+                    f"ANP production CSV had {raw_rows} row(s) but 0 valid well/period rows"
+                )
             return schema.empty_production()
 
         days = period.dt.days_in_month.astype("float64")
@@ -709,9 +803,9 @@ class Brazil(base.Source):
                 "basin": frame[cols["bacia"]].astype("string").str.strip()
                 if "bacia" in cols
                 else pd.NA,
-                "region": frame[cols["estado"]].astype("string").str.strip()
-                if "estado" in cols
-                else pd.NA,
+                "region": _clean_region(
+                    frame[cols["estado"]] if "estado" in cols else None, len(frame)
+                ),
                 "environment": _normalize_environment(
                     frame[cols["ambiente"]] if "ambiente" in cols else None, len(frame)
                 ),
@@ -752,9 +846,8 @@ class Brazil(base.Source):
             if kind is schema.GeoKind.FACILITIES:
                 return [base.download_file(http, _PLATFORMS_URL, dest_dir / "plataformas.csv")]
             if kind is schema.GeoKind.WELLS:
-                return [
-                    base.download_file(http, _WELLS_STATUS_URL, dest_dir / "situacao_pocos.csv")
-                ]
+                wells_url = _discover_wells_url(http)
+                return [base.download_file(http, wells_url, dest_dir / "situacao_pocos.csv")]
             if kind is schema.GeoKind.FIELDS:
                 return [
                     base.download_file(http, _WFS_FIELDS_URL, dest_dir / "campos.geojson"),
@@ -780,6 +873,17 @@ class Brazil(base.Source):
             enriched = _enrich_fields_from_csv(base_fields, csv_files)
             return geo.prepare_geo(enriched, schema.GeoKind.FIELDS)
         raise ValueError(f"unsupported geo kind: {kind!r}")
+
+
+def _discover_wells_url(http: httpx2.Client) -> str:
+    """Discover the current ANP wells CSV URL from the portal, falling back to the default."""
+    try:
+        resp = http.get(_PORTAL_URL)
+        resp.raise_for_status()
+    except httpx2.HTTPError:
+        return _WELLS_STATUS_URL
+    match = _WELLS_LINK_RE.search(resp.text)
+    return match.group("url") if match else _WELLS_STATUS_URL
 
 
 def _covers_year(y_min: int | None, y_max: int | None, year: int) -> bool:

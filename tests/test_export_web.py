@@ -195,3 +195,25 @@ def test_export_web_invokes_tippecanoe_and_cli(
     pmtiles = out_dir / "tiles" / "ogprod.pmtiles"
     assert pmtiles.exists()
     assert pmtiles.read_bytes().startswith(b"PMTiles")
+
+
+def test_source_bbox_prefers_fields_over_overseas_facilities() -> None:
+    fields = gpd.GeoDataFrame(
+        {"source": ["norway"], "field_id": ["1"], "field_name": ["TROLL"]},
+        geometry=[shapely.box(2.0, 58.0, 4.0, 62.0)],
+        crs="EPSG:4326",
+    )
+    # Mimics a continental European gas pipeline landfall terminal at 43°N.
+    facilities = gpd.GeoDataFrame(
+        {"source": ["norway"], "facility_id": ["416247"], "facility_name": ["COL DE LARRAU"]},
+        geometry=[shapely.Point(0.93, 43.02)],
+        crs="EPSG:4326",
+    )
+    wells = schema.empty_geo(schema.GeoKind.WELLS)
+    bbox = export_web._source_bbox("norway", (fields, facilities, wells))
+    assert bbox == [2.0, 58.0, 4.0, 62.0]
+
+    # When a source has no field geometries, falls back to facilities.
+    empty_fields = schema.empty_geo(schema.GeoKind.FIELDS)
+    fallback = export_web._source_bbox("norway", (empty_fields, facilities, wells))
+    assert fallback == [0.93, 43.02, 0.93, 43.02]

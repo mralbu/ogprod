@@ -161,14 +161,37 @@ def _sum_gas_mmpcd(frame: pd.DataFrame, cols: dict[str, str], keys: tuple[str, .
     return (a.fillna(0.0) + b.fillna(0.0)).mask(both_na) * _MMPCD_TO_E3M3D
 
 
+_MISSING_FIELD_SENTINELS = frozenset({"", "NO DISPONIBLE", "N/A", "NA", "-"})
+
+
+def _normalize_mexico_field_id(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return schema.normalize_key(str(value).replace("-", " "))
+
+
+def _check_unparseable_dates(raw: pd.Series, parsed: pd.Series, label: str) -> None:
+    bad = raw.notna() & (raw != "") & parsed.isna()
+    if bad.any():
+        samples = raw.loc[bad].drop_duplicates().head(5).tolist()
+        raise ValueError(
+            f"Mexico SIH {label} CSV has {int(bad.sum())} unparseable FECHA value(s): {samples}"
+        )
+
+
 def _parse_campos_frame(frame: pd.DataFrame, cols: dict[str, str]) -> pa.Table:
-    period = pd.to_datetime(
-        frame[cols["fecha"]].astype("string").str.strip(), format="%m/%Y", errors="coerce"
-    )
+    raw_rows = len(frame)
+    fecha_raw = frame[cols["fecha"]].astype("string").str.strip()
+    period = pd.to_datetime(fecha_raw, format="%m/%Y", errors="coerce")
+    _check_unparseable_dates(fecha_raw, period, "campos")
     valid = period.notna() & frame[cols["campo_sih"]].notna()
     frame = frame.loc[valid].reset_index(drop=True)
     period = period.loc[valid].reset_index(drop=True)
     if len(frame) == 0:
+        if raw_rows > 0:
+            raise ValueError(
+                f"Mexico SIH campos CSV had {raw_rows} row(s) but 0 valid field/period rows"
+            )
         return schema.empty_production()
 
     field_name = (
@@ -176,9 +199,9 @@ def _parse_campos_frame(frame: pd.DataFrame, cols: dict[str, str]) -> pa.Table:
         if "campo_oficial" in cols
         else frame[cols["campo_sih"]].astype("string").str.strip()
     )
-    field_id = frame[cols["campo_sih"]].map(
-        lambda v: schema.normalize_key(None if pd.isna(v) else str(v))
-    )
+    field_id = field_name.map(_normalize_mexico_field_id)
+    fallback_id = frame[cols["campo_sih"]].map(_normalize_mexico_field_id)
+    field_id = field_id.mask(field_id == "", fallback_id)
 
     rates = {
         "oil_prod": pd.to_numeric(frame[cols["petroleo_mbd"]], errors="coerce") * 1000.0
@@ -220,8 +243,10 @@ def _parse_campos_frame(frame: pd.DataFrame, cols: dict[str, str]) -> pa.Table:
 
 
 def _parse_pozos_frame(frame: pd.DataFrame, cols: dict[str, str]) -> pa.Table:
+    raw_rows = len(frame)
     fecha_raw = frame[cols["fecha"]].astype("string").str.strip()
     period = pd.to_datetime(fecha_raw, format="%d-%m-%Y", errors="coerce")
+    _check_unparseable_dates(fecha_raw, period, "pozos")
     # Normalize any non-first-of-month dates to month start.
     period = period.dt.to_period("M").dt.to_timestamp()
     id_col = cols["identificador"] if "identificador" in cols else cols["nombre_del_pozo"]
@@ -229,6 +254,10 @@ def _parse_pozos_frame(frame: pd.DataFrame, cols: dict[str, str]) -> pa.Table:
     frame = frame.loc[valid].reset_index(drop=True)
     period = period.loc[valid].reset_index(drop=True)
     if len(frame) == 0:
+        if raw_rows > 0:
+            raise ValueError(
+                f"Mexico SIH pozos CSV had {raw_rows} row(s) but 0 valid well/period rows"
+            )
         return schema.empty_production()
 
     entity_id = frame[id_col].astype("string").str.strip()
@@ -386,12 +415,15 @@ def _parse_wells_shps(paths: list[Path]) -> gpd.GeoDataFrame:
         raise ValueError(f"not a Mexico wells shapefile; columns: {sorted(gdf.columns)}")
 
     names = gdf[cols["pozo"]].astype("string").str.strip()
-    field_name = gdf[cols["campo"]].astype("string").str.strip() if "campo" in cols else pd.NA
-    field_id = (
-        field_name.map(lambda v: schema.normalize_key(None if pd.isna(v) else str(v)))
-        if isinstance(field_name, pd.Series)
-        else pd.NA
-    )
+    if "campo" in cols:
+        raw_field = gdf[cols["campo"]].astype("string").str.strip()
+        norm_field = raw_field.map(_normalize_mexico_field_id)
+        missing_field = norm_field.isin(_MISSING_FIELD_SENTINELS)
+        field_id: pd.Series | object = norm_field.mask(missing_field, pd.NA).astype("string")
+        field_name: pd.Series | object = raw_field.mask(missing_field, pd.NA).astype("string")
+    else:
+        field_id = pd.NA
+        field_name = pd.NA
     env_col = next((c for k, c in cols.items() if k.startswith("ubicaci")), None)
     status_col = next((c for k, c in cols.items() if k.startswith("estado")), None)
     spud_col = next((c for k, c in cols.items() if k.startswith("fecha_inic")), None)
@@ -402,9 +434,7 @@ def _parse_wells_shps(paths: list[Path]) -> gpd.GeoDataFrame:
             "source": "mexico",
             "well_id": names,
             "well_name": names,
-            "field_id": field_id.mask(field_id == "", pd.NA)
-            if isinstance(field_id, pd.Series)
-            else pd.NA,
+            "field_id": field_id,
             "field_name": field_name,
             "region": gdf[cols["entidad"]] if "entidad" in cols else pd.NA,
             "environment": _normalize_environment(gdf[env_col] if env_col else None, len(gdf)),

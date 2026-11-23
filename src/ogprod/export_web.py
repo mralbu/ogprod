@@ -727,21 +727,31 @@ def _build_pmtiles(
     return True
 
 
+def _layer_bounds(
+    gdf: gpd.GeoDataFrame, source_name: str
+) -> tuple[float, float, float, float] | None:
+    if len(gdf) == 0:
+        return None
+    sub = gdf.loc[gdf["source"] == source_name]
+    non_null = sub.geometry.dropna()
+    non_null = non_null.loc[~non_null.is_empty]
+    if len(non_null) == 0:
+        return None
+    b = non_null.total_bounds
+    return (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
+
+
 def _source_bbox(
     source_name: str,
     geo_frames: tuple[gpd.GeoDataFrame, ...],
 ) -> list[float] | None:
-    bounds: list[tuple[float, float, float, float]] = []
-    for gdf in geo_frames:
-        if len(gdf) == 0:
-            continue
-        sub = gdf.loc[gdf["source"] == source_name]
-        non_null = sub.geometry.dropna()
-        non_null = non_null.loc[~non_null.is_empty]
-        if len(non_null) == 0:
-            continue
-        b = non_null.total_bounds
-        bounds.append((float(b[0]), float(b[1]), float(b[2]), float(b[3])))
+    # Prefer field geometries (geo_frames[0]) when present so overseas pipeline landfalls
+    # in facilities (e.g. Norway gas terminals in continental Europe) do not distort fitBounds.
+    if geo_frames:
+        field_bounds = _layer_bounds(geo_frames[0], source_name)
+        if field_bounds is not None:
+            return [round(v, 4) for v in field_bounds]
+    bounds = [b for gdf in geo_frames if (b := _layer_bounds(gdf, source_name)) is not None]
     if not bounds:
         return None
     return [

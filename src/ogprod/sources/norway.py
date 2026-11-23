@@ -83,6 +83,17 @@ def _epoch_ms_to_year(series: pd.Series) -> pd.Series:
     ).astype("Int32")
 
 
+def _has_more_arcgis_pages(payload: dict[str, Any], page_count: int) -> bool:
+    if page_count == 0:
+        return False
+    exceeded = payload.get("exceededTransferLimit")
+    if exceeded is None and isinstance(payload.get("properties"), dict):
+        exceeded = payload["properties"].get("exceededTransferLimit")
+    if isinstance(exceeded, bool):
+        return exceeded
+    return page_count >= _PAGE_SIZE
+
+
 def _fetch_arcgis_geojson(
     http: httpx2.Client,
     layer_id: int,
@@ -101,12 +112,11 @@ def _fetch_arcgis_geojson(
         )
         if not first_url:
             first_url = url
-        resp = http.get(url)
-        resp.raise_for_status()
+        resp = base.get_with_retry(http, url)
         payload = resp.json()
         page_feats = payload.get("features", [])
         features.extend(page_feats)
-        if len(page_feats) < _PAGE_SIZE:
+        if not _has_more_arcgis_pages(payload, len(page_feats)):
             break
         offset += len(page_feats)
 
@@ -295,16 +305,25 @@ class Norway(base.Source):
         if missing:
             raise ValueError(f"not a Sodir field_production_monthly CSV; missing {missing}")
 
+        year_raw = frame["prfYear"]
+        month_raw = frame["prfMonth"]
         period = pd.to_datetime(
             pd.DataFrame(
                 {
-                    "year": pd.to_numeric(frame["prfYear"], errors="coerce"),
-                    "month": pd.to_numeric(frame["prfMonth"], errors="coerce"),
+                    "year": pd.to_numeric(year_raw, errors="coerce"),
+                    "month": pd.to_numeric(month_raw, errors="coerce"),
                     "day": 1,
                 }
             ),
             errors="coerce",
         )
+        non_blank = year_raw.notna() | month_raw.notna()
+        bad_period = non_blank & period.isna()
+        if bad_period.any():
+            samples = frame.loc[bad_period, ["prfYear", "prfMonth"]].head(5).to_dict("records")
+            raise ValueError(
+                f"Sodir CSV has {int(bad_period.sum())} unparseable year/month row(s): {samples}"
+            )
         days = period.dt.days_in_month.astype("float64")
         # Mill Sm3 (10^6 m^3) -> bbl/d; Bill Sm3 (10^9 m^3 = 10^6 e3m3) -> e3m3/d.
         mill_sm3_to_bpd = 1_000_000.0 * units.BBL_PER_M3 / days

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
@@ -22,6 +23,8 @@ type RawFile = str | Path | BinaryIO
 
 #: Descriptive User-Agent required by portals such as gov.br (blocks default python-httpx).
 USER_AGENT = "ogprod/0.1 (+https://github.com/mralbu/ogprod)"
+
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
 @dataclass(frozen=True)
@@ -60,8 +63,50 @@ def open_client(client: httpx2.Client | None = None) -> Generator[httpx2.Client]
         yield managed
 
 
-def download_file(client: httpx2.Client, url: str, dest: Path) -> DownloadResult:
-    """Stream ``url`` atomically into ``dest`` while computing its SHA-256 digest."""
+def _is_retryable_http_error(err: httpx2.HTTPError) -> bool:
+    if isinstance(err, httpx2.TransportError):
+        return True
+    if isinstance(err, httpx2.HTTPStatusError):
+        return err.response.status_code in _RETRYABLE_STATUS
+    return False
+
+
+def get_with_retry(
+    client: httpx2.Client,
+    url: str,
+    *,
+    retries: int = 3,
+    backoff_s: float = 1.0,
+) -> httpx2.Response:
+    """Perform an HTTP GET with bounded exponential backoff on transient errors / 5xx / 429."""
+    attempts = max(1, retries)
+    for attempt in range(attempts):
+        try:
+            resp = client.get(url)
+            resp.raise_for_status()
+            return resp
+        except httpx2.HTTPError as err:
+            if attempt + 1 >= attempts or not _is_retryable_http_error(err):
+                raise
+            if backoff_s > 0:
+                time.sleep(backoff_s * (2**attempt))
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _verify_content_length(headers: httpx2.Headers, actual_bytes: int, url: str) -> None:
+    if headers.get("content-encoding"):
+        return
+    raw_len = headers.get("content-length")
+    if raw_len is None or not raw_len.strip().isdigit():
+        return
+    expected = int(raw_len.strip())
+    if actual_bytes != expected:
+        raise httpx2.RemoteProtocolError(
+            f"truncated download for {url}: expected {expected} bytes, got {actual_bytes}"
+        )
+
+
+def _stream_once(client: httpx2.Client, url: str, dest: Path) -> DownloadResult:
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(f"{dest.name}.part")
     digest = hashlib.sha256()
@@ -69,13 +114,13 @@ def download_file(client: httpx2.Client, url: str, dest: Path) -> DownloadResult
     try:
         with client.stream("GET", url) as resp:
             resp.raise_for_status()
-            etag = resp.headers.get("etag")
-            last_modified = resp.headers.get("last-modified")
+            headers = resp.headers
             with part.open("wb") as sink:
                 for chunk in resp.iter_bytes():
                     sink.write(chunk)
                     digest.update(chunk)
                     size += len(chunk)
+            _verify_content_length(headers, size, url)
         part.replace(dest)
     except Exception:
         part.unlink(missing_ok=True)
@@ -85,9 +130,30 @@ def download_file(client: httpx2.Client, url: str, dest: Path) -> DownloadResult
         url=url,
         sha256=digest.hexdigest(),
         size_bytes=size,
-        etag=etag,
-        last_modified=last_modified,
+        etag=headers.get("etag"),
+        last_modified=headers.get("last-modified"),
     )
+
+
+def download_file(
+    client: httpx2.Client,
+    url: str,
+    dest: Path,
+    *,
+    retries: int = 3,
+    backoff_s: float = 1.0,
+) -> DownloadResult:
+    """Stream ``url`` atomically into ``dest`` with retries and ``Content-Length`` verification."""
+    attempts = max(1, retries)
+    for attempt in range(attempts):
+        try:
+            return _stream_once(client, url, dest)
+        except httpx2.HTTPError as err:
+            if attempt + 1 >= attempts or not _is_retryable_http_error(err):
+                raise
+            if backoff_s > 0:
+                time.sleep(backoff_s * (2**attempt))
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def _clean_string_series(series: pd.Series | None, length: int, *, fill: str | None) -> pa.Array:

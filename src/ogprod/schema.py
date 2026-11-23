@@ -237,6 +237,18 @@ def _check_production_types_and_nulls(table: pa.Table) -> None:
             raise SchemaError(f"column {field.name!r} must not contain nulls")
 
 
+def _check_finite_rates(table: pa.Table) -> None:
+    import numpy as np
+
+    for col in RATE_COLUMNS:
+        arr = table.column(col)
+        if arr.null_count == table.num_rows:
+            continue
+        values = arr.drop_null().to_numpy(zero_copy_only=False)
+        if not np.isfinite(values).all():
+            raise SchemaError(f"column {col!r} must not contain NaN or Inf values")
+
+
 def _check_production_values(table: pa.Table) -> None:
     allowed_types = {e.value for e in EntityType}
     seen_types = set(table.column("entity_type").unique().to_pylist())
@@ -246,6 +258,8 @@ def _check_production_values(table: pa.Table) -> None:
 
     if any(d.day != 1 for d in table.column("period").to_pylist()):
         raise SchemaError("'period' values must be the first day of the month (day == 1)")
+
+    _check_finite_rates(table)
 
     # Enforce key uniqueness within a single validated table.
     key_frame = table.select(list(PRODUCTION_KEY)).to_pandas()

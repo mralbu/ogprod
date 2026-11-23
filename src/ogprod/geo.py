@@ -24,7 +24,8 @@ def _cast_geo_columns(gdf: gpd.GeoDataFrame, kind: GeoKind) -> gpd.GeoDataFrame:
         elif col in spec.int32_columns:
             out[col] = pd.to_numeric(out[col], errors="coerce").astype("Int32")
         else:
-            out[col] = out[col].astype("string")
+            cleaned = out[col].astype("string").str.strip()
+            out[col] = cleaned.mask(cleaned == "", pd.NA)
     return gpd.GeoDataFrame(out[list(spec.columns)], geometry="geometry", crs=out.crs)
 
 

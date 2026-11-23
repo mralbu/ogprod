@@ -157,6 +157,55 @@ def coverage(data_dir: Path | None) -> None:
     click.echo(frame.to_string(index=False))
 
 
+@cli.command()
+@click.option(
+    "--source",
+    default=None,
+    help="Limit audit to a single source (default: all sources in the store).",
+)
+@click.option(
+    "--stale-months",
+    type=int,
+    default=6,
+    show_default=True,
+    help="Warn when a source's latest period is older than this many months.",
+)
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Exit non-zero on warnings in addition to errors.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit machine-readable JSON output.",
+)
+@click.option(
+    "--data-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Override the ogprod data directory.",
+)
+def audit(
+    source: str | None,
+    stale_months: int,
+    strict: bool,
+    as_json: bool,
+    data_dir: Path | None,
+) -> None:
+    """Audit stored Parquet and GeoParquet tables for data-quality issues."""
+    import json
+
+    report = Store(data_dir).audit(source=source, stale_months=stale_months)
+    if as_json:
+        click.echo(json.dumps(report.to_dict(), indent=2))
+    else:
+        click.echo(report.format_text())
+    if not report.ok or (strict and report.warnings):
+        raise SystemExit(1)
+
+
 @cli.command("sql")
 @click.argument("query")
 @click.option(

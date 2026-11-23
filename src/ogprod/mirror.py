@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx2
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 from ogprod import schema
@@ -372,6 +373,43 @@ def sync_source(
     )
 
 
+def _month_index(iso_period: str) -> int:
+    year_s, month_s, _ = iso_period.split("-", 2)
+    return int(year_s) * 12 + int(month_s)
+
+
+def _compute_env_stats(table: pa.Table) -> dict[str, dict[str, Any]]:
+    if table.num_rows == 0 or "environment" not in table.column_names:
+        return {}
+    cols = ["environment", "period", "oil_prod", "gas_prod"]
+    frame = table.select([c for c in cols if c in table.column_names]).to_pandas()
+    frame = frame.loc[frame["environment"].notna()]
+    if frame.empty:
+        return {}
+    by_env: dict[str, dict[str, Any]] = {}
+    for env_val, grp in frame.groupby("environment", sort=True):
+        env_key = str(env_val)
+        monthly = grp.groupby("period", sort=True).agg(
+            oil=("oil_prod", lambda s: float(np.nansum(s.to_numpy(dtype=np.float64)))),
+            gas=("gas_prod", lambda s: float(np.nansum(s.to_numpy(dtype=np.float64)))),
+        )
+        has_positive = bool(((monthly["oil"] > 0.0) | (monthly["gas"] > 0.0)).any())
+        zero_months = (
+            int(((monthly["oil"] == 0.0) & (monthly["gas"] == 0.0)).sum()) if has_positive else 0
+        )
+        periods = monthly.index.tolist()
+        by_env[env_key] = {
+            "rows": len(grp),
+            "months": len(periods),
+            "first_period": min(periods).isoformat(),
+            "last_period": max(periods).isoformat(),
+            "oil_prod": round(float(monthly["oil"].sum()), 4),
+            "gas_prod": round(float(monthly["gas"].sum()), 4),
+            "zero_hydrocarbon_months": zero_months,
+        }
+    return by_env
+
+
 def compute_partition_stats(
     path: Path,
     rel_path: str,
@@ -385,11 +423,13 @@ def compute_partition_stats(
     rows = table.num_rows
     first_period: str | None = None
     last_period: str | None = None
+    months = 0
     if rows > 0:
         periods = [p for p in table.column("period").to_pylist() if p is not None]
         if periods:
             first_period = min(periods).isoformat()
             last_period = max(periods).isoformat()
+            months = len(set(periods))
 
     sum_rates: dict[str, float] = {}
     for col in schema.RATE_COLUMNS:
@@ -400,16 +440,20 @@ def compute_partition_stats(
         else:
             sum_rates[col] = 0.0
 
-    return {
+    entry: dict[str, Any] = {
         "path": rel_path,
         "sha256": digest,
         "bytes": size_bytes,
         "rows": rows,
+        "months": months,
         "first_period": first_period,
         "last_period": last_period,
         "sum_rates": sum_rates,
         "updated_at": updated_at or datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if by_env := _compute_env_stats(table):
+        entry["by_environment"] = by_env
+    return entry
 
 
 def compute_geo_stats(
@@ -431,6 +475,57 @@ def compute_geo_stats(
     }
 
 
+def _check_intrinsic_partition_health(
+    source: str,
+    year_key: str,
+    new_entry: dict[str, Any],
+) -> list[str]:
+    issues: list[str] = []
+    by_env = new_entry.get("by_environment") or {}
+    part_last = new_entry.get("last_period")
+    for env_name, env_stats in sorted(by_env.items()):
+        zero_m = int(env_stats.get("zero_hydrocarbon_months", 0))
+        if zero_m > 0:
+            issues.append(
+                f"{source}/{year_key} ({env_name}): {zero_m} month(s) with zero oil and gas "
+                "in an active producing year"
+            )
+        env_last = env_stats.get("last_period")
+        if part_last and env_last:
+            lag = _month_index(str(part_last)) - _month_index(str(env_last))
+            if lag >= 3:
+                issues.append(
+                    f"{source}/{year_key} ({env_name}): ends {lag} month(s) before partition "
+                    f"last_period ({env_last} vs {part_last})"
+                )
+    return issues
+
+
+def _check_env_baseline_drops(
+    source: str,
+    year_key: str,
+    new_env_map: dict[str, Any],
+    old_env_map: dict[str, Any],
+    max_prod_drop: float,
+) -> list[str]:
+    issues: list[str] = []
+    for env_name, old_env in sorted(old_env_map.items()):
+        new_env = new_env_map.get(env_name)
+        if not isinstance(new_env, dict):
+            issues.append(f"{source}/{year_key} ({env_name}): environment disappeared")
+            continue
+        for metric in ("rows", "oil_prod", "gas_prod"):
+            old_v = float(old_env.get(metric, 0.0))
+            new_v = float(new_env.get(metric, 0.0))
+            if old_v > 0.0 and new_v < old_v * (1.0 - max_prod_drop):
+                drop_pct = (1.0 - new_v / old_v) * 100.0
+                issues.append(
+                    f"{source}/{year_key} ({env_name}) {metric}: dropped {drop_pct:.1f}% "
+                    f"({old_v:.1f} -> {new_v:.1f})"
+                )
+    return issues
+
+
 def _check_production_entry(
     source: str,
     year_key: str,
@@ -442,6 +537,7 @@ def _check_production_entry(
     if new_entry.get("rows", 0) <= 0 or new_entry.get("bytes", 0) <= 0:
         issues.append(f"{source}/{year_key}: empty production partition")
         return issues
+    issues.extend(_check_intrinsic_partition_health(source, year_key, new_entry))
     if old_entry is None:
         return issues
     old_rows = int(old_entry.get("rows", 0))
@@ -451,6 +547,10 @@ def _check_production_entry(
         issues.append(
             f"{source}/{year_key}: row count dropped {drop_pct:.1f}% ({old_rows} -> {new_rows})"
         )
+    old_months = int(old_entry.get("months", 0))
+    new_months = int(new_entry.get("months", 0))
+    if old_months > 0 and new_months < old_months:
+        issues.append(f"{source}/{year_key}: month count dropped ({old_months} -> {new_months})")
     old_rates = old_entry.get("sum_rates") or {}
     new_rates = new_entry.get("sum_rates") or {}
     for col, old_val in old_rates.items():
@@ -462,6 +562,12 @@ def _check_production_entry(
                 f"{source}/{year_key} {col}: sum rate dropped {drop_pct:.1f}% "
                 f"({old_f:.1f} -> {new_f:.1f})"
             )
+    if old_env := old_entry.get("by_environment"):
+        issues.extend(
+            _check_env_baseline_drops(
+                source, year_key, new_entry.get("by_environment") or {}, old_env, max_prod_drop
+            )
+        )
     return issues
 
 
@@ -517,6 +623,34 @@ def check_sanity_gate(
     return issues
 
 
+def _entry_unchanged(old_entry: Any, new_entry: dict[str, Any]) -> bool:
+    return (
+        isinstance(old_entry, dict)
+        and old_entry.get("sha256") == new_entry.get("sha256")
+        and int(old_entry.get("bytes", -1)) == int(new_entry.get("bytes", -2))
+    )
+
+
+def _merge_entry_map(
+    target_map: dict[str, Any],
+    incoming_map: dict[str, Any],
+    *,
+    reset: bool,
+) -> bool:
+    changed = False
+    for key, entry in incoming_map.items():
+        key_s = str(key)
+        merged_entry = copy.deepcopy(entry)
+        old_entry = None if reset else target_map.get(key_s)
+        if _entry_unchanged(old_entry, merged_entry):
+            if old_entry and "updated_at" in old_entry:
+                merged_entry["updated_at"] = old_entry["updated_at"]
+        else:
+            changed = True
+        target_map[key_s] = merged_entry
+    return changed
+
+
 def merge_mirror_manifest(
     remote_manifest: dict[str, Any] | None,
     local_sources: dict[str, Any],
@@ -545,15 +679,17 @@ def merge_mirror_manifest(
 
     sources_out: dict[str, Any] = merged.setdefault("sources", {})
     for src_name, src_data in sorted(local_sources.items()):
+        is_new_source = src_name not in sources_out
         target: dict[str, Any] = sources_out.setdefault(src_name, {"production": {}, "geo": {}})
         for meta_key in ("country", "country_code", "publisher", "docs_url", "entity_type"):
             if meta_key in src_data:
                 target[meta_key] = src_data[meta_key]
-        target["updated_at"] = src_data.get("updated_at", ts)
-        prod_target: dict[str, Any] = target.setdefault("production", {})
-        for year_key, entry in src_data.get("production", {}).items():
-            prod_target[str(year_key)] = copy.deepcopy(entry)
-        geo_target: dict[str, Any] = target.setdefault("geo", {})
-        for kind, entry in src_data.get("geo", {}).items():
-            geo_target[str(kind)] = copy.deepcopy(entry)
+        prod_changed = _merge_entry_map(
+            target.setdefault("production", {}), src_data.get("production", {}), reset=reset
+        )
+        geo_changed = _merge_entry_map(
+            target.setdefault("geo", {}), src_data.get("geo", {}), reset=reset
+        )
+        if is_new_source or prod_changed or geo_changed or "updated_at" not in target:
+            target["updated_at"] = src_data.get("updated_at", ts)
     return merged

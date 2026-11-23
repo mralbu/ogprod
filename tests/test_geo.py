@@ -60,3 +60,21 @@ def test_prepare_geo_repairs_invalid_polygon_and_reprojects() -> None:
     assert prepared.crs is not None
     assert prepared.crs.to_epsg() == 4326
     assert prepared.geometry.iloc[0].is_valid
+
+
+def test_prepare_geo_strips_whitespace_and_nullifies_blank_strings() -> None:
+    gdf = gpd.GeoDataFrame(
+        {
+            "source": ["brazil"],
+            "well_id": ["W-1"],
+            "well_name": [" W-1 \n"],
+            "status": ["   "],
+            "basin": ["Recôncavo\n"],
+        },
+        geometry=[shapely.Point(-38.5, -12.7)],
+        crs="EPSG:4326",
+    )
+    prepared = geo.prepare_geo(gdf, schema.GeoKind.WELLS)
+    assert prepared.loc[0, "well_name"] == "W-1"
+    assert prepared.loc[0, "basin"] == "Recôncavo"
+    assert prepared["status"].isna().iloc[0]

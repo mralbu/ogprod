@@ -253,3 +253,139 @@ def test_brazil_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
     assert br_meta["country_code"] == "BR"
     assert br_meta["publisher"] == "ANP"
     assert "pm/producao-mar-2026.csv" in br_meta["files"]
+
+
+@given(
+    year=st.integers(min_value=1941, max_value=2099),
+    month_idx=st.integers(min_value=1, max_value=12),
+    sep=st.sampled_from(["/", "-"]),
+    upper=st.booleans(),
+)
+def test_parse_anp_portuguese_month_periods(
+    year: int, month_idx: int, sep: str, upper: bool
+) -> None:
+    import pandas as pd
+
+    abbr = list(brazil._PT_MONTHS)[month_idx - 1]
+    token = f"{abbr.upper() if upper else abbr}{sep}{year}"
+    parsed = brazil._parse_anp_period_series(pd.Series([token]))
+    ts = parsed.iloc[0]
+    assert pd.notna(ts)
+    assert ts.year == year
+    assert ts.month == month_idx
+    assert ts.day == 1
+
+
+@given(
+    year=st.integers(min_value=1941, max_value=2099),
+    month=st.integers(min_value=1, max_value=12),
+    day=st.integers(min_value=1, max_value=28),
+    fmt=st.sampled_from(["slash", "dash", "iso", "unpadded"]),
+)
+def test_parse_br_date_normalizes_all_anp_formats_to_iso(
+    year: int, month: int, day: int, fmt: str
+) -> None:
+    import pandas as pd
+
+    if fmt == "slash":
+        text = f"{day:02d}/{month:02d}/{year}"
+    elif fmt == "dash":
+        text = f"{day:02d}-{month:02d}-{year}"
+    elif fmt == "unpadded":
+        text = f"{day}/{month}/{year}"
+    else:
+        text = f"{year}-{month:02d}-{day:02d}"
+    parsed = brazil._parse_br_date(pd.Series([text]))
+    assert parsed.iloc[0] == f"{year}-{month:02d}-{day:02d}"
+
+
+def test_parse_brazil_portuguese_months_and_fail_loud_bad_period() -> None:
+    csv_ok = (
+        "[Ano],[Mês/Ano],[Campo],[Bacia],[Instalação],[Poço],[Estado],[Ambiente],"
+        "[Produção de Óleo (m³)],[Produção de Gás Associado (Mm³)]\n"
+        "2025,out/2025,LAGOA SURUACA,Espírito Santo,Petrobras 66 (P-66),7-LS-14-ES,"
+        'Não Informado,TERRA,"158,99","31,0"\n'
+        "2025,dez/2025,LAGOA SURUACA,Espírito Santo,FPSO CIDADE DE ILHA BELA,7-LS-14-ES,"
+        '(NÃO CADASTRADO),TERRA,"158,99","31,0"\n'
+    )
+    table = brazil.Brazil().parse_production(io.BytesIO(csv_ok.encode("utf-8")))
+    df = table.to_pandas().sort_values("period").reset_index(drop=True)
+    assert len(df) == 2
+    assert df.loc[0, "period"].isoformat() == "2025-10-01"
+    assert df.loc[1, "period"].isoformat() == "2025-12-01"
+    assert df.loc[0, "facility_id"] == "PETROBRAS 66"
+    assert df.loc[1, "facility_id"] == "FPSO CIDADE DE ILHABELA"
+    assert df["region"].isna().all()
+
+    csv_bad = (
+        "Ano,Mês/Ano,Estado,Bacia,Campo,Poço,Ambiente,Instalação,Produção de Óleo (m³)\n"
+        "2025,bogus/2025,Bahia,Recôncavo,CAMPO A,1-A-1-BA,Terra,Não Informado,10\n"
+    )
+    with pytest.raises(ValueError, match="unparseable period"):
+        brazil.Brazil().parse_production(io.BytesIO(csv_bad.encode("utf-8")))
+
+
+def test_brazil_wfs_dates_env_backfill_status_and_dynamic_wells_url(tmp_path: Path) -> None:
+    wfs_payload = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {
+                    "COD_CAMPO": 10,
+                    "NOM_CAMPO": "CANDEIAS",
+                    "NOM_BACIA": "Recôncavo",
+                    "OPERADOR_C": None,
+                    "AMBIENTE": "A ",
+                    "ETAPA": "Em Devolução\n",
+                    "FLUIDO_PRI": "ÓLEO",
+                    "MED_LAMINA": 0,
+                    "AREA": 109,
+                    "DAT_DESCOB": "12/05/1941",
+                    "DAT_INICIO": "1-11-1941",
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[-38.6, -12.7], [-38.5, -12.7], [-38.5, -12.6], [-38.6, -12.7]]
+                    ],
+                },
+            }
+        ],
+    }
+    wfs_path = tmp_path / "campos.geojson"
+    wfs_path.write_text(json.dumps(wfs_payload), encoding="utf-8")
+    active_path = tmp_path / "extracao_campo.csv"
+    active_path.write_text(
+        "CODIGO_CAMPO,CAMPO,BACIA,ESTADO,OPERADOR,AMBIENTE,SITUACAO_CAMPO,DATA_INICIO_PRODUCAO\n"
+        "10,CANDEIAS,Recôncavo,Bahia,PETROBRAS,Terra,Produção,01/11/1941\n",
+        encoding="utf-8-sig",
+    )
+    relinq_path = tmp_path / "extracao_campo_devolvido.csv"
+    relinq_path.write_text(
+        "CODIGO_CAMPO,CAMPO,BACIA,AMBIENTE,SITUACAO,ULTIMO_MES_PRODUCAO\n"
+        "90,DENTÃO,Potiguar,MAR,Em Devolução,12/2006\n",
+        encoding="utf-8-sig",
+    )
+    fields = (
+        brazil.Brazil()
+        .parse_geo(schema.GeoKind.FIELDS, [wfs_path, active_path, relinq_path])
+        .set_index("field_id")
+    )
+    assert fields.loc["CANDEIAS", "discovery_date"] == "1941-05-12"
+    assert fields.loc["CANDEIAS", "production_start_date"] == "1941-11-01"
+    assert fields.loc["CANDEIAS", "environment"] == "onshore"
+    assert fields.loc["CANDEIAS", "operator"] == "PETROBRAS"
+    assert fields.loc["CANDEIAS", "status"] == "Em Devolução"
+    assert fields.loc["DENTAO", "status"] == "Em Devolução"
+
+    # Dynamic wells CSV discovery should follow a future year rollover link on the portal.
+    portal_html = (
+        '<a href="https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/'
+        "arquivos-fase-de-desenvolvimento-e-producao/informacoes-sobre-pocos/"
+        'situacao-pocos-1939-2027.csv">wells</a>'
+    )
+    client = httpx2.Client(
+        transport=httpx2.MockTransport(lambda _: httpx2.Response(200, text=portal_html))
+    )
+    assert brazil._discover_wells_url(client).endswith("situacao-pocos-1939-2027.csv")

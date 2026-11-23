@@ -163,3 +163,48 @@ def test_norway_end_to_end_mock_ingest(tmp_path: Path) -> None:
     assert no_meta["country"] == "Norway"
     assert no_meta["country_code"] == "NO"
     assert no_meta["publisher"] == "Sodir"
+
+
+def test_norway_arcgis_pagination_respects_exceeded_transfer_limit(tmp_path: Path) -> None:
+    page1 = {
+        "type": "FeatureCollection",
+        "exceededTransferLimit": True,
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"wlbNpdidWellbore": 1, "wlbWellboreName": "1/1-1"},
+                "geometry": {"type": "Point", "coordinates": [2.0, 60.0]},
+            }
+        ],
+    }
+    page2 = {
+        "type": "FeatureCollection",
+        "exceededTransferLimit": False,
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"wlbNpdidWellbore": 2, "wlbWellboreName": "1/1-2"},
+                "geometry": {"type": "Point", "coordinates": [2.1, 60.1]},
+            }
+        ],
+    }
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        url = str(request.url)
+        return httpx2.Response(200, json=page1 if "resultOffset=0" in url else page2)
+
+    client = httpx2.Client(transport=httpx2.MockTransport(handler))
+    dl = norway._fetch_arcgis_geojson(client, 5000, "wlbNpdidWellbore", tmp_path / "wells.geojson")
+    merged = json.loads(dl.path.read_text(encoding="utf-8"))
+    assert len(merged["features"]) == 2
+
+
+def test_norway_rejects_unparseable_year_month() -> None:
+    import io
+
+    bad_csv = (
+        "prfInformationCarrier,prfYear,prfMonth,prfPrdOilNetMillSm3,prfNpdidInformationCarrier\n"
+        "TROLL,2026,13,1.0,46437\n"
+    )
+    with pytest.raises(ValueError, match="unparseable year/month"):
+        norway.Norway().parse_production(io.BytesIO(bad_csv.encode("utf-8")))

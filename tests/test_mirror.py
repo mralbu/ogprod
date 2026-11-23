@@ -247,3 +247,173 @@ def test_parquet_writer_uses_128k_row_group_size(tmp_path: Path) -> None:
     assert meta.row_group(0).num_rows == 128_000
     assert meta.row_group(1).num_rows == 2_000
     assert pa.table({"a": [1]}).num_rows == 1
+
+
+def test_sanity_gate_catches_zero_hydrocarbon_months_and_env_lag_without_baseline(
+    tmp_path: Path,
+) -> None:
+    # Partition mimics broken Brazil 2018 (onshore Jan=0 oil/gas, Jul>0) and 2025 (onshore lags).
+    table = base.build_production_table(
+        source="brazil",
+        entity_type=schema.EntityType.WELL,
+        entity_id=pd.Series(["W1", "W1", "W2", "W2", "W3", "W4", "W4", "W5"]),
+        entity_name=pd.Series(["W1", "W1", "W2", "W2", "W3", "W4", "W4", "W5"]),
+        period=pd.Series(
+            [
+                date(2018, 1, 1),
+                date(2018, 7, 1),
+                date(2025, 1, 1),
+                date(2025, 9, 1),
+                date(2025, 12, 1),
+                date(1954, 1, 1),
+                date(1954, 12, 1),
+                date(1954, 12, 1),
+            ]
+        ),
+        environment=pd.Series(
+            [
+                "onshore",
+                "onshore",
+                "onshore",
+                "onshore",
+                "offshore",
+                "onshore",
+                "onshore",
+                "offshore",
+            ]
+        ),
+        rates={
+            "oil_prod": pd.Series([0.0, 100.0, 80.0, 80.0, 3000.0, 50.0, 55.0, 10.0]),
+            "gas_prod": pd.Series([0.0, 10.0, 5.0, 5.0, 100.0, 1.0, 1.2, 0.5]),
+        },
+    )
+    write_production(table, root=tmp_path)
+    prod = {}
+    for yr in (1954, 2018, 2025):
+        rel = f"production/source=brazil/year={yr}/data.parquet"
+        prod[str(yr)] = mirror.compute_partition_stats(tmp_path / "store" / rel, rel)
+
+    issues = mirror.check_sanity_gate({"brazil": {"production": prod, "geo": {}}}, None)
+    assert any("brazil/2018 (onshore)" in msg and "zero oil and gas" in msg for msg in issues)
+    assert any("brazil/2025 (onshore)" in msg and "ends 3 month(s) before" in msg for msg in issues)
+    # 1954 offshore starts in Dec (same last_period as onshore) -> must not false-positive.
+    assert not any("brazil/1954" in msg for msg in issues)
+
+
+def test_sanity_gate_catches_per_environment_drop_masked_by_large_offshore() -> None:
+    old = {
+        "schema_version": 2,
+        "sources": {
+            "brazil": {
+                "production": {
+                    "2025": {
+                        "path": "production/source=brazil/year=2025/data.parquet",
+                        "sha256": "old",
+                        "bytes": 1000,
+                        "rows": 100_000,
+                        "months": 12,
+                        "sum_rates": {"oil_prod": 40_000_000.0, "gas_prod": 2_000_000.0},
+                        "by_environment": {
+                            "offshore": {
+                                "rows": 15_000,
+                                "months": 12,
+                                "oil_prod": 39_000_000.0,
+                                "gas_prod": 1_800_000.0,
+                            },
+                            "onshore": {
+                                "rows": 85_000,
+                                "months": 12,
+                                "oil_prod": 1_000_000.0,
+                                "gas_prod": 200_000.0,
+                            },
+                        },
+                    }
+                },
+                "geo": {},
+            }
+        },
+    }
+    # Onshore loses 30% of its oil while total national oil only drops 0.75%.
+    new_local = {
+        "brazil": {
+            "production": {
+                "2025": {
+                    "path": "production/source=brazil/year=2025/data.parquet",
+                    "sha256": "new",
+                    "bytes": 950,
+                    "rows": 90_000,
+                    "months": 12,
+                    "sum_rates": {"oil_prod": 39_700_000.0, "gas_prod": 1_940_000.0},
+                    "by_environment": {
+                        "offshore": {
+                            "rows": 15_000,
+                            "months": 12,
+                            "oil_prod": 39_000_000.0,
+                            "gas_prod": 1_800_000.0,
+                        },
+                        "onshore": {
+                            "rows": 75_000,
+                            "months": 10,
+                            "oil_prod": 700_000.0,
+                            "gas_prod": 140_000.0,
+                        },
+                    },
+                }
+            },
+            "geo": {},
+        }
+    }
+    issues = mirror.check_sanity_gate(new_local, old)
+    assert any("brazil/2025 (onshore) oil_prod" in msg for msg in issues)
+
+
+def test_merge_mirror_manifest_preserves_updated_at_for_unchanged_entries() -> None:
+    remote = {
+        "schema_version": 2,
+        "updated_at": "2026-01-01T00:00:00Z",
+        "sources": {
+            "brazil": {
+                "updated_at": "2026-01-01T00:00:00Z",
+                "production": {
+                    "2018": {
+                        "path": "production/source=brazil/year=2018/data.parquet",
+                        "sha256": "same-hash",
+                        "bytes": 500,
+                        "rows": 10,
+                        "updated_at": "2026-01-01T00:00:00Z",
+                    }
+                },
+                "geo": {},
+            }
+        },
+    }
+    local_unchanged = {
+        "brazil": {
+            "updated_at": "2026-11-23T12:00:00Z",
+            "production": {
+                "2018": {
+                    "path": "production/source=brazil/year=2018/data.parquet",
+                    "sha256": "same-hash",
+                    "bytes": 500,
+                    "rows": 10,
+                    "updated_at": "2026-11-23T12:00:00Z",
+                }
+            },
+            "geo": {},
+        }
+    }
+    merged = mirror.merge_mirror_manifest(
+        remote, local_unchanged, updated_at="2026-11-23T12:00:00Z"
+    )
+    assert merged["sources"]["brazil"]["production"]["2018"]["updated_at"] == "2026-01-01T00:00:00Z"
+    assert merged["sources"]["brazil"]["updated_at"] == "2026-01-01T00:00:00Z"
+
+    # When sha256 changes, both entry and source updated_at advance.
+    local_unchanged["brazil"]["production"]["2018"]["sha256"] = "new-hash"
+    merged2 = mirror.merge_mirror_manifest(
+        remote, local_unchanged, updated_at="2026-11-23T12:00:00Z"
+    )
+    assert (
+        merged2["sources"]["brazil"]["production"]["2018"]["updated_at"] == "2026-11-23T12:00:00Z"
+    )
+    assert merged2["sources"]["brazil"]["updated_at"] == "2026-11-23T12:00:00Z"
