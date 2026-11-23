@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 import geopandas as gpd
-import httpx
+import httpx2
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -47,20 +47,20 @@ class DownloadResult:
 
 
 @contextmanager
-def open_client(client: httpx.Client | None = None) -> Generator[httpx.Client]:
-    """Yield an injected httpx.Client, or open a managed one with our User-Agent."""
+def open_client(client: httpx2.Client | None = None) -> Generator[httpx2.Client]:
+    """Yield an injected httpx2.Client, or open a managed one with our User-Agent."""
     if client is not None:
         yield client
         return
-    with httpx.Client(
-        timeout=httpx.Timeout(60.0, connect=20.0),
+    with httpx2.Client(
+        timeout=httpx2.Timeout(60.0, connect=20.0),
         follow_redirects=True,
         headers={"User-Agent": USER_AGENT},
     ) as managed:
         yield managed
 
 
-def download_file(client: httpx.Client, url: str, dest: Path) -> DownloadResult:
+def download_file(client: httpx2.Client, url: str, dest: Path) -> DownloadResult:
     """Stream ``url`` atomically into ``dest`` while computing its SHA-256 digest."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(f"{dest.name}.part")
@@ -267,7 +267,7 @@ class Source(ABC):
     def discover_production(
         self,
         *,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
         year: int | None = None,
         environment: str | None = None,
         recent: bool = False,
@@ -283,7 +283,7 @@ class Source(ABC):
         kind: schema.GeoKind,
         dest_dir: Path,
         *,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
     ) -> list[DownloadResult]:
         """Download upstream spatial files for ``kind`` into ``dest_dir``."""
         raise NotImplementedError(

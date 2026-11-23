@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 
 import geopandas as gpd
-import httpx
+import httpx2
 import pytest
 import shapely
 
@@ -128,28 +128,30 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
         "pozos",
     )
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         url = str(request.url)
         if url.endswith("PRODUCCION_CAMPOS.csv"):
-            return httpx.Response(200, content=(DATA_DIR / "mexico_campos_sample.csv").read_bytes())
+            return httpx2.Response(
+                200, content=(DATA_DIR / "mexico_campos_sample.csv").read_bytes()
+            )
         if url.endswith("export.php"):
             body = request.content.decode("utf-8")
             if "cmp_cmp_rsv" in body:
-                return httpx.Response(200, json={"filePath": "tmp/campos.zip"})
+                return httpx2.Response(200, json={"filePath": "tmp/campos.zip"})
             if "v_iftep_instalaciones" in body:
-                return httpx.Response(200, json={"filePath": "tmp/instalaciones.zip"})
-            return httpx.Response(200, json={"filePath": "tmp/pozos.zip"})
+                return httpx2.Response(200, json={"filePath": "tmp/instalaciones.zip"})
+            return httpx2.Response(200, json={"filePath": "tmp/pozos.zip"})
         if "getFile.php" in url:
             if "campos.zip" in url:
-                return httpx.Response(200, content=fields_zip.read_bytes())
+                return httpx2.Response(200, content=fields_zip.read_bytes())
             if "instalaciones.zip" in url:
-                return httpx.Response(200, content=fac_zip.read_bytes())
-            return httpx.Response(200, content=well_zip.read_bytes())
-        return httpx.Response(404)
+                return httpx2.Response(200, content=fac_zip.read_bytes())
+            return httpx2.Response(200, content=well_zip.read_bytes())
+        return httpx2.Response(404)
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = httpx2.Client(transport=httpx2.MockTransport(handler))
     db = Store(tmp_path / "data")
-    summary = db.ingest("mexico", client=client)
+    summary = db.ingest("mexico", origin="publisher", client=client)
 
     assert summary.production_rows == 2
     assert summary.geo_counts == {"fields": 1, "facilities": 1, "wells": 1}

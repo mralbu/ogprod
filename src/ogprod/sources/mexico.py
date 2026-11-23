@@ -28,7 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import geopandas as gpd
-import httpx
+import httpx2
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -284,7 +284,9 @@ def _aggregate_duplicate_keys(
     return work.groupby(key, as_index=False, sort=False).agg(agg)
 
 
-def _export_map_layer(http: httpx.Client, layer: str, name: str, dest: Path) -> base.DownloadResult:
+def _export_map_layer(
+    http: httpx2.Client, layer: str, name: str, dest: Path
+) -> base.DownloadResult:
     """Request a shapefile ZIP from Mapa de Hidrocarburos and stream it to ``dest``."""
     req_payload = {
         "layers": [{"locale": "es_MX", "layer": layer, "format": "shp", "fileName": name}]
@@ -302,7 +304,7 @@ def _export_map_layer(http: httpx.Client, layer: str, name: str, dest: Path) -> 
         "filePath": file_path,
         "fileRemove": True,
     }
-    url = str(httpx.URL(_GET_FILE_URL, params={"params": json.dumps(dl_params)}))
+    url = str(httpx2.URL(_GET_FILE_URL, params={"params": json.dumps(dl_params)}))
     return base.download_file(http, url, dest)
 
 
@@ -432,7 +434,7 @@ class Mexico(base.Source):
     def discover_production(
         self,
         *,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
         year: int | None = None,
         environment: str | None = None,
         recent: bool = False,
@@ -467,7 +469,7 @@ class Mexico(base.Source):
         kind: schema.GeoKind,
         dest_dir: Path,
         *,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
     ) -> list[base.DownloadResult]:
         """Export and download shapefiles from Mapa de Hidrocarburos."""
         with base.open_client(client) as http:

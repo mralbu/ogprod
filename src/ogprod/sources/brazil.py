@@ -20,7 +20,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import geopandas as gpd
-import httpx
+import httpx2
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -603,7 +603,7 @@ class Brazil(base.Source):
     def discover_production(
         self,
         *,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
         year: int | None = None,
         environment: str | None = None,
         recent: bool = False,
@@ -713,7 +713,7 @@ class Brazil(base.Source):
         kind: schema.GeoKind,
         dest_dir: Path,
         *,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
     ) -> list[base.DownloadResult]:
         """Download ANP spatial data for ``fields``, ``facilities``, or ``wells``."""
         with base.open_client(client) as http:

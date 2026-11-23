@@ -42,17 +42,49 @@ def list_sources() -> None:
 
 @cli.command()
 @click.argument("source")
-@click.option("--year", type=int, default=None, help="Ingest a specific production year.")
+@click.option(
+    "--origin",
+    type=click.Choice(["mirror", "publisher"], case_sensitive=False),
+    default="mirror",
+    show_default=True,
+    help="Download pre-built Parquet from the mirror or fetch live from the regulator portal.",
+)
+@click.option(
+    "--mirror",
+    default=None,
+    help="Override mirror Hugging Face dataset repo or base URL (default: $OGPROD_MIRROR).",
+)
+@click.option(
+    "--revision",
+    default="main",
+    show_default=True,
+    help="Mirror git revision or tag to read from.",
+)
+@click.option(
+    "--year",
+    "years",
+    type=int,
+    multiple=True,
+    help="Ingest specific production year(s); repeatable (e.g. --year 2025 --year 2026).",
+)
 @click.option(
     "--environment",
     type=click.Choice(["onshore", "offshore"], case_sensitive=False),
     default=None,
-    help="Filter source files by onshore or offshore (when supported).",
+    help="Filter source files by onshore or offshore (publisher origin only).",
 )
-@click.option("--recent", is_flag=True, help="Only fetch the current and previous year.")
+@click.option(
+    "--recent",
+    is_flag=True,
+    help="Only fetch the current and previous year (publisher origin only).",
+)
 @click.option("--refresh", is_flag=True, help="Re-download files and geo layers already ingested.")
 @click.option("--no-geo", is_flag=True, help="Skip geospatial layers (fields, facilities, wells).")
-@click.option("--keep-raw", is_flag=True, help="Keep raw downloaded files under <data-dir>/raw/.")
+@click.option(
+    "--keep-raw",
+    is_flag=True,
+    help="Keep raw downloaded files under <data-dir>/raw/ (publisher origin only).",
+)
 @click.option(
     "--files",
     "local_files",
@@ -68,7 +100,10 @@ def list_sources() -> None:
 )
 def ingest(
     source: str,
-    year: int | None,
+    origin: str,
+    mirror: str | None,
+    revision: str,
+    years: tuple[int, ...],
     environment: str | None,
     recent: bool,
     refresh: bool,
@@ -85,9 +120,13 @@ def ingest(
     if recent:
         options["recent"] = True
 
+    origin_val = "publisher" if origin.lower() == "publisher" else "mirror"
     summary = store.ingest(
         source,
-        year=year,
+        year=list(years) if years else None,
+        origin=origin_val,
+        mirror=mirror,
+        revision=revision,
         refresh=refresh,
         geo_layers=not no_geo,
         keep_raw=keep_raw,
@@ -133,6 +172,68 @@ def run_sql(query: str, data_dir: Path | None) -> None:
         click.echo("(0 rows)")
         return
     click.echo(frame.to_string(index=False))
+
+
+@cli.command("export-web")
+@click.option(
+    "--data-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Override the ogprod data directory (Layer-1 store).",
+)
+@click.option(
+    "--out-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path("data/web"),
+    show_default=True,
+    help="Destination directory for Layer-2 web assets (meta, rollups, search, PMTiles).",
+)
+@click.option(
+    "--sync-mirror",
+    is_flag=True,
+    help="Sync all available sources from the Hugging Face mirror before exporting.",
+)
+@click.option(
+    "--mirror",
+    default=None,
+    help="Mirror repository or base URL recorded in meta.json (default: $OGPROD_MIRROR).",
+)
+@click.option(
+    "--revision",
+    default="main",
+    show_default=True,
+    help="Mirror git revision recorded in meta.json and used by --sync-mirror.",
+)
+@click.option(
+    "--skip-tiles",
+    is_flag=True,
+    help="Skip tippecanoe PMTiles generation (exports meta, rollups, and search index only).",
+)
+def export_web_cmd(
+    data_dir: Path | None,
+    out_dir: Path,
+    sync_mirror: bool,
+    mirror: str | None,
+    revision: str,
+    skip_tiles: bool,
+) -> None:
+    """Export Layer-2 web visualization artifacts (meta, rollups, search, PMTiles)."""
+    from ogprod.export_web import export_web
+
+    summary = export_web(
+        data_dir=data_dir,
+        out_dir=out_dir,
+        sync_mirror=sync_mirror,
+        mirror_repo=mirror,
+        revision=revision,
+        skip_tiles=skip_tiles,
+    )
+    src_list = ", ".join(summary.sources) or "(none)"
+    tiles_status = "yes" if summary.has_tiles else "no"
+    click.echo(
+        f"exported web assets to {summary.out_dir}: sources=[{src_list}], "
+        f"search={summary.search_entries:,}, tiles={tiles_status}"
+    )
 
 
 @cli.command()

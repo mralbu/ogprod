@@ -80,3 +80,20 @@ def test_skill_frontmatter() -> None:
 def test_skill_install(tmp_path: Path) -> None:
     invoke("skill", "--install", "--skills-dir", str(tmp_path))
     assert (tmp_path / APP_NAME / "SKILL.md").read_text(encoding="utf-8") == skill_text()
+
+
+def test_ingest_and_export_web_help_options() -> None:
+    ingest_help = invoke("ingest", "--help")
+    for flag in ("--origin", "--mirror", "--revision", "--year"):
+        assert flag in ingest_help
+
+    export_help = invoke("export-web", "--help")
+    for flag in (
+        "--data-dir",
+        "--out-dir",
+        "--sync-mirror",
+        "--mirror",
+        "--revision",
+        "--skip-tiles",
+    ):
+        assert flag in export_help

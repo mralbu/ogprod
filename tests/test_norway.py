@@ -6,7 +6,7 @@ import json
 import math
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 
 from ogprod import Store, units
@@ -126,23 +126,23 @@ def test_norway_rejects_onshore_and_foreign_csv() -> None:
 
 
 def test_norway_end_to_end_mock_ingest(tmp_path: Path) -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         url = str(request.url)
         if "field_production_monthly" in url:
-            return httpx.Response(
+            return httpx2.Response(
                 200, content=(DATA_DIR / "sodir_field_production_sample.csv").read_bytes()
             )
         if "/MapServer/7100/query" in url:
-            return httpx.Response(200, json=SODIR_FIELDS_GEOJSON)
+            return httpx2.Response(200, json=SODIR_FIELDS_GEOJSON)
         if "/MapServer/6000/query" in url:
-            return httpx.Response(200, json=SODIR_FACILITIES_GEOJSON)
+            return httpx2.Response(200, json=SODIR_FACILITIES_GEOJSON)
         if "/MapServer/5000/query" in url:
-            return httpx.Response(200, json=SODIR_WELLS_GEOJSON)
-        return httpx.Response(404)
+            return httpx2.Response(200, json=SODIR_WELLS_GEOJSON)
+        return httpx2.Response(404)
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = httpx2.Client(transport=httpx2.MockTransport(handler))
     db = Store(tmp_path)
-    summary = db.ingest("norway", client=client)
+    summary = db.ingest("norway", origin="publisher", client=client)
 
     assert summary.production_rows == 2
     assert summary.geo_counts == {"fields": 2, "facilities": 1, "wells": 1}

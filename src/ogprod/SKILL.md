@@ -18,9 +18,10 @@ list every option.
 | Command | Description |
 |---|---|
 | `sources` | List registered data source connectors |
-| `ingest SOURCE [OPTIONS]` | Download, normalize, and store production & geospatial data (`--year`, `--environment`, `--recent`, `--refresh`, `--no-geo`, `--keep-raw`, `--files`, `--data-dir`) |
+| `ingest SOURCE [OPTIONS]` | Sync pre-built Parquet from the Hugging Face mirror (`--origin mirror`, default) or fetch live from regulator portals (`--origin publisher`). Supports repeatable `--year`, `--mirror`, `--revision`, `--environment`, `--recent`, `--refresh`, `--no-geo`, `--keep-raw`, `--files`, `--data-dir` |
 | `coverage [--data-dir DIR]` | Summarize stored production rows, periods, and geo counts per source |
 | `sql QUERY [--data-dir DIR]` | Run a DuckDB SQL query over `production`, `fields`, `facilities`, and `wells` |
+| `export-web [OPTIONS]` | Export Layer-2 static web visualization artifacts (`meta.json`, `rollups/`, `search/index.json`, `tiles/ogprod.pmtiles`). Supports `--data-dir`, `--out-dir`, `--sync-mirror`, `--mirror`, `--revision`, `--skip-tiles` |
 | `completion SHELL` | Print the completion script for bash, zsh or fish |
 | `skill [--install]` | Print this file, or install it as an agent skill |
 
@@ -34,9 +35,10 @@ All rates in `production` are calendar-day averages stored as `float32`:
 
 ```sh
 ogprod sources
-ogprod ingest brazil --year 2026 --data-dir ./data
+ogprod ingest brazil --year 2025 --year 2026 --data-dir ./data
 ogprod ingest norway --data-dir ./data
-ogprod ingest mexico --data-dir ./data
+ogprod ingest mexico --origin publisher --data-dir ./data
 ogprod coverage --data-dir ./data
+ogprod export-web --data-dir ./data --out-dir ./site/public/data
 ogprod sql "SELECT source, field_name, round(sum(oil_prod), 0) AS oil_bpd FROM production WHERE period = '2025-01-01' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 10" --data-dir ./data
 ```

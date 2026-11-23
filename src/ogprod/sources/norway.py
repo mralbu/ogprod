@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
-import httpx
+import httpx2
 import pandas as pd
 import pyarrow as pa
 
@@ -84,7 +84,7 @@ def _epoch_ms_to_year(series: pd.Series) -> pd.Series:
 
 
 def _fetch_arcgis_geojson(
-    http: httpx.Client,
+    http: httpx2.Client,
     layer_id: int,
     out_fields: str,
     dest: Path,
@@ -268,7 +268,7 @@ class Norway(base.Source):
     def discover_production(
         self,
         *,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
         year: int | None = None,
         environment: str | None = None,
         recent: bool = False,
@@ -350,7 +350,7 @@ class Norway(base.Source):
         kind: schema.GeoKind,
         dest_dir: Path,
         *,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
     ) -> list[base.DownloadResult]:
         """Download projected GeoJSON from FactMaps for ``fields``, ``facilities``, or ``wells``."""
         layer_id, out_fields = _LAYER_CONFIG[kind]
