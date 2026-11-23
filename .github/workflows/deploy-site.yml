@@ -1,0 +1,124 @@
+name: Deploy Site to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "src/ogprod/export_web.py"
+      - "scripts/export_site.py"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+    inputs:
+      mirror:
+        description: "Mirror repository override (default: mralbu/ogprod)"
+        required: false
+        default: "mralbu/ogprod"
+        type: string
+      revision:
+        description: "Mirror git revision or tag (default: main)"
+        required: false
+        default: "main"
+        type: string
+  workflow_call:
+    inputs:
+      mirror:
+        required: false
+        default: "mralbu/ogprod"
+        type: string
+      revision:
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  UV_LOCKED: "1"
+  TIPPECANOE_VERSION: "2.79.0"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: site/package-lock.json
+
+      - name: Cache Felt tippecanoe binary
+        id: cache-tippecanoe
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/tippecanoe
+          key: tippecanoe-${{ runner.os }}-${{ env.TIPPECANOE_VERSION }}
+
+      - name: Build Felt tippecanoe on cache miss
+        if: steps.cache-tippecanoe.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential libsqlite3-dev zlib1g-dev
+          git clone --depth 1 --branch "${TIPPECANOE_VERSION}" https://github.com/felt/tippecanoe.git /tmp/tippecanoe
+          make -C /tmp/tippecanoe -j"$(nproc)"
+          mkdir -p ~/.local/tippecanoe/bin
+          cp /tmp/tippecanoe/tippecanoe ~/.local/tippecanoe/bin/tippecanoe
+          rm -rf /tmp/tippecanoe
+
+      - name: Add tippecanoe to PATH
+        run: echo "$HOME/.local/tippecanoe/bin" >> "$GITHUB_PATH"
+
+      - name: Sync Python dependencies
+        run: uv sync
+
+      - name: Export Layer-2 web assets from Hugging Face mirror
+        run: |
+          uv run ogprod export-web \
+            --sync-mirror \
+            --mirror "${{ inputs.mirror || 'mralbu/ogprod' }}" \
+            --revision "${{ inputs.revision || 'main' }}" \
+            --data-dir ./data \
+            --out-dir ./site/public/data
+
+      - name: Install frontend dependencies & test
+        working-directory: site
+        run: |
+          npm ci
+          npm test
+
+      - name: Build static site
+        working-directory: site
+        env:
+          VITE_BASE_PATH: /ogprod/
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

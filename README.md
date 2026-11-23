@@ -29,9 +29,11 @@ Geospatial tables are stored as Hilbert-sorted **GeoParquet 1.1** (`EPSG:4326`, 
 
 ## Quickstart
 
+By default, `ogprod ingest` downloads pre-normalized v2 Parquet and GeoParquet 1.1 files anonymously from the public Hugging Face mirror ([`mralbu/ogprod`](https://huggingface.co/datasets/mralbu/ogprod)) with no token required. Pass `--origin publisher` to fetch live from regulator portals.
+
 ```sh
 uv run ogprod sources
-uv run ogprod ingest brazil --year 2026 --data-dir ./data
+uv run ogprod ingest brazil --year 2025 --year 2026 --data-dir ./data
 uv run ogprod ingest norway --data-dir ./data
 uv run ogprod ingest mexico --data-dir ./data
 uv run ogprod coverage --data-dir ./data
@@ -44,14 +46,23 @@ Python API:
 import ogprod
 
 db = ogprod.Store("./data")
-db.ingest("brazil", year=2026)
-db.ingest("norway")
+db.ingest("brazil", year=[2025, 2026])  # default: origin="mirror"
+db.ingest("norway", origin="publisher")  # live fetch from Sodir
 db.ingest("mexico")
 
 df = db.production(source="brazil", start="2026-01")
 fields = db.fields()  # GeoParquet 1.1 polygons
 facilities = db.facilities()  # GeoParquet 1.1 FPSOs/platforms
 wells = db.wells()  # GeoParquet 1.1 well points
+```
+
+### Web Visualization (`site/`)
+
+Export Layer-2 static assets (rollups, search index, `meta.json`, and `ogprod.pmtiles` via Felt's `tippecanoe`) and run the MapLibre + ECharts + lazy DuckDB-WASM explorer:
+
+```sh
+uv run ogprod export-web --sync-mirror --out-dir site/public/data --data-dir ./data
+npm --prefix site ci && npm --prefix site run dev
 ```
 
 See [docs/data-architecture.md](docs/data-architecture.md) for the full storage layout, source plan (Brazil ANP, Norway Sodir, Mexico SENER/CNH), and static web export contract.
