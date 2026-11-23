@@ -1,0 +1,89 @@
+name: Update Mirror Data
+
+on:
+  schedule:
+    # Weekly Monday 06:00 UTC rolling refresh for CI-reachable regulators (Norway, Mexico).
+    # Brazil (www.gov.br) resets connections from Azure IPs and is updated locally via
+    # scripts/publish_mirror.py (or manually via workflow_dispatch when reachable).
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Comma-separated sources or 'all' (default: norway,mexico)"
+        required: false
+        default: "norway,mexico"
+        type: string
+      full_history:
+        description: "Fetch full history instead of recent years for multi-file sources"
+        required: false
+        default: false
+        type: boolean
+      prune_legacy:
+        description: "One-time v1 -> v2 cutover: reset remote manifest and delete legacy files"
+        required: false
+        default: false
+        type: boolean
+      force:
+        description: "Override sanity-gate drops"
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: "Run ingest and diff without pushing to Hugging Face"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: mirror-publish
+  cancel-in-progress: false
+
+env:
+  UV_LOCKED: "1"
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      changed: ${{ steps.refresh.outputs.changed }}
+      succeeded: ${{ steps.refresh.outputs.succeeded }}
+      failed: ${{ steps.refresh.outputs.failed }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies (including publish group)
+        run: uv sync --group publish
+
+      - name: Refresh regulators and publish healthy sources to Hugging Face
+        id: refresh
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          args=(
+            --sources "${{ inputs.sources || 'norway,mexico' }}"
+            --data-dir ./data
+          )
+          if [[ "${{ inputs.full_history }}" == "true" ]]; then args+=(--full-history); fi
+          if [[ "${{ inputs.prune_legacy }}" == "true" ]]; then args+=(--prune-legacy); fi
+          if [[ "${{ inputs.force }}" == "true" ]]; then args+=(--force); fi
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then args+=(--dry-run); fi
+          uv run --group publish python -m scripts.ci_refresh "${args[@]}"
+
+  deploy-site:
+    needs: update
+    if: ${{ always() && needs.update.outputs.changed == 'true' }}
+    uses: ./.github/workflows/deploy-site.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write

@@ -7,7 +7,7 @@ import json
 import math
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -142,27 +142,27 @@ def test_brazil_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
         'arquivos-producao-de-petroleo-e-gas-natural-nacional/pm/producao-mar-2026.csv">2026</a>'
     )
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         url = str(request.url)
         if url.endswith("fase-de-desenvolvimento-e-producao"):
-            return httpx.Response(200, text=portal_html)
+            return httpx2.Response(200, text=portal_html)
         if url.endswith("producao-mar-2026.csv"):
-            return httpx.Response(200, content=(DATA_DIR / "anp_mar_2026_sample.csv").read_bytes())
+            return httpx2.Response(200, content=(DATA_DIR / "anp_mar_2026_sample.csv").read_bytes())
         if url.endswith("dados-abertos-plataformas-operacao.csv"):
-            return httpx.Response(200, content=(DATA_DIR / "anp_lpo_sample.csv").read_bytes())
+            return httpx2.Response(200, content=(DATA_DIR / "anp_lpo_sample.csv").read_bytes())
         if "CAMPOS_PRODUCAO_SIRGAS" in url:
-            return httpx.Response(200, json=ANP_FIELDS_GEOJSON)
+            return httpx2.Response(200, json=ANP_FIELDS_GEOJSON)
         if url.endswith("extracao-campo.csv"):
-            return httpx.Response(200, content=ANP_FIELDS_ACTIVE_CSV.encode("utf-8-sig"))
+            return httpx2.Response(200, content=ANP_FIELDS_ACTIVE_CSV.encode("utf-8-sig"))
         if url.endswith("extracao-campo-devolvido.csv"):
-            return httpx.Response(200, content=ANP_FIELDS_RELINQ_CSV.encode("utf-8-sig"))
+            return httpx2.Response(200, content=ANP_FIELDS_RELINQ_CSV.encode("utf-8-sig"))
         if url.endswith("situacao-pocos-1939-2026.csv"):
-            return httpx.Response(200, content=(DATA_DIR / "anp_wells_sample.csv").read_bytes())
-        return httpx.Response(404)
+            return httpx2.Response(200, content=(DATA_DIR / "anp_wells_sample.csv").read_bytes())
+        return httpx2.Response(404)
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = httpx2.Client(transport=httpx2.MockTransport(handler))
     db = Store(tmp_path)
-    summary = db.ingest("brazil", year=2026, client=client)
+    summary = db.ingest("brazil", year=2026, origin="publisher", client=client)
 
     assert summary.files_ingested == 1
     assert summary.production_rows == 2

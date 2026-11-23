@@ -16,22 +16,24 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import duckdb
 import geopandas as gpd
-import httpx
+import httpx2
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from duckdb import ColumnExpression, ConstantExpression
 
 from ogprod import geo, schema, sources
+from ogprod import mirror as mirror_mod
 from ogprod.sources import base
 
 _ENV_VAR = "OGPROD_DATA"
 _MANIFEST_VERSION = 2
 _BATCH_ROWS = 1_500_000
+_PARQUET_ROW_GROUP_SIZE = 128_000
 
 
 def resolve_root(root: str | Path | None = None) -> Path:
@@ -89,6 +91,7 @@ def _atomic_write_parquet(table: pa.Table, path: Path) -> None:
     pq.write_table(
         table,
         tmp,
+        row_group_size=_PARQUET_ROW_GROUP_SIZE,
         compression="zstd",
         compression_level=6,
         use_dictionary=True,
@@ -372,6 +375,24 @@ def _should_skip_remote(
     return remote.year_max is not None and remote.year_max < current_year - 1
 
 
+def _discover_for_years(
+    connector: base.Source,
+    http: httpx2.Client,
+    years: list[int] | None,
+    options: dict[str, Any],
+) -> list[base.RemoteFile]:
+    if years is None:
+        return connector.discover_production(client=http, year=None, **options)
+    seen: set[str] = set()
+    remotes: list[base.RemoteFile] = []
+    for y in years:
+        for remote in connector.discover_production(client=http, year=y, **options):
+            if remote.key not in seen:
+                seen.add(remote.key)
+                remotes.append(remote)
+    return remotes
+
+
 class Store:
     """Primary interface to ogprod's local Parquet/GeoParquet store."""
 
@@ -389,18 +410,23 @@ class Store:
         self,
         source: str,
         *,
-        year: int | None = None,
+        year: int | Iterable[int] | None = None,
+        origin: Literal["mirror", "publisher"] = "mirror",
+        mirror: str | None = None,
+        revision: str = "main",
         refresh: bool = False,
         geo_layers: bool = True,
         keep_raw: bool = False,
         files: Sequence[str | Path] | None = None,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
         **options: Any,
     ) -> IngestSummary:
-        """Download, parse, and upsert a source's production and spatial tables."""
+        """Download, normalize, or mirror-sync a source's production and spatial tables."""
         connector = sources.get(source)
         if files is not None and (year is not None or options):
             raise TypeError("omit fetch filters when ingesting local files=")
+        if origin not in {"mirror", "publisher"}:
+            raise ValueError(f"origin must be 'mirror' or 'publisher', got {origin!r}")
 
         manifest = load_manifest(self.root)
         src_entry = manifest.setdefault("sources", {}).setdefault(source, {"files": {}})
@@ -408,6 +434,21 @@ class Store:
         src_entry["country_code"] = connector.country_code
         src_entry["publisher"] = connector.publisher
         src_entry["docs_url"] = connector.docs_url
+
+        if files is None and origin == "mirror":
+            return self._ingest_from_mirror(
+                source=source,
+                manifest=manifest,
+                src_entry=src_entry,
+                year=year,
+                mirror_spec=mirror,
+                revision=revision,
+                geo_layers=geo_layers,
+                refresh=refresh,
+                keep_raw=keep_raw,
+                client=client,
+                options=options,
+            )
 
         with tempfile.TemporaryDirectory(prefix="ogprod-") as tmp:
             work_dir = (self.root / "raw" / source) if keep_raw else Path(tmp)
@@ -438,22 +479,67 @@ class Store:
             geo_counts=geo_counts,
         )
 
+    def _ingest_from_mirror(
+        self,
+        *,
+        source: str,
+        manifest: dict[str, Any],
+        src_entry: dict[str, Any],
+        year: int | Iterable[int] | None,
+        mirror_spec: str | None,
+        revision: str,
+        geo_layers: bool,
+        refresh: bool,
+        keep_raw: bool,
+        client: httpx2.Client | None,
+        options: dict[str, Any],
+    ) -> IngestSummary:
+        if keep_raw or options:
+            unsupported = sorted((*options, *(["keep_raw"] if keep_raw else [])))
+            raise ValueError(
+                f"options {unsupported} are only supported with origin='publisher', "
+                "not origin='mirror'"
+            )
+        result = mirror_mod.sync_source(
+            source,
+            store_dir(self.root),
+            year=year,
+            mirror=mirror_spec,
+            revision=revision,
+            geo_layers=geo_layers,
+            refresh=refresh,
+            client=client,
+        )
+        src_entry["mirror"] = result.mirror
+        src_entry["revision"] = result.revision
+        src_entry["updated_at"] = datetime.now(tz=UTC).isoformat()
+        save_manifest(manifest, self.root)
+        return IngestSummary(
+            source=source,
+            files_ingested=result.files_downloaded,
+            files_skipped=result.files_skipped,
+            production_rows=result.production_rows,
+            partitions=result.partitions,
+            geo_counts=result.geo_counts,
+        )
+
     def _ingest_production_layer(
         self,
         connector: base.Source,
         *,
         work_dir: Path,
         src_entry: dict[str, Any],
-        year: int | None,
+        year: int | Iterable[int] | None,
         refresh: bool,
         files: Sequence[str | Path] | None,
-        client: httpx.Client | None,
+        client: httpx2.Client | None,
         options: dict[str, Any],
     ) -> tuple[int, int, int, list[Path]]:
         if files is not None:
             return self._ingest_local_files(connector, [Path(f) for f in files])
+        years = mirror_mod.normalize_years(year)
         with base.open_client(client) as http:
-            remotes = connector.discover_production(client=http, year=year, **options)
+            remotes = _discover_for_years(connector, http, years, options)
             return self._ingest_remote_files(
                 connector,
                 remotes,
@@ -484,7 +570,7 @@ class Store:
         connector: base.Source,
         remotes: list[base.RemoteFile],
         *,
-        http: httpx.Client,
+        http: httpx2.Client,
         work_dir: Path,
         recorded: dict[str, Any],
         refresh: bool,
@@ -531,7 +617,7 @@ class Store:
         work_dir: Path,
         *,
         refresh: bool,
-        client: httpx.Client | None,
+        client: httpx2.Client | None,
     ) -> dict[str, int]:
         counts: dict[str, int] = {}
         with base.open_client(client) as http:

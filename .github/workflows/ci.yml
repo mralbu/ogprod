@@ -42,3 +42,22 @@ jobs:
       - run: just build
 
       - run: just smoke
+
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: site/package-lock.json
+
+      - working-directory: site
+        run: |
+          npm ci
+          npm test
+          VITE_BASE_PATH=/ogprod/ npm run build
+
