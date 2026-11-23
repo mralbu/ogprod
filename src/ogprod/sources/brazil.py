@@ -66,13 +66,9 @@ _WELLS_LINK_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Relative and absolute tolerances when merging known ANP duplicate well-months.
-# 0.5 bbl/d (~2.4 m³/month) covers 1-2 m³ rounding differences between ANP's pre-2005
-# spurious state cross-join rows and the authoritative state-matching row on small wells.
 _MERGE_RTOL = 5e-3
 _MERGE_ATOL = 0.5
 
-# Map Brazilian state names (normalized) to well-name state suffix codes.
 _STATE_SUFFIX: dict[str, str] = {
     "alagoas": "AL",
     "amazonas": "AM",
@@ -88,7 +84,6 @@ _STATE_SUFFIX: dict[str, str] = {
     "sergipe": "SE",
 }
 
-# Portuguese 3-letter month abbreviations used in ANP CSVs (e.g. 'out/2025', 'dez/2025').
 _PT_MONTHS: dict[str, str] = {
     "jan": "01",
     "fev": "02",
@@ -106,10 +101,8 @@ _PT_MONTHS: dict[str, str] = {
 
 _MISSING_SENTINELS = frozenset({"", "NAO INFORMADO", "(NAO CADASTRADO)"})
 
-# Trailing platform/hull code tags in pre-2022 ANP CSVs (e.g. 'PETROBRAS 66 (P-66)').
 _FACILITY_CODE_SUFFIX_RE = re.compile(r"\s*\((?:P-\d+|MV-\d+)\)\s*$")
 
-# Known pre-2022 ANP production facility spelling drifts vs LPO canonical names.
 _FACILITY_ALIASES: dict[str, str] = {
     "FPSO CIDADE DE ILHA BELA": "FPSO CIDADE DE ILHABELA",
     "PLATAFORMA DE PAMPO-1": "PLATAFORMA DE PAMPO 1",
@@ -529,7 +522,6 @@ def _parse_facilities_csv(path: Path) -> gpd.GeoDataFrame:
             else pd.NA,
             "water_depth_m": parse_br_number(df[water_depth_col]) if water_depth_col else pd.NA,
             "oil_capacity_bpd": parse_br_number(df[oil_cap_col]) if oil_cap_col else pd.NA,
-            # ANP LPO gas capacity is already in Mil m³/d (10³ m³/d = e3m3/d).
             "gas_capacity_e3m3d": parse_br_number(df[gas_cap_col]) if gas_cap_col else pd.NA,
             "export_system": df[cols["sistema de escoamento"]]
             if "sistema de escoamento" in cols
@@ -628,7 +620,6 @@ def _enrich_fields_from_csv(
     meta = pd.concat(frames, ignore_index=True)
     meta = meta.loc[meta["field_id"] != ""].drop_duplicates(subset=["field_id"], keep="first")
 
-    # Backfill missing metadata on WFS rows and append fields absent from WFS (e.g. relinquished).
     lookup = meta.set_index("field_id")
     enriched = base_fields.copy()
     for col in ("region", "environment", "operator", "production_start_date"):

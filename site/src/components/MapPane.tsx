@@ -177,7 +177,6 @@ export function MapPane({
           },
         });
       } else {
-        // Fallback point layers when running without tippecanoe PMTiles.
         map.addSource("fields-fallback", {
           type: "geojson",
           data: buildFallbackGeoJson(fieldsSummary as unknown as { lon: number | null; lat: number | null }[]),
@@ -303,7 +302,6 @@ export function MapPane({
     };
   }, [meta.has_tiles, fieldsSummary, facilitiesSummary]);
 
-  // Apply layer visibility and active source filter.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -323,7 +321,6 @@ export function MapPane({
     }
   }, [activeSource, showFields, showFacilities, showWells, mapReady]);
 
-  // Fit bounds when switching country/source on overview.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || selection.kind !== "overview") return;
@@ -344,7 +341,6 @@ export function MapPane({
     }
   }, [activeSource, selection.kind, meta.sources, mapReady]);
 
-  // Fly to selected entity when coordinates are known.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;

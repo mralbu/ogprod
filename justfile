@@ -18,6 +18,11 @@ lint:
     uv run ruff format --check
     uv run ruff check
     uv run ty check
+    uv run python -m scripts.check_comments
+
+# Check the comment ratchet (docs/adr/0001); --update lowers the baseline, --list shows them all
+comments *args:
+    uv run python -m scripts.check_comments {{ args }}
 
 # Report unused code (vulture, configured in pyproject.toml). Silence a false positive with
 # ignore_names / ignore_decorators in [tool.vulture], or a whitelist file passed as an argument

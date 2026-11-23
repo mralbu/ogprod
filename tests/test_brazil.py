@@ -93,16 +93,13 @@ def test_parse_brazil_production_and_injection_rates() -> None:
     assert df["gas_prod"].dtype == "float32"
     assert df["water_inj"].dtype == "float32"
 
-    # Jan 2026 has 31 days. 15898.73 m3 == 100,000 bbl -> 100,000 / 31 bbl/d.
     buz = df.loc["7-BUZ-1-RJS"]
     assert buz["source"] == "brazil"
     assert buz["field_id"] == "BUZIOS"
     assert buz["facility_id"] == "FPSO ALMIRANTE BARROSO"
     assert buz["environment"] == "offshore"
     assert math.isclose(float(buz["oil_prod"]), 15898.73 * units.BBL_PER_M3 / 31, rel_tol=1e-4)
-    # 3100 e3m3 / 31 days == 100.0 e3m3/d
-    assert math.isclose(float(buz["gas_prod"]), 100.0, rel_tol=1e-4)
-    # water_inj = (1589.87 + 317.97) m3 * BBL_PER_M3 / 31
+    assert math.isclose(float(buz["gas_prod"]), 3_100.0 / 31, rel_tol=1e-4)
     assert math.isclose(
         float(buz["water_inj"]), (1589.87 + 317.97) * units.BBL_PER_M3 / 31, rel_tol=1e-4
     )
@@ -121,9 +118,8 @@ def test_parse_brazil_merges_state_cross_join_and_warns_gas_gap() -> None:
     df = table.to_pandas()
     assert len(df) == 1
     row = df.iloc[0]
-    assert row["region"] == "Bahia"  # matches -BA well suffix
-    assert row["facility_id"] == ""  # Não Informado normalized to empty key
-    # Oil kept once (not doubled), gas recovered from the other copy.
+    assert row["region"] == "Bahia"
+    assert row["facility_id"] == ""
     assert math.isclose(float(row["oil_prod"]), 158.99 * units.BBL_PER_M3 / 31, rel_tol=1e-4)
     assert math.isclose(float(row["gas_prod"]), 1.0, rel_tol=1e-4)
 
@@ -136,7 +132,6 @@ def test_parse_brazil_rejects_conflicting_duplicate_rows() -> None:
 
 
 def test_parse_brazil_prefers_state_matching_row_on_small_rounding_diff() -> None:
-    # Mirrors real 2003-12 FAZENDA BELÉM cross-join (Bahia 228.6 m³ vs Ceará 230 m³).
     csv_text = (
         "Ano,Mês/Ano,Estado,Bacia,Campo,Poço,Ambiente,Instalação,"
         "Produção de Óleo (m³),Produção de Condensado (m³),"
@@ -224,14 +219,11 @@ def test_brazil_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
     assert summary.files_ingested == 1
     assert summary.production_rows == 2
     assert summary.geo_counts == {"fields": 2, "facilities": 1, "wells": 3}
-    # Lean default: raw/ directory is NOT kept on disk.
     assert not (tmp_path / "raw").exists()
-    # Clean country-named GeoParquet files.
     assert (tmp_path / "store" / "geo" / "fields" / "brazil.parquet").exists()
     assert (tmp_path / "store" / "geo" / "facilities" / "brazil.parquet").exists()
     assert (tmp_path / "store" / "geo" / "wells" / "brazil.parquet").exists()
 
-    # Verify joins across production, facilities, fields, and wells.
     fac = db.facilities(source="brazil")
     assert fac.loc[0, "facility_id"] == "FPSO ALMIRANTE BARROSO"
     assert math.isclose(float(fac.loc[0, "gas_capacity_e3m3d"]), 6291.0, rel_tol=1e-4)
@@ -244,7 +236,6 @@ def test_brazil_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
     assert fields.loc["BUZIOS", "region"] == "Rio de Janeiro"
     assert fields.loc["CANDEIAS HIST"].geometry is None
 
-    # Verify manifest recorded SHA-256, publisher attribution, and units.
     manifest = json.loads((tmp_path / "store" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["units"]["oil_prod"] == "bbl/d"
     assert manifest["units"]["gas_prod"] == "e3m3/d"
@@ -379,7 +370,6 @@ def test_brazil_wfs_dates_env_backfill_status_and_dynamic_wells_url(tmp_path: Pa
     assert fields.loc["CANDEIAS", "status"] == "Em Devolução"
     assert fields.loc["DENTAO", "status"] == "Em Devolução"
 
-    # Dynamic wells CSV discovery should follow a future year rollover link on the portal.
     portal_html = (
         '<a href="https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/'
         "arquivos-fase-de-desenvolvimento-e-producao/informacoes-sobre-pocos/"

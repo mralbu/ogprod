@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# Imports drive connector registration via @base.register.
 from ogprod.sources import brazil as brazil
 from ogprod.sources import mexico as mexico
 from ogprod.sources import norway as norway

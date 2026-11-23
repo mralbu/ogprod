@@ -2,7 +2,7 @@ import { ALL_RATE_COLUMNS, type EntitySelection, type RateColumn, type UnitSyste
 import { UNIT_SYSTEMS } from "./units";
 
 export interface AppUrlState {
-  source: string; // "all" or source id
+  source: string;
   selection: EntitySelection;
   products: RateColumn[];
   units: UnitSystem;

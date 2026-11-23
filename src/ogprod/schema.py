@@ -40,10 +40,8 @@ class GeoKind(enum.StrEnum):
     WELLS = "wells"
 
 
-#: CRS enforced across every GeoParquet table.
 GEO_CRS = "EPSG:4326"
 
-#: Canonical rate columns and their storage units (written into Parquet field metadata).
 RATE_UNITS: dict[str, str] = {
     "oil_prod": LIQUID_RATE_UNIT,
     "condensate_prod": LIQUID_RATE_UNIT,
@@ -261,7 +259,6 @@ def _check_production_values(table: pa.Table) -> None:
 
     _check_finite_rates(table)
 
-    # Enforce key uniqueness within a single validated table.
     key_frame = table.select(list(PRODUCTION_KEY)).to_pandas()
     duplicated = key_frame.duplicated(keep=False)
     if duplicated.any():

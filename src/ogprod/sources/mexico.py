@@ -216,7 +216,6 @@ def _parse_campos_frame(frame: pd.DataFrame, cols: dict[str, str]) -> pa.Table:
         else pd.Series(np.nan, index=frame.index),
     }
 
-    # Merge any duplicate (field_id, period) rows (e.g. a field spanning onshore/offshore) by sum.
     work = pd.DataFrame(
         {
             "field_id": field_id,
@@ -247,7 +246,6 @@ def _parse_pozos_frame(frame: pd.DataFrame, cols: dict[str, str]) -> pa.Table:
     fecha_raw = frame[cols["fecha"]].astype("string").str.strip()
     period = pd.to_datetime(fecha_raw, format="%d-%m-%Y", errors="coerce")
     _check_unparseable_dates(fecha_raw, period, "pozos")
-    # Normalize any non-first-of-month dates to month start.
     period = period.dt.to_period("M").dt.to_timestamp()
     id_col = cols["identificador"] if "identificador" in cols else cols["nombre_del_pozo"]
     valid = period.notna() & frame[id_col].notna()

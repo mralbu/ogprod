@@ -19,7 +19,6 @@ describe("unit conversions", () => {
   it("converts gas from e3m3/d to MMcf/d accurately under oilfield_mmcf", () => {
     const mmcfd = convertRate(1_000, "gas_prod", "oilfield_mmcf");
     expect(mmcfd).toBeCloseTo(1_000 * MMCF_PER_E3M3, 6);
-    // 1000 e3m3 = 1,000,000 m3 ≈ 35.314667 MMcf
     expect(mmcfd).toBeCloseTo(35.314667, 4);
     expect(convertRate(50_000, "oil_prod", "oilfield_mmcf")).toBe(50_000);
     expect(unitLabelFor("gas_inj", "oilfield_mmcf")).toBe("MMcf/d");

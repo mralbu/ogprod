@@ -82,11 +82,6 @@ def test_audit_store_clean_and_cli_exit_zero(tmp_path: Path) -> None:
 
 
 def test_audit_store_detects_corruption_staleness_joins_and_geo_hygiene(tmp_path: Path) -> None:
-    # Seed a store with:
-    # - zero-hydrocarbon month (brazil 2018-01 onshore)
-    # - missing months & env tail lag (brazil 2025 onshore stops at 2025-09 while offshore at 12)
-    # - stale feed (reference_date far ahead)
-    # - low join coverage (unmatched field & well)
     table = base.build_production_table(
         source="brazil",
         entity_type=schema.EntityType.WELL,
@@ -111,7 +106,6 @@ def test_audit_store_detects_corruption_staleness_joins_and_geo_hygiene(tmp_path
     )
     write_production(table, root=tmp_path)
 
-    # Write a raw GeoParquet file bypassing prepare_geo to simulate legacy pre-fix geo issues.
     bad_fields = schema.empty_geo(schema.GeoKind.FIELDS)
     bad_fields.loc[0, ["source", "field_id", "field_name", "discovery_date", "status"]] = [
         "brazil",
@@ -149,7 +143,6 @@ def test_audit_store_detects_corruption_staleness_joins_and_geo_hygiene(tmp_path
     assert ("warning", "geo_sentinels") in checks
     assert not report.ok
 
-    # CLI exits 1 when errors exist.
     res = CliRunner().invoke(cli, ["audit", "--data-dir", str(tmp_path)], prog_name=APP_NAME)
     assert res.exit_code == 1
     assert "[error]" in res.stdout
@@ -167,7 +160,6 @@ def test_audit_detects_out_of_year_partition_and_strict_warning_exit(tmp_path: P
         environment=pd.Series(["onshore"]),
         rates={"oil_prod": pd.Series([500.0])},
     )
-    # Write 2024 data cleanly -> stale warning only under --strict.
     write_production(table, root=tmp_path)
     res_warn = CliRunner().invoke(
         cli,
@@ -182,7 +174,6 @@ def test_audit_detects_out_of_year_partition_and_strict_warning_exit(tmp_path: P
     )
     assert res_strict.exit_code == 1
 
-    # Misplace 2024 row into year=2025 partition -> partition error.
     wrong_path = tmp_path / "store" / "production" / "source=mexico" / "year=2025" / "data.parquet"
     wrong_path.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(table, wrong_path)

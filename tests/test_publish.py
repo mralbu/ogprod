@@ -152,14 +152,13 @@ def test_publish_merges_without_dropping_untouched_and_skips_unchanged(
         operation_classes=(FakeAdd, FakeDelete),
     )
     assert res.changed is True
-    assert res.uploaded == 2  # norway 2026 + facilities
+    assert res.uploaded == 2
     assert res.skipped == 0
     assert len(api.commits) == 1
     assert api.commits[0]["parent_commit"] == "head-sha-1"
     assert api.tags == ["v2-2026-01"]
     assert "changed=true" in gh_out.read_text(encoding="utf-8")
 
-    # Verify manifest preserved untouched brazil 2025 partition.
     manifest_op = next(
         op for op in api.commits[0]["operations"] if op.path_in_repo == "manifest.json"
     )
@@ -170,7 +169,6 @@ def test_publish_merges_without_dropping_untouched_and_skips_unchanged(
     assert pushed_manifest["sources"]["norway"]["production"]["2026"]["rows"] == 2
     assert local_scanned["norway"]["production"]["2026"]["rows"] == 2
 
-    # Second run against the pushed manifest skips everything and does not commit.
     api2 = FakeHfApi(sha="head-sha-2", manifest=pushed_manifest, tmp_dir=tmp_path)
     res2 = publish_mirror.publish_store(
         data_dir=data_dir,
@@ -225,7 +223,6 @@ def test_publish_sanity_gate_blocks_drops_and_force_overrides(tmp_path: Path) ->
         )
     assert len(api.commits) == 0
 
-    # --force overrides sanity gate; --dry-run avoids commit.
     dry = publish_mirror.publish_store(
         data_dir=data_dir,
         repo_id="mralbu/ogprod",

@@ -100,22 +100,18 @@ def test_parse_norway_production_units_and_schema() -> None:
     assert df["oil_prod"].dtype == "float32"
     assert df["gas_prod"].dtype == "float32"
 
-    # Jan 2026 = 31 days.
     js = df.loc["26376286"]
     assert js["source"] == "norway"
     assert js["entity_type"] == "field"
     assert js["field_id"] == "26376286"
     assert js["environment"] == "offshore"
-    # 3.5 Mill Sm3 -> bbl/d
     assert math.isclose(
         float(js["oil_prod"]), 3.5 * 1_000_000 * units.BBL_PER_M3 / 31, rel_tol=1e-4
     )
-    # 0.093 Bill Sm3 = 93,000 e3m3 -> 3,000 e3m3/d
-    assert math.isclose(float(js["gas_prod"]), 3000.0, rel_tol=1e-4)
+    assert math.isclose(float(js["gas_prod"]), 0.093 * 1_000_000 / 31, rel_tol=1e-4)
 
     troll = df.loc["46437"]
-    # 3.1 Bill Sm3 = 3,100,000 e3m3 -> 100,000 e3m3/d
-    assert math.isclose(float(troll["gas_prod"]), 100_000.0, rel_tol=1e-4)
+    assert math.isclose(float(troll["gas_prod"]), 3.1 * 1_000_000 / 31, rel_tol=1e-4)
 
 
 def test_norway_rejects_onshore_and_foreign_csv() -> None:

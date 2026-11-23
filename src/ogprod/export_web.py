@@ -591,7 +591,6 @@ def _field_tile_features(
         centroid_feats.append(
             {"type": "Feature", "geometry": shapely.to_geojson(pt), "properties": props}
         )
-    # Convert stringified shapely GeoJSON geometry strings into dicts for valid GeoJSON features.
     for feat in (*poly_feats, *centroid_feats):
         feat["geometry"] = json.loads(feat["geometry"])
     return poly_feats, centroid_feats
@@ -745,8 +744,6 @@ def _source_bbox(
     source_name: str,
     geo_frames: tuple[gpd.GeoDataFrame, ...],
 ) -> list[float] | None:
-    # Prefer field geometries (geo_frames[0]) when present so overseas pipeline landfalls
-    # in facilities (e.g. Norway gas terminals in continental Europe) do not distort fitBounds.
     if geo_frames:
         field_bounds = _layer_bounds(geo_frames[0], source_name)
         if field_bounds is not None:

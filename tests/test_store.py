@@ -49,7 +49,6 @@ def test_upsert_replaces_restated_month_and_isolates_other_years(tmp_path: Path)
     part_2025 = tmp_path / "store" / "production" / "source=brazil" / "year=2025" / "data.parquet"
     bytes_2025_before = part_2025.read_bytes()
 
-    # Restate 2026-01 and add 2026-02.
     revised = _make_table(
         [
             ("W1", date(2026, 1, 1), 1250.0, 0.30),
@@ -114,7 +113,6 @@ def test_refresh_replaces_requested_year_without_wiping_spillover_or_other_env(
 ) -> None:
     import httpx2
 
-    # Seed 2017 onshore + 2018 stale row with old facility key.
     seed = base.build_production_table(
         source="brazil",
         entity_type=schema.EntityType.WELL,
@@ -160,7 +158,7 @@ def test_refresh_replaces_requested_year_without_wiping_spillover_or_other_env(
     )
 
     df_2018 = db.production(source="brazil", start="2018-01", end="2018-12")
-    assert list(df_2018["entity_id"]) == ["W-FRESH-18"]  # stale row cleanly purged
+    assert list(df_2018["entity_id"]) == ["W-FRESH-18"]
 
     df_2017 = db.production(source="brazil", start="2017-01", end="2017-12")
-    assert set(df_2017["entity_id"]) == {"W-ON-17", "W-OFF-17"}  # spillover year merged, not wiped
+    assert set(df_2017["entity_id"]) == {"W-ON-17", "W-OFF-17"}

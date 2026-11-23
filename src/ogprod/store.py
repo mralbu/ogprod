@@ -399,7 +399,6 @@ def _should_skip_remote(
 ) -> bool:
     if refresh or remote.key not in recorded_files:
         return False
-    # Historical files older than previous year are treated as immutable unless refresh=True.
     return remote.year_max is not None and remote.year_max < current_year - 1
 
 

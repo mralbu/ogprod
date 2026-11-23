@@ -122,7 +122,7 @@ def test_export_web_generates_meta_rollups_fpso_utilization_and_search(tmp_path:
     )
     assert summary.sources == ("brazil", "norway")
     assert summary.has_tiles is False
-    assert summary.search_entries == 5  # 3 fields + 1 facility + 1 well
+    assert summary.search_entries == 5
 
     meta = json.loads((out_dir / "meta.json").read_text(encoding="utf-8"))
     assert meta["schema_version"] == 2
@@ -134,13 +134,11 @@ def test_export_web_generates_meta_rollups_fpso_utilization_and_search(tmp_path:
     assert by_src["norway"]["latest_oil_bpd"] == 700_000.0
     assert by_src["brazil"]["bbox"] is not None
 
-    # Verify Parquet rollups exist and match schema.
     for name in ("country_monthly", "basin_monthly", "field_monthly", "facility_monthly"):
         pf = out_dir / "rollups" / f"{name}.parquet"
         assert pf.exists()
         assert pq.read_metadata(pf).num_rows > 0
 
-    # Verify FPSO utilization = 120,000 / 150,000 = 0.80.
     fac_summary = json.loads((out_dir / "rollups" / "facilities_summary.json").read_text("utf-8"))
     assert len(fac_summary) == 1
     assert math.isclose(fac_summary[0]["oil_utilization"], 0.8, rel_tol=1e-4)
@@ -154,7 +152,6 @@ def test_export_web_generates_meta_rollups_fpso_utilization_and_search(tmp_path:
     assert math.isclose(series[0]["oil_util"], 0.6, rel_tol=1e-4)
     assert math.isclose(series[1]["oil_util"], 0.8, rel_tol=1e-4)
 
-    # Verify search index carries well first_year/last_year for lazy DuckDB-WASM pruning.
     search = json.loads((out_dir / "search" / "index.json").read_text("utf-8"))
     well_entry = next(item for item in search if item["t"] == "well")
     assert well_entry["id"] == "7-BUZ-1-RJS"
@@ -169,7 +166,6 @@ def test_export_web_invokes_tippecanoe_and_cli(
     out_dir = tmp_path / "web"
     _seed_multi_source_store(data_dir)
 
-    # Create a tiny executable stub for tippecanoe that writes its -o target file.
     fake_bin_dir = tmp_path / "bin"
     fake_bin_dir.mkdir()
     fake_tippecanoe = fake_bin_dir / "tippecanoe"
@@ -203,7 +199,6 @@ def test_source_bbox_prefers_fields_over_overseas_facilities() -> None:
         geometry=[shapely.box(2.0, 58.0, 4.0, 62.0)],
         crs="EPSG:4326",
     )
-    # Mimics a continental European gas pipeline landfall terminal at 43°N.
     facilities = gpd.GeoDataFrame(
         {"source": ["norway"], "facility_id": ["416247"], "facility_name": ["COL DE LARRAU"]},
         geometry=[shapely.Point(0.93, 43.02)],
@@ -213,7 +208,6 @@ def test_source_bbox_prefers_fields_over_overseas_facilities() -> None:
     bbox = export_web._source_bbox("norway", (fields, facilities, wells))
     assert bbox == [2.0, 58.0, 4.0, 62.0]
 
-    # When a source has no field geometries, falls back to facilities.
     empty_fields = schema.empty_geo(schema.GeoKind.FIELDS)
     fallback = export_web._source_bbox("norway", (empty_fields, facilities, wells))
     assert fallback == [0.93, 43.02, 0.93, 43.02]
