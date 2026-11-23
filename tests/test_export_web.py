@@ -58,16 +58,17 @@ def _seed_multi_source_store(root: Path) -> None:
 
     fields = gpd.GeoDataFrame(
         {
-            "source": ["brazil", "norway"],
-            "field_id": ["BUZIOS", "26376286"],
-            "field_name": ["BÚZIOS", "JOHAN SVERDRUP"],
-            "basin": ["Santos", "North Sea"],
-            "operator": ["PETROBRAS", "Equinor"],
-            "environment": ["offshore", "offshore"],
+            "source": ["brazil", "norway", "norway"],
+            "field_id": ["BUZIOS", "26376286", "NULL_GEOM_FIELD"],
+            "field_name": ["BÚZIOS", "JOHAN SVERDRUP", "RELINQUISHED FIELD"],
+            "basin": ["Santos", "North Sea", "North Sea"],
+            "operator": ["PETROBRAS", "Equinor", "Equinor"],
+            "environment": ["offshore", "offshore", "offshore"],
         },
         geometry=[
             shapely.box(-42.7, -24.7, -42.4, -24.5),
             shapely.box(2.4, 58.7, 2.7, 58.9),
+            None,
         ],
         crs="EPSG:4326",
     )
@@ -121,7 +122,7 @@ def test_export_web_generates_meta_rollups_fpso_utilization_and_search(tmp_path:
     )
     assert summary.sources == ("brazil", "norway")
     assert summary.has_tiles is False
-    assert summary.search_entries == 4  # 2 fields + 1 facility + 1 well
+    assert summary.search_entries == 5  # 3 fields + 1 facility + 1 well
 
     meta = json.loads((out_dir / "meta.json").read_text(encoding="utf-8"))
     assert meta["schema_version"] == 2

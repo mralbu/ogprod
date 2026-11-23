@@ -341,8 +341,12 @@ def _load_entity_stats(
     return stats
 
 
+def _has_valid_geom(geom: Any) -> bool:
+    return isinstance(geom, shapely.Geometry) and not geom.is_empty
+
+
 def _geom_lon_lat(geom: Any) -> tuple[float | None, float | None]:
-    if geom is None or geom.is_empty:
+    if not _has_valid_geom(geom):
         return None, None
     pt = geom if geom.geom_type == "Point" else geom.representative_point()
     return _round_opt(pt.x, 5), _round_opt(pt.y, 5)
@@ -560,7 +564,7 @@ def _field_tile_features(
     centroid_feats: list[dict[str, Any]] = []
     for _, row in fields_gdf.iterrows():
         geom = row.geometry
-        if geom is None or geom.is_empty:
+        if not _has_valid_geom(geom):
             continue
         key = (str(row["source"]), str(row["field_id"]))
         st = field_stats.get(key, {})
@@ -600,7 +604,7 @@ def _facility_tile_features(
     feats: list[dict[str, Any]] = []
     for _, row in fac_gdf.iterrows():
         geom = row.geometry
-        if geom is None or geom.is_empty:
+        if not _has_valid_geom(geom):
             continue
         key = (str(row["source"]), str(row["facility_id"]))
         st = fac_stats.get(key, {})
@@ -646,7 +650,7 @@ def _well_tile_features(
     feats: list[dict[str, Any]] = []
     for _, row in wells_gdf.iterrows():
         geom = row.geometry
-        if geom is None or geom.is_empty:
+        if not _has_valid_geom(geom):
             continue
         key = (str(row["source"]), str(row["well_id"]))
         st = well_stats.get(key, {})
