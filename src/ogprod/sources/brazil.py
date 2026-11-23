@@ -12,6 +12,8 @@ required field-polygon properties via ``propertyName`` to save bandwidth and spa
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 import unicodedata
 import warnings
@@ -182,15 +184,42 @@ def _env_matches(env_code: str, environment: str | None) -> bool:
     return wanted == actual
 
 
+def _read_raw_bytes(raw: base.RawFile) -> bytes:
+    if isinstance(raw, str | Path):
+        return Path(raw).read_bytes()
+    raw.seek(0)
+    return raw.read()
+
+
+def _unwrap_outer_quoted_rows(text: str) -> str:
+    """Fix ANP 2019-2021 CSVs where entire data rows are wrapped in outer quotes."""
+    lines = text.splitlines()
+    if len(lines) <= 1:
+        return text
+    header = lines[0]
+    if "," not in header:
+        return text
+    out = [header]
+    for line in lines[1:]:
+        if line.startswith('"'):
+            parsed = next(csv.reader([line]), [])
+            if len(parsed) == 1 and "," in parsed[0]:
+                out.append(parsed[0])
+                continue
+        out.append(line)
+    return "\n".join(out)
+
+
 def _read_csv_auto(raw: base.RawFile) -> pd.DataFrame:
-    """Read an ANP CSV, supporting UTF-8 BOM and cp1252 encodings."""
+    """Read an ANP CSV, supporting UTF-8 BOM/cp1252 and outer-quoted 2019-2021 rows."""
+    content = _read_raw_bytes(raw)
     for encoding in ("utf-8-sig", "cp1252"):
         try:
-            if not isinstance(raw, str | Path):
-                raw.seek(0)
-            return pd.read_csv(raw, sep=",", dtype=str, encoding=encoding, low_memory=False)
+            text = content.decode(encoding)
         except UnicodeDecodeError:
             continue
+        cleaned = _unwrap_outer_quoted_rows(text)
+        return pd.read_csv(io.StringIO(cleaned), sep=",", dtype=str, low_memory=False)
     raise ValueError("could not decode ANP CSV as utf-8-sig or cp1252")
 
 
@@ -630,7 +659,8 @@ class Brazil(base.Source):
                 continue
             if recent and y_max is not None and y_max < current_year - 1:
                 continue
-            key = f"{env_code}/{Path(url).name}"
+            tail = url.split("arquivos-producao-de-petroleo-e-gas-natural-nacional/", 1)[-1]
+            key = tail.lstrip("/") or f"{env_code}/{Path(url).name}"
             remotes.append(base.RemoteFile(url=url, key=key, year_min=y_min, year_max=y_max))
         if not remotes:
             raise ValueError(

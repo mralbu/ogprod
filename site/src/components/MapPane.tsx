@@ -70,34 +70,9 @@ export function MapPane({
     if (!containerRef.current) return;
     ensurePmtilesProtocol();
 
-    const style: maplibregl.StyleSpecification = {
-      version: 8,
-      sources: {
-        carto: {
-          type: "raster",
-          tiles: [
-            "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-            "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-            "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-          ],
-          tileSize: 256,
-          attribution: "&copy; OpenStreetMap &copy; CARTO",
-        },
-      },
-      layers: [
-        {
-          id: "basemap",
-          type: "raster",
-          source: "carto",
-          minzoom: 0,
-          maxzoom: 19,
-        },
-      ],
-    };
-
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style,
+      style: "https://tiles.openfreemap.org/styles/positron",
       center: [-30, 12],
       zoom: 2.1,
       minZoom: 1.5,

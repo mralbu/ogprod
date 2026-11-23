@@ -157,6 +157,41 @@ def test_parse_brazil_prefers_state_matching_row_on_small_rounding_diff() -> Non
     assert math.isclose(float(row["gas_prod"]), 1.143 / 31, rel_tol=1e-4)
 
 
+def test_parse_brazil_unwraps_outer_quoted_2019_2021_rows() -> None:
+    csv_text = (
+        "Ano,Mês/Ano,Estado,Bacia,Campo,Poço,Ambiente,Instalação,"
+        "Produção de Óleo (m³),Produção de Condensado (m³),"
+        "Produção de Gás Associado (Mm³),Produção de Gás Não Associado (Mm³),"
+        "Produção de Água (m³)\n"
+        '"2020,01/2020,Rio de Janeiro,Santos,BUZIOS,7-BUZ-1-RJS,Mar,FPSO A,'
+        '""15898,73"",0,""3100,0"",0,""500,5"""\n'
+        "2020,01/2020,Alagoas,Alagoas,PARU,4-ALS-39-AL,Mar,Não Informado,0,0,0,0,0\n"
+    )
+    table = brazil.Brazil().parse_production(io.BytesIO(csv_text.encode("utf-8")))
+    df = table.to_pandas().set_index("entity_id")
+    assert len(df) == 2
+    buz = df.loc["7-BUZ-1-RJS"]
+    assert math.isclose(float(buz["oil_prod"]), 15898.73 * units.BBL_PER_M3 / 31, rel_tol=1e-4)
+    assert math.isclose(float(buz["gas_prod"]), 100.0, rel_tol=1e-4)
+
+
+def test_brazil_discover_preserves_year_subdir_in_key() -> None:
+    html = (
+        '<a href="https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/'
+        "arquivos-fase-de-desenvolvimento-e-producao/"
+        'arquivos-producao-de-petroleo-e-gas-natural-nacional/pt/2022/producao-terra-3-trim.csv">22</a>'
+        '<a href="https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/'
+        "arquivos-fase-de-desenvolvimento-e-producao/"
+        'arquivos-producao-de-petroleo-e-gas-natural-nacional/pt/2023/producao-terra-3-trim.csv">23</a>'
+    )
+    client = httpx2.Client(
+        transport=httpx2.MockTransport(lambda _: httpx2.Response(200, text=html))
+    )
+    remotes = brazil.Brazil().discover_production(client=client)
+    keys = [r.key for r in remotes]
+    assert keys == ["pt/2022/producao-terra-3-trim.csv", "pt/2023/producao-terra-3-trim.csv"]
+
+
 def test_brazil_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
     portal_html = (
         '<a href="https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/'
