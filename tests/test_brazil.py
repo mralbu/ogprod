@@ -135,6 +135,28 @@ def test_parse_brazil_rejects_conflicting_duplicate_rows() -> None:
         brazil.Brazil().parse_production(io.BytesIO(bad_csv.encode("utf-8")))
 
 
+def test_parse_brazil_prefers_state_matching_row_on_small_rounding_diff() -> None:
+    # Mirrors real 2003-12 FAZENDA BELÉM cross-join (Bahia 228.6 m³ vs Ceará 230 m³).
+    csv_text = (
+        "Ano,Mês/Ano,Estado,Bacia,Campo,Poço,Ambiente,Instalação,"
+        "Produção de Óleo (m³),Produção de Condensado (m³),"
+        "Produção de Gás Associado (Mm³),Produção de Gás Não Associado (Mm³),"
+        "Produção de Água (m³)\n"
+        "2003,12/2003,Bahia,Recôncavo,FAZENDA BELÉM,7-FZB-379-CE,Terra,Não Informado,"
+        '"228,6",0,"1,143",0,"299,2"\n'
+        "2003,12/2003,Ceará,Potiguar,FAZENDA BELÉM,7-FZB-379-CE,Terra,Não Informado,"
+        '230,0,0,0,"299,2"\n'
+    )
+    with pytest.warns(UserWarning, match="2003-07..2005-06"):
+        table = brazil.Brazil().parse_production(io.BytesIO(csv_text.encode("utf-8")))
+    df = table.to_pandas()
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["region"] == "Ceará"
+    assert math.isclose(float(row["oil_prod"]), 230.0 * units.BBL_PER_M3 / 31, rel_tol=1e-4)
+    assert math.isclose(float(row["gas_prod"]), 1.143 / 31, rel_tol=1e-4)
+
+
 def test_brazil_end_to_end_mock_ingest_and_lean_storage(tmp_path: Path) -> None:
     portal_html = (
         '<a href="https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/'

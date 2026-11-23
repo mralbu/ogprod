@@ -60,8 +60,10 @@ _PROD_LINK_RE = re.compile(
 )
 
 # Relative and absolute tolerances when merging known ANP duplicate well-months.
+# 0.5 bbl/d (~2.4 m³/month) covers 1-2 m³ rounding differences between ANP's pre-2005
+# spurious state cross-join rows and the authoritative state-matching row on small wells.
 _MERGE_RTOL = 5e-3
-_MERGE_ATOL = 0.05
+_MERGE_ATOL = 0.5
 
 # Map Brazilian state names (normalized) to well-name state suffix codes.
 _STATE_SUFFIX: dict[str, str] = {
