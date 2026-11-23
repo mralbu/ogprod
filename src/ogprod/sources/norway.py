@@ -288,7 +288,7 @@ class Norway(base.Source):
             raise ValueError(
                 "norway (Sodir) covers Norwegian offshore fields only (no onshore data)"
             )
-        del client, year, recent  # single full-history CSV covers all years
+        del client, year, recent
         return [
             base.RemoteFile(
                 url=_PROD_CSV_URL,
@@ -325,7 +325,6 @@ class Norway(base.Source):
                 f"Sodir CSV has {int(bad_period.sum())} unparseable year/month row(s): {samples}"
             )
         days = period.dt.days_in_month.astype("float64")
-        # Mill Sm3 (10^6 m^3) -> bbl/d; Bill Sm3 (10^9 m^3 = 10^6 e3m3) -> e3m3/d.
         mill_sm3_to_bpd = 1_000_000.0 * units.BBL_PER_M3 / days
         bill_sm3_to_e3m3d = 1_000_000.0 / days
 

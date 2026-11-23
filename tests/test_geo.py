@@ -40,13 +40,11 @@ def test_write_geoparquet_drops_unused_columns_and_writes_v11_bbox(tmp_path: Pat
     assert len(loaded) == 3
     assert loaded.crs is not None
     assert loaded.crs.to_epsg() == 4326
-    # Null geometry row is sorted after valid geometries.
     assert loaded.iloc[-1]["facility_id"] == "FPSO C"
     assert loaded.iloc[-1].geometry is None
 
 
 def test_prepare_geo_repairs_invalid_polygon_and_reprojects() -> None:
-    # Bowtie self-intersecting polygon in Web Mercator (EPSG:3857)
     bowtie = shapely.Polygon(
         [(-4700000, -2800000), (-4600000, -2700000), (-4700000, -2700000), (-4600000, -2800000)]
     )

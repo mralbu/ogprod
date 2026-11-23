@@ -46,6 +46,13 @@ repos:
         types_or: [python, pyi]
         pass_filenames: false
 
+      - id: comments
+        name: comment ratchet
+        entry: uv run --frozen python -m scripts.check_comments
+        language: system
+        types_or: [python, pyi, ts, tsx]
+        pass_filenames: false
+
       - id: pytest
         name: pytest
         entry: uv run --frozen pytest -q

@@ -159,19 +159,17 @@ def test_store_ingest_defaults_to_mirror_and_skips_unchanged(tmp_path: Path) -> 
     db = Store(tmp_path / "dest")
 
     summary = db.ingest("brazil", client=client)
-    assert summary.files_ingested == 3  # 2025, 2026, facilities
+    assert summary.files_ingested == 3
     assert summary.files_skipped == 0
     assert summary.production_rows == 2
     assert summary.geo_counts == {"facilities": 1}
     assert len(db.production(source="brazil")) == 2
     assert len(db.facilities(source="brazil")) == 1
 
-    # Local manifest records mirror provenance.
     local_manifest = json.loads((db.root / "store" / "manifest.json").read_text(encoding="utf-8"))
     assert local_manifest["sources"]["brazil"]["mirror"] == DEFAULT_MIRROR
     assert local_manifest["sources"]["brazil"]["revision"] == "main"
 
-    # Second run skips all unchanged files by checksum (only fetches manifest.json).
     requests.clear()
     summary2 = db.ingest("brazil", client=client)
     assert summary2.files_ingested == 0
@@ -179,7 +177,6 @@ def test_store_ingest_defaults_to_mirror_and_skips_unchanged(tmp_path: Path) -> 
     assert len(requests) == 1
     assert requests[0].endswith("/manifest.json")
 
-    # refresh=True forces re-download.
     summary3 = db.ingest("brazil", refresh=True, client=client)
     assert summary3.files_ingested == 3
     assert summary3.files_skipped == 0
@@ -252,7 +249,6 @@ def test_parquet_writer_uses_128k_row_group_size(tmp_path: Path) -> None:
 def test_sanity_gate_catches_zero_hydrocarbon_months_and_env_lag_without_baseline(
     tmp_path: Path,
 ) -> None:
-    # Partition mimics broken Brazil 2018 (onshore Jan=0 oil/gas, Jul>0) and 2025 (onshore lags).
     table = base.build_production_table(
         source="brazil",
         entity_type=schema.EntityType.WELL,
@@ -296,7 +292,6 @@ def test_sanity_gate_catches_zero_hydrocarbon_months_and_env_lag_without_baselin
     issues = mirror.check_sanity_gate({"brazil": {"production": prod, "geo": {}}}, None)
     assert any("brazil/2018 (onshore)" in msg and "zero oil and gas" in msg for msg in issues)
     assert any("brazil/2025 (onshore)" in msg and "ends 3 month(s) before" in msg for msg in issues)
-    # 1954 offshore starts in Dec (same last_period as onshore) -> must not false-positive.
     assert not any("brazil/1954" in msg for msg in issues)
 
 
@@ -333,7 +328,6 @@ def test_sanity_gate_catches_per_environment_drop_masked_by_large_offshore() -> 
             }
         },
     }
-    # Onshore loses 30% of its oil while total national oil only drops 0.75%.
     new_local = {
         "brazil": {
             "production": {
@@ -408,7 +402,6 @@ def test_merge_mirror_manifest_preserves_updated_at_for_unchanged_entries() -> N
     assert merged["sources"]["brazil"]["production"]["2018"]["updated_at"] == "2026-01-01T00:00:00Z"
     assert merged["sources"]["brazil"]["updated_at"] == "2026-01-01T00:00:00Z"
 
-    # When sha256 changes, both entry and source updated_at advance.
     local_unchanged["brazil"]["production"]["2018"]["sha256"] = "new-hash"
     merged2 = mirror.merge_mirror_manifest(
         remote, local_unchanged, updated_at="2026-11-23T12:00:00Z"

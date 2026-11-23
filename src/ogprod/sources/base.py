@@ -21,7 +21,6 @@ from ogprod import schema
 
 type RawFile = str | Path | BinaryIO
 
-#: Descriptive User-Agent required by portals such as gov.br (blocks default python-httpx).
 USER_AGENT = "ogprod/0.1 (+https://github.com/mralbu/ogprod)"
 
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
@@ -196,7 +195,6 @@ def build_production_table(
     if n == 0:
         return schema.empty_production()
 
-    # Drop rows with null entity_id or null period (unkeyable).
     valid_id = entity_id.astype("string").str.strip()
     valid_id = valid_id.mask(valid_id == "", pd.NA)
     periods = pd.to_datetime(period, errors="coerce")

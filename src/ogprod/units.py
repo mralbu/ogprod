@@ -16,16 +16,12 @@ from __future__ import annotations
 import calendar
 from datetime import date
 
-#: Exact ISO cubic metres per barrel.
 M3_PER_BBL: float = 0.158987294928
 
-#: Exact ISO barrels per cubic metre.
 BBL_PER_M3: float = 1.0 / M3_PER_BBL
 
-#: Exact ISO cubic metres per standard cubic foot.
 M3_PER_SCF: float = 0.028316846592
 
-#: Exact cubic metres per unit for every supported volume unit.
 VOLUME_TO_M3: dict[str, float] = {
     "m3": 1.0,
     "e3m3": 1_000.0,
@@ -40,7 +36,6 @@ VOLUME_TO_M3: dict[str, float] = {
     "bcf": 1_000_000_000.0 * M3_PER_SCF,
 }
 
-#: Canonical rate units for liquids and gases.
 LIQUID_RATE_UNIT = "bbl/d"
 GAS_RATE_UNIT = "e3m3/d"
 

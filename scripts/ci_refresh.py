@@ -17,9 +17,6 @@ from typing import Any
 from ogprod import sources, store
 from scripts import publish_mirror
 
-#: Default sources refreshed on GitHub Actions Azure runners.
-#: Brazil (www.gov.br) resets TCP connections from Azure IPs; seed/update Brazil locally
-#: via ``scripts/publish_mirror.py`` or manually trigger when reachable.
 DEFAULT_CI_SOURCES: tuple[str, ...] = ("norway", "mexico")
 
 

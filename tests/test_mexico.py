@@ -42,7 +42,6 @@ def test_parse_mexico_campos_production_units() -> None:
     assert maloob["environment"] == "offshore"
     assert math.isclose(float(maloob["oil_prod"]), 250_500.0, rel_tol=1e-4)
     assert math.isclose(float(maloob["water_prod"]), 40_000.0, rel_tol=1e-4)
-    # 100 MMpcd -> e3m3/d
     expected_gas = 100.0 * units.volume_factor("mmcf", "e3m3")
     assert math.isclose(float(maloob["gas_prod"]), expected_gas, rel_tol=1e-4)
 
@@ -65,7 +64,6 @@ def test_parse_mexico_pozos_csv_and_zip(tmp_path: Path) -> None:
     assert math.isclose(float(row["oil_prod"]), 1200.0, rel_tol=1e-4)
     assert math.isclose(float(row["condensate_prod"]), 300.0, rel_tol=1e-4)
 
-    # Also works directly on a ZIP containing POZOS_COMPILADO.csv.
     zip_path = tmp_path / "PRODUCCION_POZOS.zip"
     with zipfile.ZipFile(zip_path, "w") as archive:
         archive.write(DATA_DIR / "mexico_pozos_sample.csv", arcname="POZOS_COMPILADO.csv")

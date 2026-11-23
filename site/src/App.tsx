@@ -86,7 +86,6 @@ export function App() {
     };
   }, []);
 
-  // Sync URL query params cleanly via replaceState.
   useEffect(() => {
     const qs = serializeUrlState({
       source: activeSource,
@@ -100,7 +99,6 @@ export function App() {
     }
   }, [activeSource, selection, activeProducts, unitSystem]);
 
-  // Load active entity series (instant rollups for country/basin/field/facility, lazy DuckDB-WASM for wells).
   useEffect(() => {
     if (!meta) return;
     let cancelled = false;

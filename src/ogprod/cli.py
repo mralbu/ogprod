@@ -297,7 +297,7 @@ def completion(shell: str) -> None:
              > ~/.config/fish/completions/ogprod.fish
     """
     comp_cls = get_completion_class(shell)
-    assert comp_cls is not None  # SHELLS only lists shells that click supports
+    assert comp_cls is not None
     click.echo(comp_cls(cli, {}, APP_NAME, COMPLETE_VAR).source())
 
 
