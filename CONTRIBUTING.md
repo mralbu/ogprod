@@ -2,25 +2,40 @@
 
 Requires [uv](https://docs.astral.sh/uv/) and [just](https://just.systems/).
 
+Run `just` to list all grouped recipes (or `just --list --group GROUP` to filter):
+
 ```sh
+# Setup
 just sync                # create/update .venv
+just pre-commit-install  # install the git hooks (pre-commit and pre-push)
+
+# Quality
+just check               # lint + test (what CI runs)
 just format              # ruff format + ruff check --fix
 just lint                # ruff (incl. security and complexity rules) + ty
+just pre-commit          # prek hooks on all files
+
+# Test
 just test                # pytest
 just cov                 # pytest under coverage, with a terminal report
 just cov-report          # HTML report of the last cov run in htmlcov/
+
+# Analysis
 just dead-code           # unused code (vulture)
 just complexity          # complexity and maintainability per function/module (radon)
-just check               # lint + test (what CI runs)
+
+# CLI
 just run ...             # run the CLI, e.g. just run --help
 just skill-install       # install SKILL.md into ~/.claude/skills
-just pre-commit          # prek hooks on all files
-just pre-commit-install  # install the git hooks (pre-commit and pre-push)
-just upgrade             # upgrade the locked dependencies
+
+# Release
 just build               # wheel and sdist in dist/
-just smoke               # install the built wheel in a clean environment and import it
+just smoke               # install the built wheel in a clean environment and verify it
 just api-check           # public API changes since the last release (griffe)
 just release BUMP        # bump the version, check, commit and tag
+
+# Maintenance
+just upgrade             # upgrade the locked dependencies
 just clean               # remove caches and dist/
 ```
 

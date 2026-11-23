@@ -1,19 +1,38 @@
+# Task runner for ogprod (https://just.systems).
+# Run `just` to list recipes, `just --list --group GROUP` to filter, or `just --show RECIPE`.
+
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-# List recipes
+[private]
 default:
-    @just --list
+    @just --list --unsorted
 
-# Create/update .venv with the dev dependencies
+# --- Setup ---
+
+# Create or update .venv with dev dependencies
+[group('setup')]
 sync:
     uv sync
 
-# Format code and apply ruff's safe fixes
+# Install the prek git hooks (pre-commit and pre-push)
+[group('setup')]
+pre-commit-install:
+    uv run prek install
+
+# --- Quality ---
+
+# Run lint and tests (what CI runs)
+[group('quality')]
+check: lint test
+
+# Format code and apply ruff's safe auto-fixes
+[group('quality')]
 format:
     uv run ruff format
     uv run ruff check --fix
 
-# Lint: ruff (style, errors, security, complexity) and ty (types)
+# Check formatting, ruff (style, errors, security, complexity), and ty (types)
+[group('quality')]
 lint:
     uv run ruff format --check
     uv run ruff check
@@ -21,70 +40,77 @@ lint:
     uv run python -m scripts.check_comments
 
 # Check the comment ratchet (docs/adr/0001); --update lowers the baseline, --list shows them all
+[group('quality')]
 comments *args:
     uv run python -m scripts.check_comments {{ args }}
 
-# Report unused code (vulture, configured in pyproject.toml). Silence a false positive with
-# ignore_names / ignore_decorators in [tool.vulture], or a whitelist file passed as an argument
-dead-code *args:
-    uv run vulture {{ args }}
+# Run prek hooks on all files (e.g. just pre-commit --files X)
+[group('quality')]
+pre-commit *args="--all-files":
+    uv run prek run {{ args }}
 
-# Report complexity per function (radon cc, F worst) and maintainability per module (radon mi)
-complexity *args="src":
-    uv run radon cc --show-complexity --average --order SCORE {{ args }}
-    uv run radon mi --show {{ args }}
+# --- Test ---
 
-# Run the tests, e.g. just test -k cli
+# Run tests with pytest (e.g. just test -k cli)
+[group('test')]
 test *args:
     uv run pytest {{ args }}
 
-# Run the tests under coverage and print the report, e.g. just cov -k cli
+# Run tests under coverage and print a terminal summary (e.g. just cov -k cli)
+[group('test')]
 cov *args:
     uv run coverage run -m pytest {{ args }}
     uv run coverage report
 
 # Write an HTML report of the last coverage run to htmlcov/
+[group('test')]
 cov-report:
     uv run coverage html
 
-# Lint + tests (what CI runs)
-check: lint test
+# --- Analysis ---
 
-# Run the prek hooks on all files (or: just pre-commit --files X)
-pre-commit *args="--all-files":
-    uv run prek run {{ args }}
+# Report unused code with vulture (configure ignores in [tool.vulture] or pass a whitelist)
+[group('analysis')]
+dead-code *args:
+    uv run vulture {{ args }}
 
-# Install the prek git hooks (pre-commit and pre-push)
-pre-commit-install:
-    uv run prek install
+# Report cyclomatic complexity (radon cc) and maintainability index (radon mi)
+[group('analysis')]
+complexity *args="src":
+    uv run radon cc --show-complexity --average --order SCORE {{ args }}
+    uv run radon mi --show {{ args }}
 
-# Run the CLI, e.g. just run --help
+# --- CLI ---
+
+# Run the CLI via uv (e.g. just run --help)
+[group('cli')]
 run *args:
     @uv run ogprod {{ args }}
 
-# Install the agent skill (SKILL.md) into ~/.claude/skills, or: just skill-install .claude/skills
+# Install agent SKILL.md into ~/.claude/skills (or: just skill-install DIR)
+[group('cli')]
 skill-install dir="":
     @uv run ogprod skill --install {{ if dir != "" { "--skills-dir " + quote(dir) } else { "" } }}
 
-# Upgrade the locked dependencies
-upgrade:
-    uv lock --upgrade
-    uv sync
+# --- Release ---
 
-# Build wheel and sdist into dist/ (ignoring [tool.uv.sources], as when publishing)
+# Build wheel and sdist into dist/ (ignoring [tool.uv.sources])
+[group('release')]
 build:
     rm -rf dist
     uv build --no-sources
 
-# Install the built wheel into a clean environment and import it (after just build)
+# Install the built wheel in an isolated env and verify import and CLI (after just build)
+[group('release')]
 smoke:
     uv run --isolated --no-project --with dist/*.whl python -c "import ogprod; print(ogprod.__version__)"
     uv run --isolated --no-project --with dist/*.whl ogprod --version
 
-# Check the public API against the last release tag with griffe: a breaking change needs a
-# major bump (a minor one before 1.0). VERSION defaults to the current one.
+# Check public API breaking changes against the last release tag with griffe
+[group('release')]
 api-check version="":
     #!/usr/bin/env bash
+    # A breaking change requires a major bump (minor before 1.0). VERSION defaults to current.
     set -euo pipefail
     version={{ quote(version) }}
     version=${version:-$(uv version --short)}
@@ -107,7 +133,8 @@ api-check version="":
         exit 1
     fi
 
-# Bump the version, check, commit and tag, e.g. just release minor; just release (as is)
+# Bump version, check, commit, and tag (e.g. just release minor; omit bump to tag current)
+[group('release')]
 release *bump:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -128,7 +155,16 @@ release *bump:
     git tag --annotate "v$version" --message "v$version"
     echo "Tagged v$version. Push it to release: git push --follow-tags"
 
-# Remove caches and build artifacts (keeps .venv)
+# --- Maintenance ---
+
+# Upgrade locked dependencies in uv.lock and sync .venv
+[group('maintenance')]
+upgrade:
+    uv lock --upgrade
+    uv sync
+
+# Remove caches, coverage files, and build artifacts (keeps .venv)
+[group('maintenance')]
 clean:
     rm -rf dist build .pytest_cache .ruff_cache .coverage htmlcov
     find . -path ./.venv -prune -o -type d -name __pycache__ -exec rm -rf {} +

@@ -3,7 +3,7 @@ name = "ogprod"
 version = "0.1.0"
 description = "Public oil & gas production data pipeline and geospatial store."
 readme = "README.md"
-authors = [{ name = "mralbu", email = "marceloralbuquerque@gmail.com" }]
+authors = [{ name = "mralbu", email = "1636597+mralbu@users.noreply.github.com" }]
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.14"
