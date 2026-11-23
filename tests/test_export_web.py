@@ -14,6 +14,8 @@ import pyarrow.parquet as pq
 import pytest
 import shapely
 from click.testing import CliRunner
+from hypothesis import given
+from hypothesis import strategies as st
 
 from ogprod import export_web, schema
 from ogprod.cli import APP_NAME, cli
@@ -211,3 +213,45 @@ def test_source_bbox_prefers_fields_over_overseas_facilities() -> None:
     empty_fields = schema.empty_geo(schema.GeoKind.FIELDS)
     fallback = export_web._source_bbox("norway", (empty_fields, facilities, wells))
     assert fallback == [0.93, 43.02, 0.93, 43.02]
+
+
+@given(
+    lon=st.floats(min_value=-179.0, max_value=179.0, allow_nan=False, allow_infinity=False),
+    lat=st.floats(min_value=-89.0, max_value=89.0, allow_nan=False, allow_infinity=False),
+    span=st.floats(min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False),
+)
+def test_tile_features_build_geojson_dicts_matching_to_geojson(
+    lon: float, lat: float, span: float
+) -> None:
+    poly = shapely.box(lon, lat, lon + span, lat + span)
+    pt = shapely.Point(lon, lat)
+
+    fields = gpd.GeoDataFrame(
+        {"source": ["brazil"], "field_id": ["F1"], "field_name": ["Field 1"]},
+        geometry=[poly],
+        crs="EPSG:4326",
+    )
+    facs = gpd.GeoDataFrame(
+        {"source": ["brazil"], "facility_id": ["P1"], "facility_name": ["FPSO 1"]},
+        geometry=[pt],
+        crs="EPSG:4326",
+    )
+    wells = gpd.GeoDataFrame(
+        {"source": ["brazil"], "well_id": ["W1"], "well_name": ["Well 1"]},
+        geometry=[pt],
+        crs="EPSG:4326",
+    )
+
+    poly_feats, centroid_feats = export_web._field_tile_features(fields, {})
+    fac_feats = export_web._facility_tile_features(facs, {})
+    well_feats = export_web._well_tile_features(wells, {})
+
+    for feat, expected in (
+        (poly_feats[0], poly),
+        (centroid_feats[0], poly.representative_point()),
+        (fac_feats[0], pt),
+        (well_feats[0], pt),
+    ):
+        assert isinstance(feat["geometry"], dict)
+        serialized = json.loads(json.dumps(feat["geometry"]))
+        assert serialized == json.loads(shapely.to_geojson(expected))

@@ -4,11 +4,17 @@ import { Protocol } from "pmtiles";
 import { useEffect, useRef, useState } from "react";
 import { pmtilesUrl } from "../lib/dataClient";
 import { formatCompactNumber, formatPercent } from "../lib/units";
-import type { EntitySelection, FacilitySummary, FieldSummary, SiteMeta } from "../types/data";
+import type {
+  EntitySelection,
+  FacilitySummary,
+  FieldSummary,
+  SiteMeta,
+  SourceFilter,
+} from "../types/data";
 
 interface MapPaneProps {
   meta: SiteMeta;
-  activeSource: string;
+  activeSource: SourceFilter;
   selection: EntitySelection;
   fieldsSummary: FieldSummary[];
   facilitiesSummary: FacilitySummary[];
@@ -306,7 +312,7 @@ export function MapPane({
     const map = mapRef.current;
     if (!map || !mapReady) return;
     const filter: maplibregl.FilterSpecification | null =
-      activeSource === "all" ? null : ["==", ["get", "source"], activeSource];
+      activeSource === null ? null : ["==", ["get", "source"], activeSource];
 
     const toggles: [string, boolean][] = [
       ["fields-fill", showFields],
@@ -324,7 +330,7 @@ export function MapPane({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || selection.kind !== "overview") return;
-    if (activeSource === "all") {
+    if (activeSource === null) {
       map.flyTo({ center: [-30, 14], zoom: 2.1, duration: 700 });
       return;
     }
@@ -365,61 +371,94 @@ export function MapPane({
     >
       <div ref={containerRef} className="h-full w-full" />
 
-      {/* Layer toggle panel */}
-      <div className="absolute left-3 top-3 z-10 rounded-lg border border-slate-200/90 bg-white/95 px-3 py-2 shadow-sm backdrop-blur-xs">
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-          <Layers className="h-3.5 w-3.5" />
-          Layers
-        </div>
-        <div className="flex flex-col gap-1 text-xs text-slate-700">
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={showFields}
-              onChange={(e) => setShowFields(e.target.checked)}
-              className="accent-amber-600"
-            />
-            <span className="h-2.5 w-2.5 rounded-xs bg-amber-600/80" />
-            <span>Fields</span>
-          </label>
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={showFacilities}
-              onChange={(e) => setShowFacilities(e.target.checked)}
-              className="accent-cyan-700"
-            />
-            <span className="h-2.5 w-2.5 rounded-full border border-white bg-cyan-700 ring-1 ring-cyan-700" />
-            <span>FPSOs / Platforms</span>
-          </label>
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={showWells}
-              onChange={(e) => setShowWells(e.target.checked)}
-              className="accent-slate-700"
-            />
-            <span className="h-2 w-2 rounded-full bg-slate-700" />
-            <span>Wells (zoom in)</span>
-          </label>
-        </div>
-      </div>
+      <LayerTogglePanel
+        showFields={showFields}
+        showFacilities={showFacilities}
+        showWells={showWells}
+        onToggleFields={setShowFields}
+        onToggleFacilities={setShowFacilities}
+        onToggleWells={setShowWells}
+      />
 
-      {/* Compact legend */}
-      <div className="absolute bottom-3 left-3 z-10 rounded-lg border border-slate-200/90 bg-white/92 px-3 py-1.5 text-[11px] text-slate-600 shadow-xs backdrop-blur-xs">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[#fbbf24]" />
-            <span>5k</span>
-            <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[#d97706]" />
-            <span>50k</span>
-            <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[#9a3412]" />
-            <span>250k+ bbl/d</span>
-          </span>
-          <span className="hidden text-slate-300 sm:inline">|</span>
-          <span className="hidden sm:inline">Click well to query HF Parquet via DuckDB-WASM</span>
-        </div>
-      </div>
+      <MapLegend />
     </section>
+  );
+}
+
+interface LayerTogglePanelProps {
+  showFields: boolean;
+  showFacilities: boolean;
+  showWells: boolean;
+  onToggleFields: (visible: boolean) => void;
+  onToggleFacilities: (visible: boolean) => void;
+  onToggleWells: (visible: boolean) => void;
+}
+
+function LayerTogglePanel({
+  showFields,
+  showFacilities,
+  showWells,
+  onToggleFields,
+  onToggleFacilities,
+  onToggleWells,
+}: LayerTogglePanelProps) {
+  return (
+    <div className="absolute left-3 top-3 z-10 rounded-lg border border-slate-200/90 bg-white/95 px-3 py-2 shadow-sm backdrop-blur-xs">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+        <Layers className="h-3.5 w-3.5" />
+        Layers
+      </div>
+      <div className="flex flex-col gap-1 text-xs text-slate-700">
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={showFields}
+            onChange={(e) => onToggleFields(e.target.checked)}
+            className="accent-amber-600"
+          />
+          <span className="h-2.5 w-2.5 rounded-xs bg-amber-600/80" />
+          <span>Fields</span>
+        </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={showFacilities}
+            onChange={(e) => onToggleFacilities(e.target.checked)}
+            className="accent-cyan-700"
+          />
+          <span className="h-2.5 w-2.5 rounded-full border border-white bg-cyan-700 ring-1 ring-cyan-700" />
+          <span>FPSOs / Platforms</span>
+        </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={showWells}
+            onChange={(e) => onToggleWells(e.target.checked)}
+            className="accent-slate-700"
+          />
+          <span className="h-2 w-2 rounded-full bg-slate-700" />
+          <span>Wells (zoom in)</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function MapLegend() {
+  return (
+    <div className="absolute bottom-3 left-3 z-10 rounded-lg border border-slate-200/90 bg-white/92 px-3 py-1.5 text-[11px] text-slate-600 shadow-xs backdrop-blur-xs">
+      <div className="flex items-center gap-3">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[#fbbf24]" />
+          <span>5k</span>
+          <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[#d97706]" />
+          <span>50k</span>
+          <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[#9a3412]" />
+          <span>250k+ bbl/d</span>
+        </span>
+        <span className="hidden text-slate-300 sm:inline">|</span>
+        <span className="hidden sm:inline">Click well to query HF Parquet via DuckDB-WASM</span>
+      </div>
+    </div>
   );
 }

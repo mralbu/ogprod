@@ -288,7 +288,7 @@ class Norway(base.Source):
             raise ValueError(
                 "norway (Sodir) covers Norwegian offshore fields only (no onshore data)"
             )
-        del client, year, recent
+        del client, year, recent  # single full-history CSV covers all years
         return [
             base.RemoteFile(
                 url=_PROD_CSV_URL,

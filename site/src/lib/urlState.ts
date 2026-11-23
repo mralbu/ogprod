@@ -1,8 +1,14 @@
-import { ALL_RATE_COLUMNS, type EntitySelection, type RateColumn, type UnitSystem } from "../types/data";
+import {
+  ALL_RATE_COLUMNS,
+  type EntitySelection,
+  type RateColumn,
+  type SourceFilter,
+  type UnitSystem,
+} from "../types/data";
 import { UNIT_SYSTEMS } from "./units";
 
 export interface AppUrlState {
-  source: string;
+  source: SourceFilter;
   selection: EntitySelection;
   products: RateColumn[];
   units: UnitSystem;
@@ -16,7 +22,8 @@ const VALID_UNITS = new Set<string>(UNIT_SYSTEMS.map((u) => u.id));
 
 export function parseUrlState(search: string): AppUrlState {
   const params = new URLSearchParams(search);
-  const source = params.get("source")?.trim() || "all";
+  const rawSource = params.get("source")?.trim() ?? "";
+  const source: SourceFilter = rawSource && rawSource !== "all" ? rawSource : null;
 
   const rawUnits = params.get("units") || "";
   const units: UnitSystem = VALID_UNITS.has(rawUnits) ? (rawUnits as UnitSystem) : DEFAULT_UNITS;
@@ -37,7 +44,7 @@ export function parseUrlState(search: string): AppUrlState {
   return { source, selection, products, units };
 }
 
-function parseEntityParam(raw: string | null, fallbackSource: string): EntitySelection {
+function parseEntityParam(raw: string | null, fallbackSource: SourceFilter): EntitySelection {
   if (!raw) {
     return { kind: "overview" };
   }
@@ -50,7 +57,7 @@ function parseEntityParam(raw: string | null, fallbackSource: string): EntitySel
   const slashIdx = rest.indexOf("/");
   const entitySource = slashIdx > 0 ? rest.slice(0, slashIdx) : fallbackSource;
   const entityId = slashIdx > 0 ? rest.slice(slashIdx + 1) : rest;
-  if (!entityId || entitySource === "all") {
+  if (!entityId || !entitySource || entitySource === "all") {
     return { kind: "overview" };
   }
   if (kind === "field") {
@@ -70,7 +77,7 @@ function parseEntityParam(raw: string | null, fallbackSource: string): EntitySel
 
 export function serializeUrlState(state: AppUrlState): string {
   const params = new URLSearchParams();
-  if (state.source && state.source !== "all") {
+  if (state.source) {
     params.set("source", state.source);
   }
   if (state.selection.kind === "field") {

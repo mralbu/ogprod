@@ -2,12 +2,12 @@ import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadSearchIndex } from "../lib/dataClient";
 import { formatCompactNumber, UNIT_SYSTEMS } from "../lib/units";
-import type { SearchEntry, SourceMeta, UnitSystem } from "../types/data";
+import type { SearchEntry, SourceFilter, SourceMeta, UnitSystem } from "../types/data";
 
 interface TopBarProps {
   sources: SourceMeta[];
-  activeSource: string;
-  onSelectSource: (sourceId: string) => void;
+  activeSource: SourceFilter;
+  onSelectSource: (source: SourceFilter) => void;
   unitSystem: UnitSystem;
   onChangeUnits: (units: UnitSystem) => void;
   onSelectSearchEntry: (entry: SearchEntry) => void;
@@ -62,7 +62,7 @@ export function TopBar({
     if (!index) return [];
     const q = query.trim().toLowerCase();
     const filtered = index.filter((item) => {
-      if (activeSource !== "all" && item.s !== activeSource) return false;
+      if (activeSource !== null && item.s !== activeSource) return false;
       if (!q) return true;
       return (
         item.n.toLowerCase().includes(q) ||
@@ -98,9 +98,9 @@ export function TopBar({
           <button
             id="source-btn-all"
             type="button"
-            onClick={() => onSelectSource("all")}
+            onClick={() => onSelectSource(null)}
             className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-              activeSource === "all"
+              activeSource === null
                 ? "bg-white text-slate-900 shadow-xs"
                 : "text-slate-600 hover:text-slate-900"
             }`}

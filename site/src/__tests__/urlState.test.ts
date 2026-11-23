@@ -2,16 +2,17 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_PRODUCTS, DEFAULT_UNITS, parseUrlState, serializeUrlState } from "../lib/urlState";
 
 describe("URL query-param state sync", () => {
-  it("defaults cleanly for empty search string", () => {
+  it("defaults cleanly for empty search string and legacy source=all", () => {
     expect(parseUrlState("")).toEqual({
-      source: "all",
+      source: null,
       selection: { kind: "overview" },
       products: DEFAULT_PRODUCTS,
       units: DEFAULT_UNITS,
     });
+    expect(parseUrlState("?source=all").source).toBeNull();
     expect(
       serializeUrlState({
-        source: "all",
+        source: null,
         selection: { kind: "overview" },
         products: DEFAULT_PRODUCTS,
         units: DEFAULT_UNITS,

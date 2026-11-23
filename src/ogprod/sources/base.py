@@ -21,6 +21,7 @@ from ogprod import schema
 
 type RawFile = str | Path | BinaryIO
 
+#: Descriptive User-Agent required by portals such as gov.br (blocks default python-httpx).
 USER_AGENT = "ogprod/0.1 (+https://github.com/mralbu/ogprod)"
 
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})

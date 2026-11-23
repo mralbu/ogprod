@@ -18,15 +18,16 @@ import type {
   RateColumn,
   SearchEntry,
   SiteMeta,
+  SourceFilter,
   UnitSystem,
 } from "./types/data";
 import { ALL_RATE_COLUMNS } from "./types/data";
 
 function mergeCountryMonthly(
   countryMonthly: Record<string, MonthlyPoint[]>,
-  activeSource: string,
+  activeSource: SourceFilter,
 ): MonthlyPoint[] {
-  if (activeSource !== "all") {
+  if (activeSource !== null) {
     return countryMonthly[activeSource] ?? [];
   }
   const byPeriod = new Map<string, MonthlyPoint>();
@@ -47,7 +48,7 @@ function mergeCountryMonthly(
 
 export function App() {
   const initial = useMemo(() => parseUrlState(window.location.search), []);
-  const [activeSource, setActiveSource] = useState<string>(initial.source);
+  const [activeSource, setActiveSource] = useState<SourceFilter>(initial.source);
   const [selection, setSelection] = useState<EntitySelection>(initial.selection);
   const [activeProducts, setActiveProducts] = useState<RateColumn[]>(initial.products);
   const [unitSystem, setUnitSystem] = useState<UnitSystem>(initial.units);
@@ -185,8 +186,8 @@ export function App() {
     }
   }, [meta, activeSource, selection, countryMonthly, basinMonthly]);
 
-  const handleSelectSource = useCallback((sourceId: string) => {
-    setActiveSource(sourceId);
+  const handleSelectSource = useCallback((source: SourceFilter) => {
+    setActiveSource(source);
     setSelection({ kind: "overview" });
   }, []);
 

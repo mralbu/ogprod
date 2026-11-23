@@ -30,3 +30,6 @@ Use `uv add PKG` / `uv add --dev PKG` to add dependencies; never edit `uv.lock` 
   when a change breaks the public API (`just api-check` lists breaking changes).
 - When commands or options change, update `src/ogprod/SKILL.md` too (it is
   what `ogprod skill` prints).
+- Avoid tautological comments that restate the code. Use brief inline comments only for
+  non-obvious invariants, units, or external quirks, and record cross-cutting decisions
+  in `docs/adr/`.

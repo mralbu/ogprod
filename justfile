@@ -37,12 +37,6 @@ lint:
     uv run ruff format --check
     uv run ruff check
     uv run ty check
-    uv run python -m scripts.check_comments
-
-# Check the comment ratchet (docs/adr/0001); --update lowers the baseline, --list shows them all
-[group('quality')]
-comments *args:
-    uv run python -m scripts.check_comments {{ args }}
 
 # Run prek hooks on all files (e.g. just pre-commit --files X)
 [group('quality')]

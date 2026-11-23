@@ -40,8 +40,10 @@ class GeoKind(enum.StrEnum):
     WELLS = "wells"
 
 
+#: CRS enforced across every GeoParquet table.
 GEO_CRS = "EPSG:4326"
 
+#: Canonical rate columns and their storage units (written into Parquet field metadata).
 RATE_UNITS: dict[str, str] = {
     "oil_prod": LIQUID_RATE_UNIT,
     "condensate_prod": LIQUID_RATE_UNIT,

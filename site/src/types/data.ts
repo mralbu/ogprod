@@ -21,6 +21,8 @@ export const ALL_RATE_COLUMNS: readonly RateColumn[] = [
 
 export type UnitSystem = "oilfield_e3m3" | "oilfield_mmcf" | "metric_m3";
 
+export type SourceFilter = string | null;
+
 export interface KnownGap {
   column: RateColumn;
   start: string;

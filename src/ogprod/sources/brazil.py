@@ -522,6 +522,7 @@ def _parse_facilities_csv(path: Path) -> gpd.GeoDataFrame:
             else pd.NA,
             "water_depth_m": parse_br_number(df[water_depth_col]) if water_depth_col else pd.NA,
             "oil_capacity_bpd": parse_br_number(df[oil_cap_col]) if oil_cap_col else pd.NA,
+            # ANP LPO gas capacity is already in Mil m³/d (10³ m³/d = e3m3/d).
             "gas_capacity_e3m3d": parse_br_number(df[gas_cap_col]) if gas_cap_col else pd.NA,
             "export_system": df[cols["sistema de escoamento"]]
             if "sistema de escoamento" in cols

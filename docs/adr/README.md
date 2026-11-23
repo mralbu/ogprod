@@ -1,13 +1,11 @@
 # Architecture decision records
 
-Decisions that are not obvious from the code live here, not in code comments
-(`just comments` bans new comments; see [0001](0001-no-code-comments.md)).
+Cross-cutting decisions that are not obvious from the code live here.
 Add one with the next free number, using the sections of the existing records:
 Context, Decision, Consequences.
 
 | ADR | Decision |
 | --- | --- |
-| [0001](0001-no-code-comments.md) | No code comments: decisions go in ADRs, ratcheted by `just comments` |
 | [0002](0002-brazil-not-refreshed-in-ci.md) | Brazil is not refreshed on GitHub Actions |
 | [0003](0003-descriptive-user-agent.md) | Send a descriptive User-Agent to every portal |
 | [0004](0004-duplicate-production-keys.md) | Duplicate production keys: reject by default, merge per source |

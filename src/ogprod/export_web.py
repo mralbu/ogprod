@@ -585,14 +585,12 @@ def _field_tile_features(
             }
         )
         poly_feats.append(
-            {"type": "Feature", "geometry": shapely.to_geojson(geom), "properties": props}
+            {"type": "Feature", "geometry": shapely.geometry.mapping(geom), "properties": props}
         )
         pt = geom.representative_point()
         centroid_feats.append(
-            {"type": "Feature", "geometry": shapely.to_geojson(pt), "properties": props}
+            {"type": "Feature", "geometry": shapely.geometry.mapping(pt), "properties": props}
         )
-    for feat in (*poly_feats, *centroid_feats):
-        feat["geometry"] = json.loads(feat["geometry"])
     return poly_feats, centroid_feats
 
 
@@ -635,7 +633,7 @@ def _facility_tile_features(
         feats.append(
             {
                 "type": "Feature",
-                "geometry": json.loads(shapely.to_geojson(geom)),
+                "geometry": shapely.geometry.mapping(geom),
                 "properties": props,
             }
         )
@@ -673,7 +671,7 @@ def _well_tile_features(
         feats.append(
             {
                 "type": "Feature",
-                "geometry": json.loads(shapely.to_geojson(geom)),
+                "geometry": shapely.geometry.mapping(geom),
                 "properties": props,
             }
         )

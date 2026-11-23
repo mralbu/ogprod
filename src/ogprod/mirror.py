@@ -25,10 +25,13 @@ import pyarrow.parquet as pq
 from ogprod import schema
 from ogprod.sources import base
 
+#: Default Hugging Face dataset repository hosting the canonical v2 mirror.
 DEFAULT_MIRROR = "mralbu/ogprod"
 
+#: Environment variable overriding :data:`DEFAULT_MIRROR`.
 MIRROR_ENV_VAR = "OGPROD_MIRROR"
 
+#: Supported mirror manifest schema version.
 MANIFEST_SCHEMA_VERSION = 2
 
 _HF_DATASETS_BASE = "https://huggingface.co/datasets"
