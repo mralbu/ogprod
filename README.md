@@ -1,8 +1,11 @@
 # ogprod
 
 [![CI](https://github.com/mralbu/ogprod/actions/workflows/ci.yml/badge.svg)](https://github.com/mralbu/ogprod/actions/workflows/ci.yml)
+[![Data Mirror](https://img.shields.io/badge/Data%20Mirror-Hugging%20Face-FFD21E?logo=huggingface&logoColor=000)](https://huggingface.co/datasets/mralbu/ogprod)
 
 Public oil & gas production data pipeline, geospatial store, and web visualization data engine.
+
+[![Launch Web Explorer](https://img.shields.io/badge/Launch_Web_Explorer_%E2%86%92-0969da?style=for-the-badge)](https://mralbu.github.io/ogprod/)
 
 `ogprod` downloads public monthly oil, gas, condensate, NGL, water production and injection data alongside well, field, and platform/FPSO geometries, normalizes them into compact `float32` ZSTD Parquet and GeoParquet 1.1 tables, and queries them via DuckDB.
 
