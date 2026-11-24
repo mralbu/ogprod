@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import calendar
 import io
 import json
 import math
+from datetime import date
 from pathlib import Path
 
 import httpx2
@@ -379,3 +381,45 @@ def test_brazil_wfs_dates_env_backfill_status_and_dynamic_wells_url(tmp_path: Pa
         transport=httpx2.MockTransport(lambda _: httpx2.Response(200, text=portal_html))
     )
     assert brazil._discover_wells_url(client).endswith("situacao-pocos-1939-2027.csv")
+
+
+def test_parse_national_gas_csv_aggregates_states_and_environments() -> None:
+    csv_text = (
+        "ANO;MÊS;GRANDE REGIÃO;UNIDADE DA FEDERAÇÃO;PRODUTO;LOCALIZAÇÃO;PRODUÇÃO\n"
+        "2004;FEV;REGIÃO SUDESTE;RIO DE JANEIRO;GÁS NATURAL;MAR;1.000.000,5\n"
+        "2004;FEV;REGIÃO NORTE;AMAZONAS;GÁS NATURAL;TERRA;319.176,72\n"
+        "2004;MAR;REGIÃO SUDESTE;RIO DE JANEIRO;GÁS NATURAL;MAR;1.433.681\n"
+    )
+    totals = brazil.parse_national_gas_csv(io.BytesIO(csv_text.encode("utf-8-sig")))
+    assert list(totals) == [date(2004, 2, 1), date(2004, 3, 1)]
+    assert math.isclose(totals[date(2004, 2, 1)], 1_319_177.22, rel_tol=1e-9)
+    assert math.isclose(totals[date(2004, 3, 1)], 1_433_681.0, rel_tol=1e-9)
+
+    with pytest.raises(ValueError, match="not an ANP ppgn-el"):
+        brazil.parse_national_gas_csv(io.BytesIO(b"foo;bar\n1;2\n"))
+
+
+def test_national_gas_gap_volumes_cover_full_known_gap() -> None:
+    gap = brazil.KNOWN_GAPS[0]
+    assert gap.resolved_in_country_rollup is True
+    expected_months: list[date] = []
+    cur = gap.start
+    while cur <= gap.end:
+        expected_months.append(cur)
+        cur = date(cur.year + (cur.month // 12), (cur.month % 12) + 1, 1)
+    assert list(brazil.NATIONAL_GAS_GAP_VOLUMES_E3M3) == expected_months
+    assert all(v > 1_000_000.0 for v in brazil.NATIONAL_GAS_GAP_VOLUMES_E3M3.values())
+
+
+@given(
+    year=st.integers(min_value=1997, max_value=2030),
+    month=st.integers(min_value=1, max_value=12),
+    volume=st.floats(min_value=0.0, max_value=1e9, allow_nan=False, allow_infinity=False),
+)
+def test_national_gas_gap_rates_round_trips_calendar_days(
+    year: int, month: int, volume: float
+) -> None:
+    period = date(year, month, 1)
+    rates = brazil.national_gas_gap_rates({period: volume})
+    days = calendar.monthrange(year, month)[1]
+    assert math.isclose(rates[period] * days, volume, rel_tol=1e-12, abs_tol=1e-9)

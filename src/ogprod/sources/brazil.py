@@ -12,14 +12,17 @@ required field-polygon properties via ``propertyName`` to save bandwidth and spa
 
 from __future__ import annotations
 
+import calendar
 import csv
 import io
 import re
 import unicodedata
 import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
+from types import MappingProxyType
 
 import geopandas as gpd
 import httpx2
@@ -110,6 +113,45 @@ _FACILITY_ALIASES: dict[str, str] = {
 }
 
 
+#: ANP monthly national gas series by state & onshore/offshore (1997-present, 10³ m³).
+NATIONAL_GAS_URL = (
+    "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/"
+    "ppgn-el/producao-gas-natural-1000m3.csv"
+)
+
+#: Official ANP monthly national gas totals (10³ m³) for the 2003-07..2005-06 well-level
+#: reporting gap, extracted from ``NATIONAL_GAS_URL`` (SHA-256 ``e90bb79a...``).
+#: Verified within 0.04% of well-level sums in adjacent intact years (2002: -0.014%, 2006: -0.039%).
+NATIONAL_GAS_GAP_VOLUMES_E3M3: Mapping[date, float] = MappingProxyType(
+    {
+        date(2003, 7, 1): 1_326_925.330,
+        date(2003, 8, 1): 1_371_809.270,
+        date(2003, 9, 1): 1_353_389.470,
+        date(2003, 10, 1): 1_403_235.813,
+        date(2003, 11, 1): 1_331_019.967,
+        date(2003, 12, 1): 1_358_365.044,
+        date(2004, 1, 1): 1_381_342.000,
+        date(2004, 2, 1): 1_319_177.220,
+        date(2004, 3, 1): 1_433_681.000,
+        date(2004, 4, 1): 1_390_912.000,
+        date(2004, 5, 1): 1_392_777.159,
+        date(2004, 6, 1): 1_390_781.000,
+        date(2004, 7, 1): 1_463_457.000,
+        date(2004, 8, 1): 1_457_533.001,
+        date(2004, 9, 1): 1_417_594.753,
+        date(2004, 10, 1): 1_464_053.243,
+        date(2004, 11, 1): 1_366_918.579,
+        date(2004, 12, 1): 1_492_929.038,
+        date(2005, 1, 1): 1_470_284.880,
+        date(2005, 2, 1): 1_310_044.947,
+        date(2005, 3, 1): 1_471_608.409,
+        date(2005, 4, 1): 1_471_787.451,
+        date(2005, 5, 1): 1_558_916.767,
+        date(2005, 6, 1): 1_501_361.000,
+    }
+)
+
+
 @dataclass(frozen=True)
 class Gap:
     """A known stretch of months where ANP's well-level reporting is incomplete."""
@@ -118,6 +160,8 @@ class Gap:
     start: date
     end: date
     description: str
+    resolved_in_country_rollup: bool = False
+    country_rollup_source: str | None = None
 
 
 KNOWN_GAPS: tuple[Gap, ...] = (
@@ -127,10 +171,48 @@ KNOWN_GAPS: tuple[Gap, ...] = (
         end=date(2005, 6, 1),
         description=(
             "only ~600 of ~8,300 producing wells report gas (~5% of national volume); "
-            "ogprod warns and never imputes"
+            "basin rollups are masked and ogprod never imputes well rows"
         ),
+        resolved_in_country_rollup=True,
+        country_rollup_source=NATIONAL_GAS_URL,
     ),
 )
+
+
+def parse_national_gas_csv(raw: base.RawFile) -> dict[date, float]:
+    """Parse ANP's ``ppgn-el/producao-gas-natural-1000m3.csv`` into monthly national volumes."""
+    content = _read_raw_bytes(raw)
+    text = content.decode("utf-8-sig")
+    frame = pd.read_csv(io.StringIO(text), sep=";", dtype=str, low_memory=False)
+    cols = {_norm_header(c): c for c in frame.columns}
+    if not {"ano", "mes", "producao"} <= set(cols):
+        raise ValueError(f"not an ANP ppgn-el gas CSV; columns: {sorted(frame.columns)}")
+
+    years = pd.to_numeric(frame[cols["ano"]].astype("string").str.strip(), errors="coerce")
+    months = frame[cols["mes"]].astype("string").str.strip().str.lower().map(_PT_MONTHS)
+    vols = parse_br_number(frame[cols["producao"]])
+    valid = years.notna() & months.notna() & vols.notna()
+    totals: dict[date, float] = {}
+    for year, month, vol in zip(
+        years.loc[valid].astype(int),
+        months.loc[valid].astype(int),
+        vols.loc[valid].astype(float),
+        strict=True,
+    ):
+        period = date(year, month, 1)
+        totals[period] = totals.get(period, 0.0) + vol
+    return dict(sorted(totals.items()))
+
+
+def national_gas_gap_rates(
+    volumes_e3m3: Mapping[date, float] = NATIONAL_GAS_GAP_VOLUMES_E3M3,
+) -> dict[date, float]:
+    """Convert official ANP monthly national gas volumes (10³ m³) to daily rates (e3m3/d)."""
+    return {
+        period: volume / calendar.monthrange(period.year, period.month)[1]
+        for period, volume in volumes_e3m3.items()
+    }
+
 
 _ENV_MAP = {
     "mar": "offshore",

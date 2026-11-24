@@ -28,6 +28,8 @@ export interface KnownGap {
   start: string;
   end: string;
   description: string;
+  resolved_in_country_rollup?: boolean;
+  country_rollup_source?: string;
 }
 
 export interface SourceMeta {

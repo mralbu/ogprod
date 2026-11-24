@@ -244,7 +244,7 @@ def _int_opt(value: Any) -> int | None:
     return int(value)
 
 
-def _known_gaps_for_source(source_name: str) -> list[dict[str, str]]:
+def _known_gaps_for_source(source_name: str) -> list[dict[str, Any]]:
     if source_name == "brazil":
         return [
             {
@@ -252,10 +252,49 @@ def _known_gaps_for_source(source_name: str) -> list[dict[str, str]]:
                 "start": g.start.isoformat(),
                 "end": g.end.isoformat(),
                 "description": g.description,
+                "resolved_in_country_rollup": g.resolved_in_country_rollup,
+                **(
+                    {"country_rollup_source": g.country_rollup_source}
+                    if g.country_rollup_source
+                    else {}
+                ),
             }
             for g in brazil.KNOWN_GAPS
         ]
     return []
+
+
+def _apply_country_gap_backfills(country_df: pd.DataFrame) -> pd.DataFrame:
+    """Splice official ANP national gas rates into Brazil's country rollup for 2003-07..2005-06."""
+    if country_df.empty or "gas_prod" not in country_df.columns:
+        return country_df
+    rates = brazil.national_gas_gap_rates()
+    periods = pd.to_datetime(country_df["period"]).dt.date
+    replacements = periods.map(rates)
+    mask = (country_df["source"] == "brazil") & replacements.notna()
+    if not mask.any():
+        return country_df
+    out = country_df.copy()
+    out.loc[mask, "gas_prod"] = replacements.loc[mask].astype("float64")
+    return out
+
+
+def _mask_basin_known_gaps(basin_df: pd.DataFrame) -> pd.DataFrame:
+    """Mask incomplete months in Brazil basin rollups so charts show a break instead of ~5%."""
+    if basin_df.empty:
+        return basin_df
+    out = basin_df
+    periods = pd.to_datetime(basin_df["period"]).dt.date
+    is_br = basin_df["source"] == "brazil"
+    for gap in brazil.KNOWN_GAPS:
+        if gap.column not in out.columns:
+            continue
+        mask = is_br & (periods >= gap.start) & (periods <= gap.end)
+        if mask.any():
+            if out is basin_df:
+                out = basin_df.copy()
+            out.loc[mask, gap.column] = float("nan")
+    return out
 
 
 def _row_to_monthly_point(row: dict[str, Any]) -> dict[str, Any]:
@@ -273,7 +312,7 @@ def _export_country_and_basin_rollups(
     con: duckdb.DuckDBPyConnection,
     rollups_dir: Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    country_df = con.execute(_COUNTRY_MONTHLY_SQL).df()
+    country_df = _apply_country_gap_backfills(con.execute(_COUNTRY_MONTHLY_SQL).df())
     _atomic_write_df_parquet(country_df, rollups_dir / "country_monthly.parquet")
 
     country_json: dict[str, list[dict[str, Any]]] = {}
@@ -282,7 +321,7 @@ def _export_country_and_basin_rollups(
         country_json.setdefault(src, []).append(_row_to_monthly_point(rec))
     _atomic_write_json(rollups_dir / "country_monthly.json", country_json)
 
-    basin_df = con.execute(_BASIN_MONTHLY_SQL).df()
+    basin_df = _mask_basin_known_gaps(con.execute(_BASIN_MONTHLY_SQL).df())
     _atomic_write_df_parquet(basin_df, rollups_dir / "basin_monthly.parquet")
 
     basin_json: dict[str, dict[str, list[dict[str, Any]]]] = {}

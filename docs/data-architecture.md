@@ -119,7 +119,7 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
 **ANP data-quality rules:**
 1. Merge pre-2005 / 2005-terra state cross-join duplicates preferring the row whose `Estado` matches the well name's state suffix; raise `SchemaError` if two non-zero values disagree by > 0.5% and > 0.5 bbl/d (see [ADR 0004](adr/0004-duplicate-production-keys.md)).
 2. Coalesce `Instalação = Não Informado` splits with empty volumes into the real installation row.
-3. Never impute the `2003-07 .. 2005-06` gas gap (~5% of wells reporting gas); emit a warning and record in `manifest.json`.
+3. Never impute well-level rows for the `2003-07 .. 2005-06` gas gap (~5% of wells reporting gas); emit a warning in Layer 1, backfill `country_monthly` from ANP's official `ppgn-el` aggregate series, and mask `basin_monthly` in Layer 2 (see [ADR 0009](adr/0009-anp-gas-gap-handling.md)).
 
 ### 3.2 Priority 2 — Norway (Sodir)
 

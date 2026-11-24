@@ -6,12 +6,20 @@ import {
   LEGEND_TOP_PX,
   Y_AXIS_NAME_GAP_PX,
 } from "../lib/timeSeriesOption";
-import type { MonthlyPoint } from "../types/data";
+import type { KnownGap, MonthlyPoint } from "../types/data";
 
 const SAMPLE_ROWS: MonthlyPoint[] = [
   { p: "2025-01-01", oil_prod: 6_400_000, gas_prod: 520_700 },
   { p: "2025-02-01", oil_prod: 6_500_000, gas_prod: 530_000 },
 ];
+
+const BRAZIL_GAS_GAP: KnownGap = {
+  column: "gas_prod",
+  start: "2003-07-01",
+  end: "2005-06-01",
+  description: "incomplete ANP gas reporting",
+  resolved_in_country_rollup: true,
+};
 
 describe("buildTimeSeriesOption", () => {
   it("separates the centered scroll legend from vertical axis unit names", () => {
@@ -58,5 +66,38 @@ describe("buildTimeSeriesOption", () => {
     expect(yAxes).toHaveLength(1);
     expect(yAxes[0].name).toBe("10³ m³/d");
     expect(yAxes[0].nameTextStyle?.align).toBe("left");
+  });
+
+  it("shades overlapping known reporting gaps clamped to displayed category periods", () => {
+    const partialOverlapRows: MonthlyPoint[] = [
+      { p: "2004-02-01", oil_prod: 10_000 },
+      { p: "2005-06-01", oil_prod: 11_000 },
+      { p: "2005-07-01", oil_prod: 12_000, gas_prod: 400 },
+    ];
+    const option = buildTimeSeriesOption({
+      rows: partialOverlapRows,
+      activeProducts: ["oil_prod", "gas_prod"],
+      unitSystem: "oilfield_e3m3",
+      knownGaps: [BRAZIL_GAS_GAP],
+    });
+
+    const series = option.series as echarts.LineSeriesOption[];
+    expect(series[0].markArea).toBeUndefined();
+    expect(series[1].markArea?.data).toEqual([
+      [{ name: "Reporting gap", xAxis: "2004-02" }, { xAxis: "2005-06" }],
+    ]);
+  });
+
+  it("omits markArea when series does not overlap known gaps", () => {
+    const option = buildTimeSeriesOption({
+      rows: SAMPLE_ROWS,
+      activeProducts: ["oil_prod", "gas_prod"],
+      unitSystem: "oilfield_e3m3",
+      knownGaps: [BRAZIL_GAS_GAP],
+    });
+
+    const series = option.series as echarts.LineSeriesOption[];
+    expect(series[0].markArea).toBeUndefined();
+    expect(series[1].markArea).toBeUndefined();
   });
 });

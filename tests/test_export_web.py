@@ -133,6 +133,7 @@ def test_export_web_generates_meta_rollups_fpso_utilization_and_search(tmp_path:
     assert by_src["brazil"]["years"] == [2025, 2026]
     assert len(by_src["brazil"]["known_gaps"]) == 1
     assert by_src["brazil"]["known_gaps"][0]["start"] == "2003-07-01"
+    assert by_src["brazil"]["known_gaps"][0]["resolved_in_country_rollup"] is True
     assert by_src["norway"]["latest_oil_bpd"] == 700_000.0
     assert by_src["brazil"]["bbox"] is not None
 
@@ -255,3 +256,94 @@ def test_tile_features_build_geojson_dicts_matching_to_geojson(
         assert isinstance(feat["geometry"], dict)
         serialized = json.loads(json.dumps(feat["geometry"]))
         assert serialized == json.loads(shapely.to_geojson(expected))
+
+
+def test_export_web_backfills_brazil_country_gas_and_masks_basin_gap(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    out_dir = tmp_path / "web"
+
+    br_periods = [date(2003, 6, 1), date(2004, 2, 1), date(2005, 6, 1), date(2005, 7, 1)]
+    br_table = base.build_production_table(
+        source="brazil",
+        entity_type=schema.EntityType.WELL,
+        entity_id=pd.Series(["7-MRL-1-RJS"] * 4),
+        entity_name=pd.Series(["7-MRL-1-RJS"] * 4),
+        period=pd.Series(br_periods),
+        field_id=pd.Series(["MARLIM"] * 4),
+        field_name=pd.Series(["MARLIM"] * 4),
+        facility_id=pd.Series(["P-35"] * 4),
+        facility_name=pd.Series(["P-35"] * 4),
+        basin=pd.Series(["Campos"] * 4),
+        region=pd.Series(["Rio de Janeiro"] * 4),
+        environment=pd.Series(["offshore"] * 4),
+        rates={
+            "oil_prod": pd.Series([100_000.0, 105_000.0, 110_000.0, 115_000.0]),
+            "gas_prod": pd.Series([40_000.0, 1_500.0, 2_000.0, 48_000.0]),
+        },
+    )
+    write_production(br_table, root=data_dir)
+
+    no_table = base.build_production_table(
+        source="norway",
+        entity_type=schema.EntityType.FIELD,
+        entity_id=pd.Series(["43778"]),
+        entity_name=pd.Series(["TROLL"]),
+        period=pd.Series([date(2004, 2, 1)]),
+        field_id=pd.Series(["43778"]),
+        field_name=pd.Series(["TROLL"]),
+        basin=pd.Series(["North Sea"]),
+        environment=pd.Series(["offshore"]),
+        rates={"oil_prod": pd.Series([200_000.0]), "gas_prod": pd.Series([80_000.0])},
+    )
+    write_production(no_table, root=data_dir)
+
+    export_web.export_web(data_dir=data_dir, out_dir=out_dir, skip_tiles=True)
+
+    # Country rollup: Brazil gap months use official ANP ppgn-el rates; no phantom months added.
+    country_json = json.loads((out_dir / "rollups" / "country_monthly.json").read_text("utf-8"))
+    br_country = {pt["p"]: pt for pt in country_json["brazil"]}
+    assert sorted(br_country) == ["2003-06-01", "2004-02-01", "2005-06-01", "2005-07-01"]
+    assert br_country["2003-06-01"]["gas_prod"] == 40_000.0
+    assert math.isclose(br_country["2004-02-01"]["gas_prod"], 1_319_177.220 / 29, abs_tol=0.02)
+    assert math.isclose(br_country["2005-06-01"]["gas_prod"], 1_501_361.000 / 30, abs_tol=0.02)
+    assert br_country["2005-07-01"]["gas_prod"] == 48_000.0
+    assert br_country["2004-02-01"]["oil_prod"] == 105_000.0
+    assert country_json["norway"][0]["gas_prod"] == 80_000.0
+
+    country_pq = pq.read_table(out_dir / "rollups" / "country_monthly.parquet").to_pandas()
+    br_2004_pq = country_pq.loc[
+        (country_pq["source"] == "brazil")
+        & (pd.to_datetime(country_pq["period"]).dt.date == date(2004, 2, 1)),
+        "gas_prod",
+    ].iloc[0]
+    assert math.isclose(float(br_2004_pq), 1_319_177.220 / 29, rel_tol=1e-6)
+
+    # Basin rollup: Brazil gap months have gas_prod masked to NULL; oil & Norway untouched.
+    basin_json = json.loads((out_dir / "rollups" / "basin_monthly.json").read_text("utf-8"))
+    campos = {pt["p"]: pt for pt in basin_json["brazil"]["Campos"]}
+    assert campos["2003-06-01"]["gas_prod"] == 40_000.0
+    assert "gas_prod" not in campos["2004-02-01"]
+    assert campos["2004-02-01"]["oil_prod"] == 105_000.0
+    assert "gas_prod" not in campos["2005-06-01"]
+    assert campos["2005-07-01"]["gas_prod"] == 48_000.0
+    assert basin_json["norway"]["North Sea"][0]["gas_prod"] == 80_000.0
+
+    basin_pq = pq.read_table(out_dir / "rollups" / "basin_monthly.parquet").to_pandas()
+    campos_2004 = basin_pq.loc[
+        (basin_pq["source"] == "brazil")
+        & (pd.to_datetime(basin_pq["period"]).dt.date == date(2004, 2, 1)),
+        "gas_prod",
+    ].iloc[0]
+    assert pd.isna(campos_2004)
+
+    # Field, facility, and Layer-1 well rows preserve reported gas values untouched.
+    field_json = json.loads(
+        (out_dir / "rollups" / "field_monthly" / "brazil.json").read_text("utf-8")
+    )
+    marlim = {pt["p"]: pt for pt in field_json["MARLIM"]}
+    assert marlim["2004-02-01"]["gas_prod"] == 1_500.0
+
+    layer1_2004 = pq.read_table(
+        data_dir / "store" / "production" / "source=brazil" / "year=2004" / "data.parquet"
+    ).to_pandas()
+    assert float(layer1_2004["gas_prod"].iloc[0]) == 1_500.0

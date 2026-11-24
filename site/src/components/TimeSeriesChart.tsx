@@ -1,7 +1,7 @@
 import * as echarts from "echarts";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { buildTimeSeriesOption } from "../lib/timeSeriesOption";
-import type { MonthlyPoint, RateColumn, UnitSystem } from "../types/data";
+import type { KnownGap, MonthlyPoint, RateColumn, UnitSystem } from "../types/data";
 
 export interface TimeSeriesChartHandle {
   exportPng: (filename: string) => void;
@@ -12,11 +12,15 @@ interface TimeSeriesChartProps {
   activeProducts: RateColumn[];
   unitSystem: UnitSystem;
   oilCapacityBpd?: number | null;
+  knownGaps?: readonly KnownGap[];
   height?: number;
 }
 
 export const TimeSeriesChart = forwardRef<TimeSeriesChartHandle, TimeSeriesChartProps>(
-  function TimeSeriesChart({ rows, activeProducts, unitSystem, oilCapacityBpd, height = 330 }, ref) {
+  function TimeSeriesChart(
+    { rows, activeProducts, unitSystem, oilCapacityBpd, knownGaps, height = 330 },
+    ref,
+  ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<echarts.ECharts | null>(null);
 
@@ -54,10 +58,10 @@ export const TimeSeriesChart = forwardRef<TimeSeriesChartHandle, TimeSeriesChart
       const chart = chartRef.current;
       if (!chart) return;
       chart.setOption(
-        buildTimeSeriesOption({ rows, activeProducts, unitSystem, oilCapacityBpd }),
+        buildTimeSeriesOption({ rows, activeProducts, unitSystem, oilCapacityBpd, knownGaps }),
         true,
       );
-    }, [rows, activeProducts, unitSystem, oilCapacityBpd]);
+    }, [rows, activeProducts, unitSystem, oilCapacityBpd, knownGaps]);
 
     return <div ref={containerRef} style={{ height }} className="w-full" />;
   },

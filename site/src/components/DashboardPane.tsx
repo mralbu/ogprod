@@ -1,12 +1,12 @@
 import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { useMemo, useRef } from "react";
 import { buildSeriesCsv, downloadCsv } from "../lib/csvExport";
+import { type ScopedKnownGap, selectApplicableGaps } from "../lib/knownGaps";
 import { formatPercent, PRODUCT_SPECS } from "../lib/units";
 import type {
   EntitySelection,
   FacilitySummary,
   FieldSummary,
-  KnownGap,
   MonthlyPoint,
   RateColumn,
   SiteMeta,
@@ -105,17 +105,16 @@ export function DashboardPane({
   const latestRow = series.length > 0 ? series[series.length - 1] : null;
   const firstRow = series.length > 0 ? series[0] : null;
 
-  const applicableGaps = useMemo<KnownGap[]>(() => {
-    const gaps: KnownGap[] = [];
-    for (const src of activeSourcesMeta) {
-      for (const g of src.known_gaps) {
-        if (visibleProducts.includes(g.column)) {
-          gaps.push(g);
-        }
-      }
-    }
-    return gaps;
-  }, [activeSourcesMeta, visibleProducts]);
+  const applicableGaps = useMemo<ScopedKnownGap[]>(
+    () =>
+      selectApplicableGaps({
+        sourcesMeta: activeSourcesMeta,
+        selectionKind: selection.kind,
+        visibleProducts,
+        series,
+      }),
+    [activeSourcesMeta, selection.kind, visibleProducts, series],
+  );
 
   const title = useMemo(() => {
     if (selection.kind === "field") return selectedField?.field_name ?? selection.name ?? selection.id;
@@ -226,6 +225,7 @@ export function DashboardPane({
               oilCapacityBpd={
                 selection.kind === "facility" ? selectedFacility?.oil_capacity_bpd : null
               }
+              knownGaps={applicableGaps}
             />
           )}
         </div>
@@ -253,15 +253,15 @@ export function DashboardPane({
   );
 }
 
-function KnownGapsBanner({ gaps }: { gaps: KnownGap[] }) {
+function KnownGapsBanner({ gaps }: { gaps: ScopedKnownGap[] }) {
   return (
     <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-900">
       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" />
       <div>
         {gaps.map((g) => (
-          <p key={`${g.column}-${g.start}`}>
+          <p key={`${g.sourceId}-${g.column}-${g.start}`}>
             <span className="font-semibold">
-              Known reporting gap ({g.start.slice(0, 7)} to {g.end.slice(0, 7)}):
+              {g.sourceLabel} — Known reporting gap ({g.start.slice(0, 7)} to {g.end.slice(0, 7)}):
             </span>{" "}
             {g.description}
           </p>

@@ -13,3 +13,4 @@ Context, Decision, Consequences.
 | [0006](0006-historical-files-immutable.md) | Historical source files are immutable unless refreshed |
 | [0007](0007-connector-registration-by-import.md) | Connectors register themselves when `ogprod.sources` is imported |
 | [0008](0008-web-explorer-loading.md) | Web explorer: rollups first, wells lazily, field bounds, GeoJSON fallback |
+| [0009](0009-anp-gas-gap-handling.md) | ANP 2003–2005 gas gap: Layer-1 faithful, Layer-2 country backfill & basin mask |

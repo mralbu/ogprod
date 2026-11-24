@@ -1,5 +1,5 @@
 import * as echarts from "echarts";
-import type { MonthlyPoint, RateColumn, UnitSystem } from "../types/data";
+import type { KnownGap, MonthlyPoint, RateColumn, UnitSystem } from "../types/data";
 import { convertRate, PRODUCT_SPECS, UNIT_SYSTEMS, unitLabelFor } from "./units";
 
 const SANS_FONT = 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -15,6 +15,7 @@ export interface BuildTimeSeriesOptionParams {
   activeProducts: readonly RateColumn[];
   unitSystem: UnitSystem;
   oilCapacityBpd?: number | null;
+  knownGaps?: readonly KnownGap[];
 }
 
 function formatAxisTick(v: number): string {
@@ -23,11 +24,35 @@ function formatAxisTick(v: number): string {
   return String(v);
 }
 
+function buildGapMarkAreas(
+  periods: readonly string[],
+  gaps: readonly KnownGap[],
+): [{ name: string; xAxis: string }, { xAxis: string }][] {
+  const areas: [{ name: string; xAxis: string }, { xAxis: string }][] = [];
+  for (const g of gaps) {
+    const startYm = g.start.slice(0, 7);
+    const endYm = g.end.slice(0, 7);
+    let first: string | null = null;
+    let last: string | null = null;
+    for (const p of periods) {
+      if (p >= startYm && p <= endYm) {
+        if (first === null) first = p;
+        last = p;
+      }
+    }
+    if (first !== null && last !== null) {
+      areas.push([{ name: "Reporting gap", xAxis: first }, { xAxis: last }]);
+    }
+  }
+  return areas;
+}
+
 export function buildTimeSeriesOption({
   rows,
   activeProducts,
   unitSystem,
   oilCapacityBpd,
+  knownGaps = [],
 }: BuildTimeSeriesOptionParams): echarts.EChartsOption {
   const unitMeta = UNIT_SYSTEMS.find((u) => u.id === unitSystem) ?? UNIT_SYSTEMS[0];
   const periods = rows.map((r) => r.p.slice(0, 7));
@@ -87,6 +112,30 @@ export function buildTimeSeriesOption({
         },
         data: [{ yAxis: convertedCap }],
       };
+    }
+
+    const colGaps = knownGaps.filter((g) => g.column === col);
+    if (colGaps.length > 0) {
+      const gapAreas = buildGapMarkAreas(periods, colGaps);
+      if (gapAreas.length > 0) {
+        baseSeries.markArea = {
+          silent: true,
+          itemStyle: {
+            color: "rgba(245, 158, 11, 0.14)",
+            borderColor: "rgba(217, 119, 6, 0.35)",
+            borderWidth: 1,
+            borderType: "dashed",
+          },
+          label: {
+            show: true,
+            position: "insideTop",
+            color: "#92400e",
+            fontSize: 10,
+            fontFamily: SANS_FONT,
+          },
+          data: gapAreas,
+        };
+      }
     }
     return baseSeries;
   });
