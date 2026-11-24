@@ -169,14 +169,24 @@ def test_export_web_invokes_tippecanoe_and_cli(
     out_dir = tmp_path / "web"
     _seed_multi_source_store(data_dir)
 
+    capture_path = tmp_path / "tippecanoe_capture.json"
     fake_bin_dir = tmp_path / "bin"
     fake_bin_dir.mkdir()
     fake_tippecanoe = fake_bin_dir / "tippecanoe"
     fake_tippecanoe.write_text(
         "#!/usr/bin/env python3\n"
-        "import sys\n"
+        "import json, sys\n"
         "from pathlib import Path\n"
         "args = sys.argv[1:]\n"
+        "layers = {}\n"
+        "for idx, arg in enumerate(args):\n"
+        "    if arg == '-L':\n"
+        "        name, file_path = args[idx + 1].split(':', 1)\n"
+        "        lines = Path(file_path).read_text(encoding='utf-8').splitlines()\n"
+        "        layers[name] = [json.loads(line) for line in lines]\n"
+        f"Path({str(capture_path)!r}).write_text(\n"
+        "    json.dumps({'args': args, 'layers': layers}), encoding='utf-8'\n"
+        ")\n"
         "out = Path(args[args.index('-o') + 1])\n"
         "out.write_bytes(b'PMTiles\\x03fake')\n",
         encoding="utf-8",
@@ -194,6 +204,18 @@ def test_export_web_invokes_tippecanoe_and_cli(
     pmtiles = out_dir / "tiles" / "ogprod.pmtiles"
     assert pmtiles.exists()
     assert pmtiles.read_bytes().startswith(b"PMTiles")
+
+    captured = json.loads(capture_path.read_text(encoding="utf-8"))
+    assert "--drop-rate=1" in captured["args"]
+    assert "--drop-densest-as-needed" in captured["args"]
+    assert "--minimum-zoom=0" in captured["args"]
+    assert "--maximum-zoom=12" in captured["args"]
+
+    layers = captured["layers"]
+    assert "tippecanoe" not in layers["fields"][0]
+    assert layers["field_centroids"][0]["tippecanoe"] == {"minzoom": 6}
+    assert layers["facilities"][0]["tippecanoe"] == {"minzoom": 5}
+    assert layers["wells"][0]["tippecanoe"] == {"minzoom": 8}
 
 
 def test_source_bbox_prefers_fields_over_overseas_facilities() -> None:
@@ -347,3 +369,34 @@ def test_export_web_backfills_brazil_country_gas_and_masks_basin_gap(tmp_path: P
         data_dir / "store" / "production" / "source=brazil" / "year=2004" / "data.parquet"
     ).to_pandas()
     assert float(layer1_2004["gas_prod"].iloc[0]) == 1_500.0
+
+
+@given(
+    minzoom=st.integers(min_value=0, max_value=14),
+    count=st.integers(min_value=1, max_value=5),
+)
+def test_write_geojsonl_layer_attaches_tippecanoe_minzoom(
+    tmp_path_factory: pytest.TempPathFactory, minzoom: int, count: int
+) -> None:
+    dest = tmp_path_factory.mktemp("geojsonl") / "layer.geojsonl"
+    feats = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [float(i), 0.0]},
+            "properties": {"id": i},
+        }
+        for i in range(count)
+    ]
+    written = export_web._write_geojsonl_layer(feats, dest, minzoom=minzoom)
+    assert written == count
+
+    rows = [json.loads(line) for line in dest.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == count
+    for feat, row in zip(feats, rows, strict=True):
+        assert "tippecanoe" not in feat
+        assert row["geometry"] == feat["geometry"]
+        assert row["properties"] == feat["properties"]
+        if minzoom > 0:
+            assert row["tippecanoe"] == {"minzoom": minzoom}
+        else:
+            assert "tippecanoe" not in row

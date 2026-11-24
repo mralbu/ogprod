@@ -39,6 +39,16 @@ _LICENCES: dict[str, str] = {
     "mexico": "Datos Abiertos — SENER / CNIH SIH",
 }
 
+# Synced with site/src/lib/mapStyle.ts (MAP_LAYER_MIN_ZOOM).
+_TILE_MIN_ZOOM = 0
+_TILE_MAX_ZOOM = 12
+_TILE_LAYER_MIN_ZOOM: dict[str, int] = {
+    "fields": 0,
+    "field_centroids": 6,
+    "facilities": 5,
+    "wells": 8,
+}
+
 _COUNTRY_MONTHLY_SQL = """
 SELECT source,
        period,
@@ -586,12 +596,18 @@ def _build_search_index(
     return entries
 
 
-def _write_geojsonl_layer(features: list[dict[str, Any]], dest: Path) -> int:
+def _write_geojsonl_layer(
+    features: list[dict[str, Any]],
+    dest: Path,
+    *,
+    minzoom: int = 0,
+) -> int:
     if not features:
         return 0
     with dest.open("w", encoding="utf-8") as handle:
         for feat in features:
-            handle.write(json.dumps(feat, ensure_ascii=False, separators=(",", ":")) + "\n")
+            row = {**feat, "tippecanoe": {"minzoom": minzoom}} if minzoom > 0 else feat
+            handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
     return len(features)
 
 
@@ -740,20 +756,25 @@ def _build_pmtiles(
         ]
         layer_args: list[str] = []
         for layer_name, feats, path in layer_specs:
-            if _write_geojsonl_layer(feats, path) > 0:
+            minzoom = _TILE_LAYER_MIN_ZOOM[layer_name]
+            if _write_geojsonl_layer(feats, path, minzoom=minzoom) > 0:
                 layer_args.extend(["-L", f"{layer_name}:{path}"])
         if not layer_args:
             return False
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_pmtiles = out_path.with_name(f"{out_path.name}.tmp.pmtiles")
+        # --drop-rate=1 disables tippecanoe's default 2.5x/zoom point thinning below
+        # maxzoom (which otherwise drops >99% of facilities and field labels at z5-z6);
+        # --drop-densest-as-needed still enforces per-tile size limits where dense.
         cmd = [
             tippecanoe_bin,
             "-o",
             str(tmp_pmtiles),
             "--force",
-            "--minimum-zoom=0",
-            "--maximum-zoom=12",
+            f"--minimum-zoom={_TILE_MIN_ZOOM}",
+            f"--maximum-zoom={_TILE_MAX_ZOOM}",
+            "--drop-rate=1",
             "--drop-densest-as-needed",
             "--extend-zooms-if-still-dropping",
             *layer_args,

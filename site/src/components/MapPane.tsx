@@ -3,6 +3,15 @@ import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { useEffect, useRef, useState } from "react";
 import { pmtilesUrl } from "../lib/dataClient";
+import {
+  buildFallbackLayers,
+  buildSelectionFilter,
+  buildVectorLayers,
+  createDiamondSdfImage,
+  FACILITY_ICON_ID,
+  INITIAL_MAP_ZOOM,
+  isLayerZoomHidden,
+} from "../lib/mapStyle";
 import { formatCompactNumber, formatPercent } from "../lib/units";
 import type {
   EntitySelection,
@@ -71,6 +80,7 @@ export function MapPane({
   const [showFacilities, setShowFacilities] = useState(true);
   const [showWells, setShowWells] = useState(true);
   const [mapReady, setMapReady] = useState(false);
+  const [currentZoom, setCurrentZoom] = useState(INITIAL_MAP_ZOOM);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -80,7 +90,7 @@ export function MapPane({
       container: containerRef.current,
       style: "https://tiles.openfreemap.org/styles/positron",
       center: [-30, 12],
-      zoom: 2.1,
+      zoom: INITIAL_MAP_ZOOM,
       minZoom: 1.5,
       maxZoom: 16,
     });
@@ -88,138 +98,47 @@ export function MapPane({
     mapRef.current = map;
     popupRef.current = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 10 });
 
+    const syncZoomBand = () => {
+      const z = map.getZoom();
+      setCurrentZoom((prev) =>
+        isLayerZoomHidden("facilities", prev) === isLayerZoomHidden("facilities", z) &&
+        isLayerZoomHidden("wells", prev) === isLayerZoomHidden("wells", z)
+          ? prev
+          : z,
+      );
+    };
+    map.on("zoom", syncZoomBand);
+
     map.on("load", () => {
+      if (!map.hasImage(FACILITY_ICON_ID)) {
+        map.addImage(FACILITY_ICON_ID, createDiamondSdfImage(), { pixelRatio: 2, sdf: true });
+      }
+
       if (meta.has_tiles) {
         map.addSource("ogprod", {
           type: "vector",
           url: `pmtiles://${absolutePmtilesUrl()}`,
         });
-
-        map.addLayer({
-          id: "fields-fill",
-          type: "fill",
-          source: "ogprod",
-          "source-layer": "fields",
-          paint: {
-            "fill-color": [
-              "interpolate",
-              ["linear"],
-              ["coalesce", ["get", "latest_oil_bpd"], 0],
-              0,
-              "#cbd5e1",
-              5000,
-              "#fbbf24",
-              50000,
-              "#d97706",
-              250000,
-              "#9a3412",
-            ],
-            "fill-opacity": 0.48,
-          },
-        });
-
-        map.addLayer({
-          id: "fields-outline",
-          type: "line",
-          source: "ogprod",
-          "source-layer": "fields",
-          paint: {
-            "line-color": "#92400e",
-            "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 10, 1.6],
-            "line-opacity": 0.85,
-          },
-        });
-
-        map.addLayer({
-          id: "wells-circle",
-          type: "circle",
-          source: "ogprod",
-          "source-layer": "wells",
-          minzoom: 5,
-          paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 2, 10, 4.5, 13, 6],
-            "circle-color": "#334155",
-            "circle-stroke-color": "#ffffff",
-            "circle-stroke-width": 0.8,
-            "circle-opacity": 0.85,
-          },
-        });
-
-        map.addLayer({
-          id: "facilities-circle",
-          type: "circle",
-          source: "ogprod",
-          "source-layer": "facilities",
-          paint: {
-            "circle-radius": [
-              "interpolate",
-              ["linear"],
-              ["coalesce", ["get", "oil_capacity_bpd"], 20000],
-              0,
-              4.5,
-              100000,
-              6.5,
-              200000,
-              8.5,
-            ],
-            "circle-color": [
-              "case",
-              ["has", "oil_utilization"],
-              [
-                "interpolate",
-                ["linear"],
-                ["get", "oil_utilization"],
-                0.2,
-                "#0284c7",
-                0.7,
-                "#0d9488",
-                0.95,
-                "#dc2626",
-              ],
-              "#0e7490",
-            ],
-            "circle-stroke-color": "#ffffff",
-            "circle-stroke-width": 1.4,
-          },
-        });
+        for (const layer of buildVectorLayers()) {
+          map.addLayer(layer);
+        }
       } else {
         map.addSource("fields-fallback", {
           type: "geojson",
           data: buildFallbackGeoJson(fieldsSummary as unknown as { lon: number | null; lat: number | null }[]),
         });
-        map.addLayer({
-          id: "fields-fill",
-          type: "circle",
-          source: "fields-fallback",
-          paint: {
-            "circle-radius": 6,
-            "circle-color": "#d97706",
-            "circle-opacity": 0.72,
-            "circle-stroke-color": "#ffffff",
-            "circle-stroke-width": 1.2,
-          },
-        });
-
         map.addSource("facilities-fallback", {
           type: "geojson",
           data: buildFallbackGeoJson(
             facilitiesSummary as unknown as { lon: number | null; lat: number | null }[],
           ),
         });
-        map.addLayer({
-          id: "facilities-circle",
-          type: "circle",
-          source: "facilities-fallback",
-          paint: {
-            "circle-radius": 5.5,
-            "circle-color": "#0e7490",
-            "circle-stroke-color": "#ffffff",
-            "circle-stroke-width": 1.3,
-          },
-        });
+        for (const layer of buildFallbackLayers()) {
+          map.addLayer(layer);
+        }
       }
 
-      const interactiveLayers = ["wells-circle", "facilities-circle", "fields-fill"].filter((id) =>
+      const interactiveLayers = ["facilities-symbol", "wells-circle", "fields-fill"].filter((id) =>
         Boolean(map.getLayer(id)),
       );
 
@@ -239,7 +158,7 @@ export function MapPane({
           html = `<div class="font-semibold text-slate-900">${props.well_name ?? props.well_id}</div>
             <div class="text-[11px] text-slate-500">Well · ${String(props.source ?? "").toUpperCase()}${props.field_name ? ` · ${props.field_name}` : ""}</div>
             ${props.latest_oil_bpd ? `<div class="font-tabular mt-1 text-[11px]">Latest Oil: ${formatCompactNumber(Number(props.latest_oil_bpd))} bbl/d</div>` : ""}`;
-        } else if (layerId === "facilities-circle") {
+        } else if (layerId === "facilities-symbol") {
           html = `<div class="font-semibold text-slate-900">${props.facility_name ?? props.facility_id}</div>
             <div class="text-[11px] text-slate-500">${props.facility_type ?? "Facility"} · ${String(props.source ?? "").toUpperCase()}</div>
             ${props.oil_capacity_bpd ? `<div class="font-tabular mt-1 text-[11px]">Cap: ${formatCompactNumber(Number(props.oil_capacity_bpd))} bbl/d${props.oil_utilization ? ` · Util: ${formatPercent(Number(props.oil_utilization))}` : ""}</div>` : ""}`;
@@ -276,7 +195,7 @@ export function MapPane({
             lon: lng,
             lat,
           });
-        } else if (top.layer.id === "facilities-circle") {
+        } else if (top.layer.id === "facilities-symbol") {
           onSelectRef.current({
             kind: "facility",
             source: src,
@@ -297,6 +216,7 @@ export function MapPane({
         }
       });
 
+      setCurrentZoom(map.getZoom());
       setMapReady(true);
     });
 
@@ -317,7 +237,8 @@ export function MapPane({
     const toggles: [string, boolean][] = [
       ["fields-fill", showFields],
       ["fields-outline", showFields],
-      ["facilities-circle", showFacilities],
+      ["fields-label", showFields],
+      ["facilities-symbol", showFacilities],
       ["wells-circle", showWells],
     ];
     for (const [id, visible] of toggles) {
@@ -325,13 +246,24 @@ export function MapPane({
       map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
       map.setFilter(id, filter);
     }
-  }, [activeSource, showFields, showFacilities, showWells, mapReady]);
+
+    const selectionToggles: [string, "field" | "facility" | "well", boolean][] = [
+      ["fields-selected", "field", showFields],
+      ["facilities-selected", "facility", showFacilities],
+      ["wells-selected", "well", showWells],
+    ];
+    for (const [id, kind, visible] of selectionToggles) {
+      if (!map.getLayer(id)) continue;
+      map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+      map.setFilter(id, buildSelectionFilter(kind, selection, activeSource));
+    }
+  }, [activeSource, showFields, showFacilities, showWells, selection, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || selection.kind !== "overview") return;
     if (activeSource === null) {
-      map.flyTo({ center: [-30, 14], zoom: 2.1, duration: 700 });
+      map.flyTo({ center: [-30, 14], zoom: INITIAL_MAP_ZOOM, duration: 700 });
       return;
     }
     const metaSrc = meta.sources.find((s) => s.id === activeSource);
@@ -375,6 +307,8 @@ export function MapPane({
         showFields={showFields}
         showFacilities={showFacilities}
         showWells={showWells}
+        facilitiesZoomHidden={isLayerZoomHidden("facilities", currentZoom)}
+        wellsZoomHidden={isLayerZoomHidden("wells", currentZoom)}
         onToggleFields={setShowFields}
         onToggleFacilities={setShowFacilities}
         onToggleWells={setShowWells}
@@ -389,6 +323,8 @@ interface LayerTogglePanelProps {
   showFields: boolean;
   showFacilities: boolean;
   showWells: boolean;
+  facilitiesZoomHidden: boolean;
+  wellsZoomHidden: boolean;
   onToggleFields: (visible: boolean) => void;
   onToggleFacilities: (visible: boolean) => void;
   onToggleWells: (visible: boolean) => void;
@@ -398,6 +334,8 @@ function LayerTogglePanel({
   showFields,
   showFacilities,
   showWells,
+  facilitiesZoomHidden,
+  wellsZoomHidden,
   onToggleFields,
   onToggleFacilities,
   onToggleWells,
@@ -426,8 +364,10 @@ function LayerTogglePanel({
             onChange={(e) => onToggleFacilities(e.target.checked)}
             className="accent-cyan-700"
           />
-          <span className="h-2.5 w-2.5 rounded-full border border-white bg-cyan-700 ring-1 ring-cyan-700" />
-          <span>FPSOs / Platforms</span>
+          <span className="h-2.5 w-2.5 rotate-45 border border-white bg-cyan-700 ring-1 ring-cyan-700" />
+          <span className={showFacilities && facilitiesZoomHidden ? "text-slate-400" : undefined}>
+            FPSOs / Platforms{showFacilities && facilitiesZoomHidden ? " (zoom in)" : ""}
+          </span>
         </label>
         <label className="flex cursor-pointer items-center gap-2">
           <input
@@ -437,7 +377,9 @@ function LayerTogglePanel({
             className="accent-slate-700"
           />
           <span className="h-2 w-2 rounded-full bg-slate-700" />
-          <span>Wells (zoom in)</span>
+          <span className={showWells && wellsZoomHidden ? "text-slate-400" : undefined}>
+            Wells{showWells && wellsZoomHidden ? " (zoom in)" : ""}
+          </span>
         </label>
       </div>
     </div>
