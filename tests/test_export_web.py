@@ -135,6 +135,10 @@ def test_export_web_generates_meta_rollups_fpso_utilization_and_search(tmp_path:
     assert by_src["brazil"]["known_gaps"][0]["start"] == "2003-07-01"
     assert by_src["brazil"]["known_gaps"][0]["resolved_in_country_rollup"] is True
     assert by_src["norway"]["latest_oil_bpd"] == 700_000.0
+    assert by_src["norway"]["licence_url"] == "https://data.norge.no/nlod/en/2.0"
+    assert "NLOD 2.0" in by_src["norway"]["licence"]
+    assert "8.777/2016" in by_src["brazil"]["licence"]
+    assert by_src["brazil"]["licence_url"].startswith("https://")
     assert by_src["brazil"]["bbox"] is not None
 
     for name in ("country_monthly", "basin_monthly", "field_monthly", "facility_monthly"):

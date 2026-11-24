@@ -82,4 +82,9 @@ just complexity  # radon
 
 ## License
 
-[MIT](LICENSE)
+- **Code & documentation:** [MIT](LICENSE) — applies to the `ogprod` Python package, scripts, and web explorer source code.
+- **Data:** `ogprod` does not relicense third-party public datasets. Production and geospatial data fetched from regulator portals or mirrored on [Hugging Face (`mralbu/ogprod`)](https://huggingface.co/datasets/mralbu/ogprod) remains governed by each publisher's open-government-data terms:
+  - **Brazil (`brazil`) — ANP:** Brazilian Federal Open Data Policy ([Decreto nº 8.777/2016](https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm)). Source: [ANP Dados Abertos](https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/fase-de-desenvolvimento-e-producao) and `gishub.anp.gov.br`.
+  - **Norway (`norway`) — Sodir:** [Norwegian Licence for Open Government Data (NLOD) 2.0](https://data.norge.no/nlod/en/2.0). Contains data under NLOD 2.0 distributed by the Norwegian Offshore Directorate ([FactPages](https://factpages.sodir.no/) / [Open Data](https://www.sodir.no/en/facts/data-and-analyses/open-data/)), normalized and converted to canonical units/schemas by `ogprod`.
+  - **Mexico (`mexico`) — SENER / CNIH (ex-CNH):** Mexican Federal Open Data Policy (*Datos Abiertos* / *Términos de Libre Uso MX*). Source: [SENER / CNIH SIH](https://sih-hidrocarburos.energia.gob.mx/) and [Mapa de Hidrocarburos](https://mapa-hidrocarburos.energia.gob.mx/) (incorporating data from CNIH/SENER and Petróleos Mexicanos).
+

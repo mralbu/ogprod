@@ -39,13 +39,18 @@ class FakeHfApi:
         sha: str = "abc123",
         manifest: dict[str, Any] | None = None,
         remote_files: list[str] | None = None,
+        file_contents: dict[str, bytes] | None = None,
         tmp_dir: Path,
     ) -> None:
         self.sha = sha
         self.manifest = manifest
+        self.file_contents = dict(file_contents or {})
         self.remote_files = list(remote_files or [])
         if manifest is not None and "manifest.json" not in self.remote_files:
             self.remote_files.append("manifest.json")
+        for name in self.file_contents:
+            if name not in self.remote_files:
+                self.remote_files.append(name)
         self.tmp_dir = tmp_dir
         self.commits: list[dict[str, Any]] = []
         self.tags: list[str] = []
@@ -64,10 +69,14 @@ class FakeHfApi:
         self, *, repo_id: str, filename: str, repo_type: str, revision: str | None = None
     ) -> str:
         del repo_id, repo_type, revision
-        assert filename == "manifest.json"
-        assert self.manifest is not None
-        path = self.tmp_dir / "remote_manifest.json"
-        path.write_text(json.dumps(self.manifest), encoding="utf-8")
+        if filename == "manifest.json":
+            assert self.manifest is not None
+            path = self.tmp_dir / "remote_manifest.json"
+            path.write_text(json.dumps(self.manifest), encoding="utf-8")
+            return str(path)
+        assert filename in self.file_contents
+        path = self.tmp_dir / f"remote_{Path(filename).name}"
+        path.write_bytes(self.file_contents[filename])
         return str(path)
 
     def create_commit(self, **kwargs: Any) -> Any:
@@ -246,6 +255,7 @@ def test_publish_prune_legacy_cuts_over_v1_to_v2(tmp_path: Path) -> None:
     v1_manifest = {"schema_version": 1, "sources": {"anp": {}, "sodir": {}}}
     legacy_files = [
         ".gitattributes",
+        "LICENSE",
         "README.md",
         "manifest.json",
         "entities/anp.parquet",
@@ -280,7 +290,101 @@ def test_publish_prune_legacy_cuts_over_v1_to_v2(tmp_path: Path) -> None:
     ]
     added_paths = {op.path_in_repo for op in ops if isinstance(op, FakeAdd)}
     assert "README.md" in added_paths
+    assert "LICENSE" in added_paths
     assert "manifest.json" in added_paths
+
+
+def test_dataset_card_uses_multi_source_license_and_attributions() -> None:
+    readme = publish_mirror._DATASET_README
+    license_text = publish_mirror._DATASET_LICENSE
+
+    assert "license: other\n" in readme
+    assert "license_name: multi-source-open-government-data\n" in readme
+    assert "license_link: LICENSE\n" in readme
+    assert "license: mit" not in readme.lower()
+
+    for doc in (readme, license_text):
+        assert "https://data.norge.no/nlod/en/2.0" in doc
+        assert "Norwegian Offshore Directorate" in doc
+        assert "8.777/2016" in doc
+        assert "ANP" in doc
+        assert "SENER / CNIH" in doc
+        assert "Petróleos Mexicanos" in doc
+
+
+def test_publish_card_updates_only_changed_card_files(tmp_path: Path) -> None:
+    stale_api = FakeHfApi(
+        sha="head-card-1",
+        file_contents={"README.md": b"---\nlicense: mit\n---\n"},
+        tmp_dir=tmp_path,
+    )
+    dry = publish_mirror.publish_card(
+        repo_id="mralbu/ogprod",
+        dry_run=True,
+        api=stale_api,
+        operation_classes=(FakeAdd, FakeDelete),
+    )
+    assert dry.changed is True
+    assert dry.dry_run is True
+    assert dry.uploaded == 2
+    assert dry.skipped == 0
+    assert len(stale_api.commits) == 0
+
+    res = publish_mirror.publish_card(
+        repo_id="mralbu/ogprod",
+        api=stale_api,
+        operation_classes=(FakeAdd, FakeDelete),
+    )
+    assert res.changed is True
+    assert res.uploaded == 2
+    assert res.skipped == 0
+    assert len(stale_api.commits) == 1
+    assert stale_api.commits[0]["parent_commit"] == "head-card-1"
+    pushed = {op.path_in_repo: op.path_or_fileobj for op in stale_api.commits[0]["operations"]}
+    assert set(pushed) == {"README.md", "LICENSE"}
+    assert pushed["README.md"] == publish_mirror._DATASET_README.encode("utf-8")
+    assert pushed["LICENSE"] == publish_mirror._DATASET_LICENSE.encode("utf-8")
+
+    synced_api = FakeHfApi(
+        sha="head-card-2",
+        file_contents=pushed,
+        tmp_dir=tmp_path,
+    )
+    noop = publish_mirror.publish_card(
+        repo_id="mralbu/ogprod",
+        api=synced_api,
+        operation_classes=(FakeAdd, FakeDelete),
+    )
+    assert noop.changed is False
+    assert noop.uploaded == 0
+    assert noop.skipped == 2
+    assert len(synced_api.commits) == 0
+
+
+def test_publish_store_update_card_commits_when_data_unchanged(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    _populate_store(
+        data_dir,
+        source="norway",
+        rows=[("F1", date(2026, 1, 1), 1000.0)],
+    )
+    local_scanned = publish_mirror.scan_local_store(data_dir / "store")
+    remote_manifest = mirror.merge_mirror_manifest(None, local_scanned)
+    api = FakeHfApi(sha="head-same", manifest=remote_manifest, tmp_dir=tmp_path)
+
+    res = publish_mirror.publish_store(
+        data_dir=data_dir,
+        repo_id="mralbu/ogprod",
+        update_card=True,
+        api=api,
+        operation_classes=(FakeAdd, FakeDelete),
+    )
+    assert res.changed is True
+    assert res.uploaded == 0
+    assert res.skipped == 2
+    assert len(api.commits) == 1
+    added_paths = {op.path_in_repo for op in api.commits[0]["operations"]}
+    assert added_paths == {"manifest.json", "README.md", "LICENSE"}
 
 
 def test_ci_refresh_isolates_failing_source_and_publishes_healthy(tmp_path: Path) -> None:
@@ -307,11 +411,13 @@ def test_ci_refresh_isolates_failing_source_and_publishes_healthy(tmp_path: Path
         ["norway", "mexico"],
         data_dir=tmp_path,
         db=StubStore(tmp_path),
+        update_card=True,
         publish_fn=fake_publish,
     )
     assert outcome.succeeded == ("norway",)
     assert "mexico" in outcome.failed
     assert len(published_calls) == 1
     assert published_calls[0]["selected_sources"] == ["norway"]
+    assert published_calls[0]["update_card"] is True
     assert outcome.publish is not None
     assert outcome.publish.changed is True

@@ -72,6 +72,7 @@ def run_refresh(
     dry_run: bool = False,
     force: bool = False,
     prune_legacy: bool = False,
+    update_card: bool = False,
     tag: str | None = None,
     db: store.Store | None = None,
     publish_fn: Any = None,
@@ -111,6 +112,7 @@ def run_refresh(
             dry_run=dry_run,
             force=force,
             prune_legacy=prune_legacy,
+            update_card=update_card,
             tag=tag,
         )
     else:
@@ -139,6 +141,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--prune-legacy", action="store_true")
+    parser.add_argument(
+        "--update-card",
+        action="store_true",
+        help="Also update HF README.md and LICENSE on publish.",
+    )
     parser.add_argument("--tag", default=None)
     return parser.parse_args(argv)
 
@@ -155,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
         force=args.force,
         prune_legacy=args.prune_legacy,
+        update_card=args.update_card,
         tag=args.tag,
     )
     if outcome.publish is not None:

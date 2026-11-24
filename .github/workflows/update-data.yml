@@ -23,6 +23,11 @@ on:
         required: false
         default: false
         type: boolean
+      update_card:
+        description: "Also update Hugging Face README.md and LICENSE"
+        required: false
+        default: false
+        type: boolean
       force:
         description: "Override sanity-gate drops"
         required: false
@@ -75,6 +80,7 @@ jobs:
           )
           if [[ "${{ inputs.full_history }}" == "true" ]]; then args+=(--full-history); fi
           if [[ "${{ inputs.prune_legacy }}" == "true" ]]; then args+=(--prune-legacy); fi
+          if [[ "${{ inputs.update_card }}" == "true" ]]; then args+=(--update-card); fi
           if [[ "${{ inputs.force }}" == "true" ]]; then args+=(--force); fi
           if [[ "${{ inputs.dry_run }}" == "true" ]]; then args+=(--dry-run); fi
           uv run --group publish python -m scripts.ci_refresh "${args[@]}"

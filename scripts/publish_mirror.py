@@ -28,11 +28,13 @@ from typing import Any
 
 from ogprod import mirror, schema, sources, store
 
-_PRESERVED_ROOT_FILES = frozenset({".gitattributes", "README.md", "manifest.json"})
+_PRESERVED_ROOT_FILES = frozenset({".gitattributes", "LICENSE", "README.md", "manifest.json"})
 
 _DATASET_README = """\
 ---
-license: mit
+license: other
+license_name: multi-source-open-government-data
+license_link: LICENSE
 task_categories:
   - tabular-regression
 pretty_name: ogprod — Public Oil & Gas Production and Geospatial Dataset (v2)
@@ -65,6 +67,60 @@ Parquet (`row_group_size=128_000`):
 - `geo/facilities/<source>.parquet` — GeoParquet 1.1 platforms / FPSOs (`EPSG:4326` + `bbox`)
 - `geo/wells/<source>.parquet` — GeoParquet 1.1 wells (`EPSG:4326` + `bbox`)
 
+## Data Sources, Licensing & Attribution
+
+This dataset is a multi-source compilation of public government open data. `ogprod` does
+**not** relicense third-party government data: each `source=<source>` partition and
+`<source>.parquet` spatial layer remains governed by its upstream publisher's terms.
+`ogprod`'s schema packaging and `manifest.json` metadata are licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (the `ogprod` source code is
+[MIT](https://github.com/mralbu/ogprod/blob/main/LICENSE)). See [`LICENSE`](LICENSE) for
+complete terms.
+
+- **`brazil` — ANP (Agência Nacional do Petróleo, Gás Natural e Biocombustíveis):**
+  - Portal: [ANP Dados Abertos][anp-portal] & `gishub.anp.gov.br`
+  - Terms: Brazilian Federal Open Data Policy ([Decreto nº 8.777/2016][br-decree])
+  - Attribution: Credit ANP as source.
+- **`norway` — Sodir (Norwegian Offshore Directorate):**
+  - Portal: [FactPages][sodir-fp] & [Open Data / FactMaps][sodir-open]
+  - License: [Norwegian Licence for Open Government Data (NLOD) 2.0][nlod-2]
+  - Attribution: *"Contains data under the [Norwegian Licence for Open Government Data
+    (NLOD) 2.0][nlod-2] distributed by the Norwegian Offshore Directorate (Sodir), modified
+    by `ogprod`."*
+- **`mexico` — SENER / CNIH (ex-CNH):**
+  - Portal: [SIH][mx-sih] & [Mapa de Hidrocarburos][mx-mapa]
+  - Terms: Mexican Federal Open Data Policy (*Datos Abiertos* / *Términos de Libre Uso MX*)
+  - Attribution: Credit SENER / CNIH (ex-CNH) and Petróleos Mexicanos (Pemex) per source
+    file banners.
+
+[anp-portal]: https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/fase-de-desenvolvimento-e-producao
+[br-decree]: https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm
+[sodir-fp]: https://factpages.sodir.no/
+[sodir-open]: https://www.sodir.no/en/facts/data-and-analyses/open-data/
+[nlod-2]: https://data.norge.no/nlod/en/2.0
+[mx-sih]: https://sih-hidrocarburos.energia.gob.mx/
+[mx-mapa]: https://mapa-hidrocarburos.energia.gob.mx/
+
+### Modifications Made by `ogprod`
+
+Relative to the raw publisher files, `ogprod` has:
+
+- Converted monthly volumes and native daily units to calendar-day average rates (`bbl/d`
+  for liquids, `e3m3/d` for gases) stored as `float32` ZSTD Parquet.
+- Harmonized column names, entity identifiers, and basin/region metadata across sources.
+- Reprojected/validated geometries to `EPSG:4326` GeoParquet 1.1 with `make_valid()`,
+  Hilbert sorting, dissolved field polygons where needed, and `bbox` covering columns.
+- Applied documented data-cleaning and deduplication rules (see
+  [`docs/adr/`](https://github.com/mralbu/ogprod/tree/main/docs/adr)).
+
+### Disclaimer & No Endorsement
+
+All data is provided **"as is"** without warranty of accuracy or completeness. None of the
+upstream publishers (ANP, Sodir / Norwegian Offshore Directorate, SENER / CNIH, or Pemex)
+endorse, sponsor, or are affiliated with `ogprod`. Per Sodir's open-data disclaimer,
+Norwegian positional data accuracy is approximately +/- 0-300 m and shall not be used for
+navigational purposes.
+
 ## Usage
 
 ```sh
@@ -72,6 +128,72 @@ ogprod ingest brazil --year 2026
 ogprod ingest norway
 ogprod ingest mexico
 ```
+"""
+
+_DATASET_LICENSE = """\
+Multi-Source Open Government Data License Notice
+================================================
+
+This dataset repository (mralbu/ogprod) is a compilation of normalized public oil & gas
+production, injection, and geospatial tables sourced from national energy regulators.
+
+1. ogprod Packaging, Schema Normalization & Metadata
+----------------------------------------------------
+To the extent any copyright or database right exists in the schema harmonization,
+normalization, and manifest.json metadata created by the ogprod maintainers, those
+contributions are licensed under Creative Commons Attribution 4.0 International (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+
+The ogprod software pipeline itself is licensed separately under the MIT License:
+https://github.com/mralbu/ogprod/blob/main/LICENSE
+
+2. Upstream Data Sources (Per-Source Terms)
+-------------------------------------------
+ogprod does not relicense third-party government data. Downstream users must comply with
+the upstream terms for each source partition they use:
+
+* source=brazil (production/source=brazil/**, geo/*/brazil.parquet)
+  Publisher: ANP (Agência Nacional do Petróleo, Gás Natural e Biocombustíveis, Brazil)
+  Source: https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/fase-de-desenvolvimento-e-producao
+          https://gishub.anp.gov.br/geoserver/BD_ANP/ows
+  Terms: Brazilian Federal Open Data Policy — Decreto nº 8.777/2016 (as amended by
+         Decreto nº 9.903/2019), authorizing free use, reuse, cross-linking, and
+         redistribution of federal Executive open datasets with source attribution:
+         https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm
+
+* source=norway (production/source=norway/**, geo/*/norway.parquet)
+  Publisher: Sodir — Norwegian Offshore Directorate (Sokkeldirektoratet)
+  Source: https://factpages.sodir.no/
+          https://www.sodir.no/en/facts/data-and-analyses/open-data/
+  License: Norwegian Licence for Open Government Data (NLOD) 2.0
+           https://data.norge.no/nlod/en/2.0
+  Attribution: "Contains data under the Norwegian licence for Open Government data (NLOD)
+               distributed by the Norwegian Offshore Directorate (Sodir)."
+  Modifications: ogprod converted monthly production volumes to calendar-day average rates
+                 (bbl/d, e3m3/d), harmonized schemas, dissolved field polygons, and
+                 repackaged tables as ZSTD Parquet and GeoParquet 1.1 (EPSG:4326).
+  Notice: Per NLOD 2.0 §§5-7, downstream users must preserve attribution, link to NLOD 2.0
+          and the source, indicate modifications, refrain from misleading presentation or
+          implying endorsement, and note Sodir's disclaimer (positional accuracy approx.
+          +/- 0-300 m; not for navigational purposes).
+
+* source=mexico (production/source=mexico/**, geo/*/mexico.parquet)
+  Publisher: SENER / CNIH (Centro Nacional de Información de Hidrocarburos, ex-CNH, Mexico)
+  Source: https://sih-hidrocarburos.energia.gob.mx/
+          https://mapa-hidrocarburos.energia.gob.mx/
+  Terms: Mexican Federal Open Data Policy (Decreto por el que se establece la regulación en
+         materia de Datos Abiertos, DOF 20 Feb 2015) and Términos de Libre Uso MX — free
+         use, reuse, adaptation, and redistribution for any lawful purpose subject to
+         citing the source.
+  Attribution: Credit SENER / CNIH (ex-CNH) and Petróleos Mexicanos (Pemex) per source
+               file attribution banners ("Fuente: Comisión Nacional de Hidrocarburos con
+               información propia y de Petróleos Mexicanos.").
+
+3. Disclaimer
+-------------
+All data is provided "as is", without warranty of any kind. Upstream publishers are not
+responsible for errors introduced during normalization or downstream use, and do not
+endorse this dataset or any derivative product.
 """
 
 
@@ -88,10 +210,11 @@ class PublishPlan:
     deletes: tuple[str, ...]
     merged_manifest: dict[str, Any]
     write_readme: bool
+    write_license: bool = False
 
     @property
     def changed(self) -> bool:
-        return bool(self.uploads or self.deletes)
+        return bool(self.uploads or self.deletes or self.write_readme or self.write_license)
 
 
 @dataclass(frozen=True)
@@ -242,6 +365,7 @@ def plan_publish_operations(
     remote_files: list[str] | None = None,
     prune_legacy: bool = False,
     force: bool = False,
+    update_card: bool = False,
     updated_at: str | None = None,
 ) -> PublishPlan:
     """Validate sanity gates and compute the exact upload/delete set for HF commit."""
@@ -278,12 +402,14 @@ def plan_publish_operations(
         keep = _PRESERVED_ROOT_FILES | _manifest_paths(merged)
         deletes = sorted(f for f in remote_files if f not in keep and not f.startswith("."))
 
+    write_card = prune_legacy or remote_manifest is None or update_card
     return PublishPlan(
         uploads=tuple(uploads),
         skipped=tuple(skipped),
         deletes=tuple(deletes),
         merged_manifest=merged,
-        write_readme=prune_legacy or remote_manifest is None,
+        write_readme=write_card,
+        write_license=write_card,
     )
 
 
@@ -319,6 +445,20 @@ def _emit_github_output(key: str, value: str) -> None:
         handle.write(f"{key}={value}\n")
 
 
+def _resolve_hf_client(
+    api: Any | None,
+    operation_classes: tuple[Any, Any] | None,
+) -> tuple[Any, Any, Any]:
+    if api is None:
+        hub = _load_hf_hub()
+        token = os.environ.get("HF_TOKEN") or None
+        return hub.HfApi(token=token), hub.CommitOperationAdd, hub.CommitOperationDelete
+    if operation_classes is not None:
+        return api, operation_classes[0], operation_classes[1]
+    hub = _load_hf_hub()
+    return api, hub.CommitOperationAdd, hub.CommitOperationDelete
+
+
 def _build_commit_operations(
     plan: PublishPlan,
     *,
@@ -337,8 +477,102 @@ def _build_commit_operations(
         ops.append(
             add_cls(path_in_repo="README.md", path_or_fileobj=_DATASET_README.encode("utf-8"))
         )
+    if plan.write_license:
+        ops.append(
+            add_cls(path_in_repo="LICENSE", path_or_fileobj=_DATASET_LICENSE.encode("utf-8"))
+        )
     ops.extend(delete_cls(path_in_repo=rel) for rel in plan.deletes)
     return ops
+
+
+_CARD_FILES: tuple[tuple[str, str], ...] = (
+    ("README.md", _DATASET_README),
+    ("LICENSE", _DATASET_LICENSE),
+)
+
+
+def _diff_card_files(
+    api: Any,
+    repo_id: str,
+    parent_commit: str | None,
+    remote_files: set[str],
+) -> tuple[list[tuple[str, bytes]], int]:
+    updates: list[tuple[str, bytes]] = []
+    skipped = 0
+    for filename, content in _CARD_FILES:
+        expected = content.encode("utf-8")
+        if filename in remote_files:
+            local_path = Path(
+                api.hf_hub_download(
+                    repo_id=repo_id,
+                    filename=filename,
+                    repo_type="dataset",
+                    revision=parent_commit,
+                )
+            )
+            if local_path.read_bytes() == expected:
+                skipped += 1
+                continue
+        updates.append((filename, expected))
+    return updates, skipped
+
+
+def publish_card(
+    *,
+    repo_id: str | None = None,
+    dry_run: bool = False,
+    message: str | None = None,
+    api: Any | None = None,
+    operation_classes: tuple[Any, Any] | None = None,
+) -> PublishResult:
+    """Update only ``README.md`` and ``LICENSE`` on the Hugging Face dataset mirror."""
+    target_repo = mirror.resolve_mirror(repo_id)
+    hf_api, add_cls, _ = _resolve_hf_client(api, operation_classes)
+    info = hf_api.repo_info(repo_id=target_repo, repo_type="dataset")
+    parent_commit: str | None = getattr(info, "sha", None)
+    remote_files = set(
+        hf_api.list_repo_files(repo_id=target_repo, repo_type="dataset", revision=parent_commit)
+    )
+    updates, skipped = _diff_card_files(hf_api, target_repo, parent_commit, remote_files)
+    if not updates:
+        _emit_github_output("changed", "false")
+        return PublishResult(
+            repo_id=target_repo,
+            changed=False,
+            uploaded=0,
+            skipped=skipped,
+            deleted=0,
+            dry_run=dry_run,
+        )
+    if dry_run:
+        _emit_github_output("changed", "false")
+        return PublishResult(
+            repo_id=target_repo,
+            changed=True,
+            uploaded=len(updates),
+            skipped=skipped,
+            deleted=0,
+            dry_run=True,
+        )
+    ops = [add_cls(path_in_repo=name, path_or_fileobj=data) for name, data in updates]
+    commit_msg = message or "Update ogprod dataset card and license"
+    commit_info = hf_api.create_commit(
+        repo_id=target_repo,
+        repo_type="dataset",
+        operations=ops,
+        commit_message=commit_msg,
+        parent_commit=parent_commit,
+    )
+    _emit_github_output("changed", "true")
+    return PublishResult(
+        repo_id=target_repo,
+        changed=True,
+        uploaded=len(updates),
+        skipped=skipped,
+        deleted=0,
+        commit_url=getattr(commit_info, "commit_url", None),
+        dry_run=False,
+    )
 
 
 def publish_store(
@@ -349,6 +583,7 @@ def publish_store(
     dry_run: bool = False,
     force: bool = False,
     prune_legacy: bool = False,
+    update_card: bool = False,
     tag: str | None = None,
     message: str | None = None,
     api: Any | None = None,
@@ -359,21 +594,9 @@ def publish_store(
     store_root = store.store_dir(data_dir)
     src_filter = set(selected_sources) if selected_sources else None
     local_sources = scan_local_store(store_root, source_filter=src_filter)
+    hf_api, add_cls, delete_cls = _resolve_hf_client(api, operation_classes)
 
-    if api is None:
-        hub = _load_hf_hub()
-        token = os.environ.get("HF_TOKEN") or None
-        api = hub.HfApi(token=token)
-        add_cls = hub.CommitOperationAdd
-        delete_cls = hub.CommitOperationDelete
-    else:
-        if operation_classes is not None:
-            add_cls, delete_cls = operation_classes
-        else:
-            hub = _load_hf_hub()
-            add_cls, delete_cls = hub.CommitOperationAdd, hub.CommitOperationDelete
-
-    parent_commit, remote_manifest, remote_files = fetch_remote_state(api, target_repo)
+    parent_commit, remote_manifest, remote_files = fetch_remote_state(hf_api, target_repo)
     plan = plan_publish_operations(
         store_root,
         local_sources,
@@ -381,6 +604,7 @@ def publish_store(
         remote_files=remote_files,
         prune_legacy=prune_legacy,
         force=force,
+        update_card=update_card,
     )
 
     if not plan.changed:
@@ -408,7 +632,7 @@ def publish_store(
     ops = _build_commit_operations(plan, add_cls=add_cls, delete_cls=delete_cls)
     src_list = ", ".join(sorted(local_sources))
     commit_msg = message or f"Update ogprod v2 mirror ({src_list})"
-    commit_info = api.create_commit(
+    commit_info = hf_api.create_commit(
         repo_id=target_repo,
         repo_type="dataset",
         operations=ops,
@@ -416,7 +640,7 @@ def publish_store(
         parent_commit=parent_commit,
     )
     if tag:
-        api.create_tag(repo_id=target_repo, repo_type="dataset", tag=tag, exist_ok=True)
+        hf_api.create_tag(repo_id=target_repo, repo_type="dataset", tag=tag, exist_ok=True)
     _emit_github_output("changed", "true")
     return PublishResult(
         repo_id=target_repo,
@@ -445,6 +669,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Reset remote manifest to v2 and delete legacy/unreferenced remote files.",
     )
+    parser.add_argument(
+        "--update-card",
+        action="store_true",
+        help="Also update HF README.md and LICENSE alongside data changes.",
+    )
+    parser.add_argument(
+        "--card-only",
+        action="store_true",
+        help="Update only HF README.md and LICENSE without reading --data-dir.",
+    )
     parser.add_argument("--tag", default=None, help="Optional git tag to create on HF after push.")
     parser.add_argument("--message", default=None, help="Custom HF commit message.")
     return parser.parse_args(argv)
@@ -452,17 +686,27 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    selected = [s.strip() for s in args.sources.split(",") if s.strip()] if args.sources else None
-    result = publish_store(
-        data_dir=args.data_dir,
-        repo_id=args.repo,
-        selected_sources=selected,
-        dry_run=args.dry_run,
-        force=args.force,
-        prune_legacy=args.prune_legacy,
-        tag=args.tag,
-        message=args.message,
-    )
+    if args.card_only:
+        result = publish_card(
+            repo_id=args.repo,
+            dry_run=args.dry_run,
+            message=args.message,
+        )
+    else:
+        selected = (
+            [s.strip() for s in args.sources.split(",") if s.strip()] if args.sources else None
+        )
+        result = publish_store(
+            data_dir=args.data_dir,
+            repo_id=args.repo,
+            selected_sources=selected,
+            dry_run=args.dry_run,
+            force=args.force,
+            prune_legacy=args.prune_legacy,
+            update_card=args.update_card,
+            tag=args.tag,
+            message=args.message,
+        )
     mode = " [dry-run]" if result.dry_run else ""
     print(
         f"publish{mode} {result.repo_id}: changed={result.changed} "

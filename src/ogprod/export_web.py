@@ -33,10 +33,19 @@ import shapely
 from ogprod import mirror, schema, sources, store
 from ogprod.sources import brazil
 
-_LICENCES: dict[str, str] = {
-    "brazil": "Public open data — ANP (Agência Nacional do Petróleo)",
-    "norway": "NLOD — Sodir (Norwegian Offshore Directorate)",
-    "mexico": "Datos Abiertos — SENER / CNIH SIH",
+_LICENCES: dict[str, tuple[str, str]] = {
+    "brazil": (
+        "Open Government Data (Decreto nº 8.777/2016) — ANP",
+        "https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm",
+    ),
+    "norway": (
+        "NLOD 2.0 — Norwegian Offshore Directorate (Sodir)",
+        "https://data.norge.no/nlod/en/2.0",
+    ),
+    "mexico": (
+        "Datos Abiertos (Libre Uso MX) — SENER / CNIH (with Pemex data)",
+        "https://sih-hidrocarburos.energia.gob.mx/",
+    ),
 }
 
 # Synced with site/src/lib/mapStyle.ts (MAP_LAYER_MIN_ZOOM).
@@ -866,6 +875,7 @@ def _build_meta(
         latest_gas = _round_opt(src_country["gas_prod"].iloc[-1], 1) if len(src_country) else None
         first_p = rec.get("first_period")
         last_p = rec.get("last_period")
+        licence_label, licence_url = _LICENCES.get(src, ("Public open data", ""))
         sources_list.append(
             {
                 "id": src,
@@ -873,7 +883,8 @@ def _build_meta(
                 "country_code": conn.country_code if conn else src[:2].upper(),
                 "publisher": conn.publisher if conn else src,
                 "docs_url": conn.docs_url if conn else "",
-                "licence": _LICENCES.get(src, "Public open data"),
+                "licence": licence_label,
+                "licence_url": licence_url,
                 "entity_type": conn.entity_type.value if conn else "field",
                 "bbox": _source_bbox(src, geo_frames),
                 "years": years,

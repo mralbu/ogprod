@@ -39,6 +39,7 @@ export interface SourceMeta {
   publisher: string;
   docs_url: string;
   licence: string;
+  licence_url?: string;
   entity_type: "well" | "field";
   bbox: [number, number, number, number] | null;
   years: number[];

@@ -302,33 +302,62 @@ function DashboardFooter({
   activeSourcesMeta: SourceMeta[];
 }) {
   return (
-    <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-[11px] text-slate-500">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {activeSourcesMeta.map((s) => (
+    <footer className="space-y-1.5 border-t border-slate-200 pt-3 text-[11px] text-slate-500">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {activeSourcesMeta.map((s) => (
+            <span key={s.id} className="inline-flex flex-wrap items-center gap-1">
+              <a
+                href={s.docs_url || "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-0.5 font-medium text-slate-600 hover:text-slate-900"
+              >
+                {s.publisher}
+                <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+              <span className="text-slate-400">·</span>
+              {s.licence_url ? (
+                <a
+                  href={s.licence_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline decoration-slate-300 hover:text-slate-800"
+                >
+                  {s.licence}
+                </a>
+              ) : (
+                <span>{s.licence}</span>
+              )}
+            </span>
+          ))}
+        </div>
+        <div className="font-tabular">
+          Mirror:{" "}
           <a
-            key={s.id}
-            href={s.docs_url || "#"}
+            href={`https://huggingface.co/datasets/${meta.mirror.repo}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-0.5 hover:text-slate-800"
+            className="underline hover:text-slate-800"
           >
-            {s.publisher}
-            <ExternalLink className="h-2.5 w-2.5" />
-          </a>
-        ))}
+            {meta.mirror.repo}@{meta.mirror.revision}
+          </a>{" "}
+          · Built {meta.generated_at.slice(0, 10)}
+        </div>
       </div>
-      <div className="font-tabular">
-        Mirror:{" "}
+      <p className="text-[10px] leading-relaxed text-slate-400">
+        Normalized to calendar-day rates (bbl/d, e3m3/d) and GeoParquet 1.1 (EPSG:4326) by{" "}
         <a
-          href={`https://huggingface.co/datasets/${meta.mirror.repo}`}
+          href="https://github.com/mralbu/ogprod"
           target="_blank"
           rel="noreferrer"
-          className="underline hover:text-slate-800"
+          className="underline hover:text-slate-600"
         >
-          {meta.mirror.repo}@{meta.mirror.revision}
-        </a>{" "}
-        · Built {meta.generated_at.slice(0, 10)}
-      </div>
+          ogprod
+        </a>
+        . Upstream open-government data remains subject to each publisher&apos;s terms and is
+        provided as is without endorsement.
+      </p>
     </footer>
   );
 }
