@@ -10,10 +10,10 @@ import {
 } from "../lib/mapStyle";
 
 describe("mapStyle layer zoom thresholds and specs", () => {
-  it("applies progressive minzooms across fields, facilities, labels, and wells", () => {
+  it("applies progressive minzooms across fields, labels, facilities, and wells", () => {
     expect(MAP_LAYER_MIN_ZOOM.fields).toBe(0);
-    expect(MAP_LAYER_MIN_ZOOM.facilities).toBe(5);
     expect(MAP_LAYER_MIN_ZOOM.fieldLabels).toBe(6);
+    expect(MAP_LAYER_MIN_ZOOM.facilities).toBe(7);
     expect(MAP_LAYER_MIN_ZOOM.wells).toBe(8);
 
     const byId = new Map(buildVectorLayers().map((layer) => [layer.id, layer]));
@@ -45,8 +45,8 @@ describe("mapStyle layer zoom thresholds and specs", () => {
   });
 
   it("tracks zoom-hidden state cleanly at each layer threshold", () => {
-    expect(isLayerZoomHidden("facilities", 4.99)).toBe(true);
-    expect(isLayerZoomHidden("facilities", 5)).toBe(false);
+    expect(isLayerZoomHidden("facilities", 6.99)).toBe(true);
+    expect(isLayerZoomHidden("facilities", 7)).toBe(false);
     expect(isLayerZoomHidden("wells", 7.99)).toBe(true);
     expect(isLayerZoomHidden("wells", 8)).toBe(false);
   });

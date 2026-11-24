@@ -55,7 +55,7 @@ _TILE_MAX_ZOOM = 12
 _TILE_LAYER_MIN_ZOOM: dict[str, int] = {
     "fields": 0,
     "field_centroids": 6,
-    "facilities": 5,
+    "facilities": 7,
     "wells": 8,
 }
 
@@ -788,7 +788,7 @@ def _build_pmtiles(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_pmtiles = out_path.with_name(f"{out_path.name}.tmp.pmtiles")
         # --drop-rate=1 disables tippecanoe's default 2.5x/zoom point thinning below
-        # maxzoom (which otherwise drops >99% of facilities and field labels at z5-z6);
+        # maxzoom (which otherwise drops >99% of field labels and facilities at z6-z7);
         # --drop-densest-as-needed still enforces per-tile size limits where dense.
         cmd = [
             tippecanoe_bin,

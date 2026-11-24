@@ -218,7 +218,7 @@ def test_export_web_invokes_tippecanoe_and_cli(
     layers = captured["layers"]
     assert "tippecanoe" not in layers["fields"][0]
     assert layers["field_centroids"][0]["tippecanoe"] == {"minzoom": 6}
-    assert layers["facilities"][0]["tippecanoe"] == {"minzoom": 5}
+    assert layers["facilities"][0]["tippecanoe"] == {"minzoom": 7}
     assert layers["wells"][0]["tippecanoe"] == {"minzoom": 8}
 
 

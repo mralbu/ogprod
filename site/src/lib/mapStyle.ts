@@ -4,8 +4,8 @@ import type { EntitySelection, SourceFilter } from "../types/data";
 // Synced with src/ogprod/export_web.py (_TILE_LAYER_MIN_ZOOM).
 export const MAP_LAYER_MIN_ZOOM = {
   fields: 0,
-  facilities: 5,
   fieldLabels: 6,
+  facilities: 7,
   wells: 8,
 } as const;
 
