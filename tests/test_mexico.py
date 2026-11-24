@@ -9,8 +9,11 @@ from pathlib import Path
 
 import geopandas as gpd
 import httpx2
+import pandas as pd
 import pytest
 import shapely
+from hypothesis import given
+from hypothesis import strategies as st
 
 from ogprod import Store, schema, units
 from ogprod.sources import mexico
@@ -60,7 +63,7 @@ def test_parse_mexico_pozos_csv_and_zip(tmp_path: Path) -> None:
     assert row["entity_type"] == "well"
     assert row["entity_id"] == "1000023609"
     assert row["entity_name"] == "Poza Rica-2"
-    assert row["basin"] == "TAMPICO-MISANTLA"
+    assert row["basin"] == "Tampico-Misantla"
     assert math.isclose(float(row["oil_prod"]), 1200.0, rel_tol=1e-4)
     assert math.isclose(float(row["condensate_prod"]), 300.0, rel_tol=1e-4)
 
@@ -176,7 +179,7 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
     assert (tmp_path / "data" / "store" / "geo" / "fields" / "mexico.parquet").exists()
 
     fields = db.fields(source="mexico").set_index("field_id")
-    assert fields.loc["MALOOB", "basin"] == "CUENCAS DEL SURESTE"
+    assert fields.loc["MALOOB", "basin"] == "Cuencas del Sureste"
     assert fields.loc["MALOOB", "environment"] == "offshore"
     assert math.isclose(float(fields.loc["MALOOB", "area_km2"]), 45.2, rel_tol=1e-4)
 
@@ -184,6 +187,7 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
     assert fac.loc["PLATAFORMA KU-A", "start_year"] == 2005
 
     wells = db.wells(source="mexico").set_index("well_id")
+    assert wells.loc["CHINWOL-1EXP", "region"] == "Aguas Territoriales"
     assert wells.loc["CHINWOL-1EXP", "spud_date"] == "2020-02-29"
     assert wells.loc["CHINWOL-1EXP", "completion_date"] == "2020-04-21"
     assert wells.loc["CHINWOL-1EXP", "field_id"] == "CHINWOL"
@@ -224,7 +228,68 @@ def test_mexico_fields_parse_without_provinces_and_reversed_path_order(tmp_path:
     reversed_order = connector.parse_geo(
         schema.GeoKind.FIELDS, [provinces_zip, fields_zip]
     ).set_index("field_id")
-    assert reversed_order.loc["IXACHI", "basin"] == "VERACRUZ"
+    assert reversed_order.loc["IXACHI", "basin"] == "Veracruz"
+
+
+def test_mexico_basin_and_region_name_normalization() -> None:
+    basins = mexico._normalize_mexico_basin(
+        pd.Series(
+            [
+                "CUENCAS DEL SURESTE",
+                "SABINAS - BURRO - PICACHOS",
+                "GOLFO DE MEXICO PROFUNDO",
+                "CINTURON PLEGADO DE CHIAPAS",
+                "TAMPICO-MISANTLA",
+                "NO DISPONIBLE",
+            ]
+        )
+    )
+    assert basins.iloc[:5].tolist() == [
+        "Cuencas del Sureste",
+        "Sabinas-Burro-Picachos",
+        "Golfo de México Profundo",
+        "Cinturón Plegado de Chiapas",
+        "Tampico-Misantla",
+    ]
+    assert pd.isna(basins.iloc[5])
+
+    regions = mexico._normalize_mexico_region(
+        pd.Series(
+            [
+                "VERACRUZ DE IGNACIO DE LA LLAVE",
+                "NUEVO LEON",
+                "SAN LUIS POTOSI",
+                "CIUDAD DE MEXICO",
+                "AGUAS TERRITORIALES",
+                "YUCATAN",
+            ]
+        )
+    )
+    assert regions.tolist() == [
+        "Veracruz de Ignacio de la Llave",
+        "Nuevo León",
+        "San Luis Potosí",
+        "Ciudad de México",
+        "Aguas Territoriales",
+        "Yucatán",
+    ]
+
+
+@given(
+    raw=st.text(
+        alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzáéíóúÁÉÍÓÚñÑ -",
+        min_size=1,
+        max_size=40,
+    )
+)
+def test_mexico_spanish_label_normalization_is_idempotent(raw: str) -> None:
+    once = mexico._normalize_mexico_basin(pd.Series([raw]))
+    twice = mexico._normalize_mexico_basin(once)
+    assert once.equals(twice)
+
+    r_once = mexico._normalize_mexico_region(pd.Series([raw]))
+    r_twice = mexico._normalize_mexico_region(r_once)
+    assert r_once.equals(r_twice)
 
 
 def test_mexico_field_id_normalization_and_bad_fecha_rejected() -> None:
@@ -249,7 +314,7 @@ def test_mexico_wells_cleans_no_disponible_sentinel(tmp_path: Path) -> None:
             {
                 "pozo": ["EXPL-1", "PROD-1"],
                 "campo": ["NO DISPONIBLE", "Tupilco-Profundo"],
-                "entidad": ["TABASCO", "TABASCO"],
+                "entidad": ["TABASCO", "SAN LUIS POTOSI"],
                 "ubicacin": ["TERRESTRE", "TERRESTRE"],
                 "estado_act": ["CERRADO", "PRODUCTOR"],
                 "fecha_inic": ["01-ENE-2020", "01-FEB-2020"],
@@ -264,4 +329,6 @@ def test_mexico_wells_cleans_no_disponible_sentinel(tmp_path: Path) -> None:
     wells = mexico.Mexico().parse_geo(schema.GeoKind.WELLS, [well_zip]).set_index("well_id")
     assert wells["field_id"].isna().loc["EXPL-1"]
     assert wells["field_name"].isna().loc["EXPL-1"]
+    assert wells.loc["EXPL-1", "region"] == "Tabasco"
     assert wells.loc["PROD-1", "field_id"] == "TUPILCO PROFUNDO"
+    assert wells.loc["PROD-1", "region"] == "San Luis Potosí"

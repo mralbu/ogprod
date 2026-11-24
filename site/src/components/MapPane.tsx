@@ -12,6 +12,7 @@ import {
   INITIAL_MAP_ZOOM,
   isLayerZoomHidden,
 } from "../lib/mapStyle";
+import { formatCountryName } from "../lib/sourceLabels";
 import { formatCompactNumber, formatPercent } from "../lib/units";
 import type {
   EntitySelection,
@@ -75,6 +76,8 @@ export function MapPane({
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const onSelectRef = useRef(onSelectEntity);
   onSelectRef.current = onSelectEntity;
+  const sourcesRef = useRef(meta.sources);
+  sourcesRef.current = meta.sources;
 
   const [showFields, setShowFields] = useState(true);
   const [showFacilities, setShowFacilities] = useState(true);
@@ -153,19 +156,20 @@ export function MapPane({
         const top = feats[0];
         const props = top.properties ?? {};
         const layerId = top.layer.id;
+        const country = formatCountryName(String(props.source ?? ""), sourcesRef.current);
         let html = "";
         if (layerId === "wells-circle") {
           html = `<div class="font-semibold text-slate-900">${props.well_name ?? props.well_id}</div>
-            <div class="text-[11px] text-slate-500">Well · ${String(props.source ?? "").toUpperCase()}${props.field_name ? ` · ${props.field_name}` : ""}</div>
+            <div class="text-[11px] text-slate-500">Well · ${country}${props.field_name ? ` · ${props.field_name}` : ""}</div>
             ${props.latest_oil_bpd ? `<div class="font-tabular mt-1 text-[11px]">Latest Oil: ${formatCompactNumber(Number(props.latest_oil_bpd))} bbl/d</div>` : ""}`;
         } else if (layerId === "facilities-symbol") {
           html = `<div class="font-semibold text-slate-900">${props.facility_name ?? props.facility_id}</div>
-            <div class="text-[11px] text-slate-500">${props.facility_type ?? "Facility"} · ${String(props.source ?? "").toUpperCase()}</div>
+            <div class="text-[11px] text-slate-500">${props.facility_type ?? "Facility"} · ${country}</div>
             ${props.oil_capacity_bpd ? `<div class="font-tabular mt-1 text-[11px]">Cap: ${formatCompactNumber(Number(props.oil_capacity_bpd))} bbl/d${props.oil_utilization ? ` · Util: ${formatPercent(Number(props.oil_utilization))}` : ""}</div>` : ""}`;
         } else {
           const area = props.basin ?? props.region;
           html = `<div class="font-semibold text-slate-900">${props.field_name ?? props.field_id}</div>
-            <div class="text-[11px] text-slate-500">Field · ${String(props.source ?? "").toUpperCase()}${area ? ` · ${area}` : ""}</div>
+            <div class="text-[11px] text-slate-500">Field · ${country}${area ? ` · ${area}` : ""}</div>
             ${props.latest_oil_bpd ? `<div class="font-tabular mt-1 text-[11px]">Latest Oil: ${formatCompactNumber(Number(props.latest_oil_bpd))} bbl/d</div>` : ""}`;
         }
         popupRef.current?.setLngLat(e.lngLat).setHTML(html).addTo(map);

@@ -1,6 +1,7 @@
 import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadSearchIndex } from "../lib/dataClient";
+import { formatCountryName } from "../lib/sourceLabels";
 import { formatCompactNumber, UNIT_SYSTEMS } from "../lib/units";
 import type { SearchEntry, SourceFilter, SourceMeta, UnitSystem } from "../types/data";
 
@@ -188,7 +189,7 @@ export function TopBar({
                         </span>
                       </div>
                       <div className="mt-0.5 truncate text-[11px] text-slate-500">
-                        {entry.s.toUpperCase()}
+                        {formatCountryName(entry.s, sources)}
                         {entry.b ? ` · ${entry.b}` : ""}
                         {entry.f && entry.t !== "field" ? ` · ${entry.f}` : ""}
                       </div>

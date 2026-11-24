@@ -25,6 +25,7 @@ import json
 import re
 import unicodedata
 import zipfile
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -75,10 +76,69 @@ _SPANISH_MONTHS: dict[str, str] = {
     "DIC": "12",
 }
 
+_SPANISH_LOWER_WORDS = frozenset({"a", "de", "del", "e", "en", "la", "las", "los", "y"})
+_HYPHEN_SPACE_RE = re.compile(r"\s*-\s*")
+
+# Restore accents stripped by uppercase ASCII shapefiles/CSVs (keyed by normalize_key).
+_BASIN_CANONICAL: dict[str, str] = {
+    "CINTURON PLEGADO DE CHIAPAS": "Cinturón Plegado de Chiapas",
+    "CINTURON PLEGADO DE LA SIERRA MADRE ORIENTAL": "Cinturón Plegado de la Sierra Madre Oriental",
+    "GOLFO DE MEXICO PROFUNDO": "Golfo de México Profundo",
+    "PLATAFORMA DE YUCATAN": "Plataforma de Yucatán",
+    "VIZCAINO-LA PURISIMA-IRAY": "Vizcaíno-La Purísima-Iray",
+}
+
+_REGION_CANONICAL: dict[str, str] = {
+    "CIUDAD DE MEXICO": "Ciudad de México",
+    "MEXICO": "México",
+    "MICHOACAN": "Michoacán",
+    "MICHOACAN DE OCAMPO": "Michoacán de Ocampo",
+    "NUEVO LEON": "Nuevo León",
+    "QUERETARO": "Querétaro",
+    "SAN LUIS POTOSI": "San Luis Potosí",
+    "YUCATAN": "Yucatán",
+    "ZONA ECONOMICA EXCLUSIVA": "Zona Económica Exclusiva",
+}
+
 
 def _norm_header(name: str) -> str:
     ascii_text = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[\s_()]+", "_", ascii_text.strip().lower()).strip("_")
+
+
+def _spanish_title_case(text: str) -> str:
+    collapsed = _HYPHEN_SPACE_RE.sub("-", " ".join(text.split()))
+    words = collapsed.split(" ")
+    formatted: list[str] = []
+    for idx, word in enumerate(words):
+        parts = [
+            part.lower()
+            if idx > 0 and p_idx == 0 and part.lower() in _SPANISH_LOWER_WORDS
+            else part.capitalize()
+            for p_idx, part in enumerate(word.split("-"))
+        ]
+        formatted.append("-".join(parts))
+    return " ".join(formatted)
+
+
+def _normalize_spanish_label(value: object, canonical: Mapping[str, str]) -> object:
+    if pd.isna(value):
+        return pd.NA
+    collapsed = _HYPHEN_SPACE_RE.sub("-", str(value).strip())
+    key = schema.normalize_key(collapsed)
+    if key in _MISSING_FIELD_SENTINELS:
+        return pd.NA
+    if key in canonical:
+        return canonical[key]
+    return _spanish_title_case(collapsed)
+
+
+def _normalize_mexico_basin(series: pd.Series) -> pd.Series:
+    return series.map(lambda v: _normalize_spanish_label(v, _BASIN_CANONICAL)).astype("string")
+
+
+def _normalize_mexico_region(series: pd.Series) -> pd.Series:
+    return series.map(lambda v: _normalize_spanish_label(v, _REGION_CANONICAL)).astype("string")
 
 
 def _normalize_environment(series: pd.Series | None, length: int) -> pd.Series:
@@ -284,9 +344,7 @@ def _parse_pozos_frame(frame: pd.DataFrame, cols: dict[str, str]) -> pa.Table:
         {
             "entity_id": entity_id,
             "entity_name": entity_name,
-            "basin": frame[cols["cuenca"]].astype("string").str.strip()
-            if "cuenca" in cols
-            else pd.NA,
+            "basin": _normalize_mexico_basin(frame[cols["cuenca"]]) if "cuenca" in cols else pd.NA,
             "period": period,
             **rates,
         }
@@ -346,13 +404,14 @@ def _assign_mexico_basins(dissolved: gpd.GeoDataFrame, provinces_path: Path) -> 
         raise ValueError(
             f"not a Mexico petroleum provinces shapefile; columns: {sorted(prov.columns)}"
         )
-    return geo.assign_by_largest_overlap(
+    assigned = geo.assign_by_largest_overlap(
         dissolved,
         prov,
         id_column="_fid",
         label_column=prov_cols["nombre"],
         equal_area_crs=_EQUAL_AREA_CRS,
     )
+    return _normalize_mexico_basin(assigned)
 
 
 def _split_field_paths(paths: list[Path]) -> tuple[Path, Path | None]:
@@ -466,7 +525,9 @@ def _parse_wells_shps(paths: list[Path]) -> gpd.GeoDataFrame:
             "well_name": names,
             "field_id": field_id,
             "field_name": field_name,
-            "region": gdf[cols["entidad"]] if "entidad" in cols else pd.NA,
+            "region": _normalize_mexico_region(gdf[cols["entidad"]])
+            if "entidad" in cols
+            else pd.NA,
             "environment": _normalize_environment(gdf[env_col] if env_col else None, len(gdf)),
             "status": gdf[status_col] if status_col else pd.NA,
             "spud_date": _parse_spanish_date(gdf[spud_col]) if spud_col else pd.NA,

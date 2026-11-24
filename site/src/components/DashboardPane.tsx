@@ -238,6 +238,7 @@ export function DashboardPane({
 
         {selection.kind === "overview" && (
           <OverviewLeaderboards
+            sources={meta.sources}
             activeSource={activeSource}
             unitSystem={unitSystem}
             fieldsSummary={fieldsSummary}

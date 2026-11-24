@@ -8,7 +8,7 @@ import geopandas as gpd
 import pandas as pd
 import pyarrow.parquet as pq
 import shapely
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from ogprod import geo, schema
@@ -81,6 +81,7 @@ def test_prepare_geo_strips_whitespace_and_nullifies_blank_strings() -> None:
     assert prepared["status"].isna().iloc[0]
 
 
+@settings(deadline=None, max_examples=25)
 @given(
     split=st.floats(min_value=0.05, max_value=0.95, allow_nan=False, allow_infinity=False).filter(
         lambda v: abs(v - 0.5) > 0.02

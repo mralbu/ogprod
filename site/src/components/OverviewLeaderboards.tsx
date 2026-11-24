@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { formatCountryName } from "../lib/sourceLabels";
 import { convertRate, formatCompactNumber, formatPercent, unitLabelFor } from "../lib/units";
 import type {
   EntitySelection,
@@ -6,12 +7,14 @@ import type {
   FieldSummary,
   MonthlyPoint,
   SourceFilter,
+  SourceMeta,
   UnitSystem,
 } from "../types/data";
 
 type OverviewTab = "fields" | "facilities" | "basins";
 
 interface OverviewLeaderboardsProps {
+  sources: SourceMeta[];
   activeSource: SourceFilter;
   unitSystem: UnitSystem;
   fieldsSummary: FieldSummary[];
@@ -21,6 +24,7 @@ interface OverviewLeaderboardsProps {
 }
 
 export function OverviewLeaderboards({
+  sources,
   activeSource,
   unitSystem,
   fieldsSummary,
@@ -122,8 +126,8 @@ export function OverviewLeaderboards({
                 >
                   <td className="px-3.5 py-2 font-medium text-slate-900">
                     {f.field_name}
-                    <span className="ml-1.5 text-[10px] font-normal uppercase text-slate-400">
-                      {f.source}
+                    <span className="ml-1.5 text-[10px] font-normal text-slate-400">
+                      {formatCountryName(f.source, sources)}
                     </span>
                   </td>
                   <td className="px-2 py-2 text-slate-500">{f.basin ?? f.region ?? "—"}</td>
@@ -169,8 +173,8 @@ export function OverviewLeaderboards({
                 >
                   <td className="px-3.5 py-2 font-medium text-slate-900">
                     {fac.facility_name}
-                    <span className="ml-1.5 text-[10px] font-normal uppercase text-slate-400">
-                      {fac.source}
+                    <span className="ml-1.5 text-[10px] font-normal text-slate-400">
+                      {formatCountryName(fac.source, sources)}
                     </span>
                   </td>
                   <td className="font-tabular px-2 py-2 text-right text-slate-800">
@@ -214,7 +218,9 @@ export function OverviewLeaderboards({
                   className="cursor-pointer hover:bg-slate-50"
                 >
                   <td className="px-3.5 py-2 font-medium text-slate-900">{b.basin}</td>
-                  <td className="px-2 py-2 uppercase text-slate-500">{b.source}</td>
+                  <td className="px-2 py-2 text-slate-500">
+                    {formatCountryName(b.source, sources)}
+                  </td>
                   <td className="font-tabular px-2 py-2 text-right text-slate-800">
                     {formatCompactNumber(convertRate(b.latestOil, "oil_prod", unitSystem))}
                   </td>

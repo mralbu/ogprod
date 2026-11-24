@@ -1,4 +1,5 @@
 import { ArrowLeft, Database, Download, ImageDown } from "lucide-react";
+import { formatCountryName } from "../lib/sourceLabels";
 import type {
   EntitySelection,
   FacilitySummary,
@@ -62,7 +63,7 @@ export function DashboardHeader({
         <p className="mt-0.5 text-xs text-slate-500">
           {selection.kind === "field" && selectedField && (
             <>
-              {selectedField.source.toUpperCase()}
+              {formatCountryName(selectedField.source, activeSourcesMeta)}
               {selectedField.basin ?? selectedField.region
                 ? ` · ${selectedField.basin ?? selectedField.region}`
                 : ""}
@@ -73,14 +74,14 @@ export function DashboardHeader({
           {selection.kind === "facility" && selectedFacility && (
             <>
               {selectedFacility.facility_type ?? "Facility"} ·{" "}
-              {selectedFacility.source.toUpperCase()}
+              {formatCountryName(selectedFacility.source, activeSourcesMeta)}
               {selectedFacility.fields ? ` · Fields: ${selectedFacility.fields}` : ""}
               {selectedFacility.operator ? ` · ${selectedFacility.operator}` : ""}
             </>
           )}
           {selection.kind === "well" && (
             <>
-              {selection.source.toUpperCase()}
+              {formatCountryName(selection.source, activeSourcesMeta)}
               {selection.fieldName ? ` · Field: ${selection.fieldName}` : ""}
               {selection.status ? ` · ${selection.status}` : ""}
               {selection.liftMethod ? ` · ${selection.liftMethod}` : ""}
