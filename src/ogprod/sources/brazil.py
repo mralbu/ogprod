@@ -112,6 +112,68 @@ _FACILITY_ALIASES: dict[str, str] = {
     "FPSO CIDADE DE CARAGUATATUBA": "FPSO CIDADE DE CARAGUATATUBA - CCG (MV-27)",
 }
 
+_ECO_SUFFIX_RE = re.compile(r"_ECO$", re.IGNORECASE)
+
+# Pure field renames, spelling drifts, and non-overlapping retired offshore annexations
+# (applied before _merge_duplicate_rows so pre-2005 duplicate checks stay strict).
+_FIELD_RENAME_ALIASES: dict[str, str] = {
+    # Renames & spelling / punctuation drifts
+    "LULA": "TUPI",
+    "SUL DE LULA": "SUL DE TUPI",
+    "ANC_LULA": "ANC_TUPI",
+    "ANC_BRAVA": "ESPADIM",
+    "BELA VISTA_": "BELA VISTA",
+    "DIAS D'AVILA": "DIAS DAVILA",
+    "JACUMIRIM (LICITADO)": "JACUMIRIM",
+    "FAZENDA GAMELEIRA (LICITADO)": "FAZENDA GAMELEIRA",
+    # Retired offshore annexations (Parque das Baleias -> Jubarte, Sururu -> Berbigao, etc.)
+    "BALEIA AZUL": "JUBARTE",
+    "BALEIA FRANCA": "JUBARTE",
+    "CACHALOTE": "JUBARTE",
+    "PIRAMBU": "JUBARTE",
+    "SURURU": "BERBIGAO",
+    "PIRACABA": "BAUNA",
+    "TARTARUGA MESTICA": "TARTARUGA VERDE",
+    "NORTE DE PESCADA": "DENTAO",
+}
+
+# Pre-2022 state homonyms disambiguated by normalized basin name.
+_FIELD_BASIN_DISAMBIGUATION: dict[tuple[str, str], str] = {
+    ("FAZENDA BELEM", "POTIGUAR"): "FAZENDA BELEM CE",
+    ("FAZENDA BELEM", "RECONCAVO"): "FAZENDA BELEM BA",
+    ("BREJINHO", "POTIGUAR"): "BREJINHO RN",
+    ("BREJINHO", "RECONCAVO"): "BREJINHO BA",
+    ("MERO", "SERGIPE"): "MERO SE",
+    ("FAZENDA BOA ESPERANCA", "ESPIRITO SANTO"): "FAZENDA BOA ESPERANCA ES",
+}
+
+# Proportionally split AIP / open-acreage (AnC_*) fields merged by summing same-well-month rates
+# after _merge_duplicate_rows. Transfer-of-Rights Surplus (*_ECO) is handled by suffix rule.
+_FIELD_SPLIT_ALIASES: dict[str, str] = {
+    "ANC_MERO": "MERO",
+    "ANC_TUPI": "TUPI",
+    "ANC_NORTE_ATAPU": "ATAPU",
+    "ANC_TARTARUGA VERDE": "TARTARUGA VERDE",
+    "ANC_JUBARTE_SUDOESTE": "JUBARTE",
+    "ANC_JUBARTE_NORDESTE": "JUBARTE",
+    "ANC_FORNO": "ALBACORA",
+    "ANC_ARGONAUTA_ME1": "ARGONAUTA",
+    "SERRA": "MACAU",
+    "ARATUM": "MACAU",
+}
+
+# Accented Portuguese display names for canonical field IDs that differ from ASCII keys.
+_CANONICAL_FIELD_NAMES: dict[str, str] = {
+    "BAUNA": "BAÚNA",
+    "BERBIGAO": "BERBIGÃO",
+    "BUZIOS": "BÚZIOS",
+    "DENTAO": "DENTÃO",
+    "FAZENDA BELEM BA": "FAZENDA BELÉM BA",
+    "FAZENDA BELEM CE": "FAZENDA BELÉM CE",
+    "FAZENDA BOA ESPERANCA ES": "FAZENDA BOA ESPERANÇA ES",
+    "SEPIA": "SÉPIA",
+}
+
 
 #: ANP monthly national gas series by state & onshore/offshore (1997-present, 10³ m³).
 NATIONAL_GAS_URL = (
@@ -508,6 +570,145 @@ def _merge_duplicate_rows(work: pd.DataFrame, rate_cols: list[str]) -> pd.DataFr
     return pd.concat([work.loc[~repeated], merged], ignore_index=True)
 
 
+def _canonicalize_rename_field_id(norm_id: str) -> str:
+    """Resolve pure renames, typos, and non-split annexations before duplicate merging."""
+    if norm_id in _MISSING_SENTINELS:
+        return ""
+    return _FIELD_RENAME_ALIASES.get(norm_id, norm_id)
+
+
+def _canonicalize_post_dedup_field_id(norm_id: str, norm_basin: str = "") -> str:
+    """Resolve basin homonyms and proportionally split (*_ECO, AnC_*, etc.) field IDs."""
+    if (norm_id, norm_basin) in _FIELD_BASIN_DISAMBIGUATION:
+        return _FIELD_BASIN_DISAMBIGUATION[(norm_id, norm_basin)]
+    if norm_id in _FIELD_SPLIT_ALIASES:
+        return _FIELD_SPLIT_ALIASES[norm_id]
+    if norm_id.endswith("_ECO") and len(norm_id) > 4:
+        return norm_id[:-4]
+    return norm_id
+
+
+def _canonicalize_field_id(norm_id: str, norm_basin: str = "") -> str:
+    """Resolve any Brazil ANP field key (renames, homonyms, AnC_*, *_ECO) to its canonical key."""
+    return _canonicalize_post_dedup_field_id(_canonicalize_rename_field_id(norm_id), norm_basin)
+
+
+def _canonical_field_display_name(raw_name: object, raw_id: str, canon_id: str) -> object:
+    if canon_id == "":
+        return pd.NA
+    if canon_id == raw_id:
+        if pd.isna(raw_name) or str(raw_name).strip() == "":
+            return canon_id
+        return str(raw_name).strip()
+    if canon_id in _CANONICAL_FIELD_NAMES:
+        return _CANONICAL_FIELD_NAMES[canon_id]
+    if raw_id.endswith("_ECO") and not pd.isna(raw_name):
+        return _ECO_SUFFIX_RE.sub("", str(raw_name).strip())
+    return canon_id
+
+
+def _clean_field_columns(
+    field_series: pd.Series | None,
+    basin_series: pd.Series | None,
+    length: int,
+    *,
+    include_splits: bool,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Return ``(raw_id, canon_id, canon_name)`` Series for ANP ``Campo`` + ``Bacia`` columns."""
+    if field_series is None:
+        empty = pd.Series([""] * length, dtype="string")
+        nulls = pd.Series([pd.NA] * length, dtype="string")
+        return empty, empty.copy(), nulls
+
+    raw_names = field_series.astype("string").str.strip().tolist()
+    basins = (
+        basin_series.astype("string").str.strip().tolist()
+        if basin_series is not None
+        else [pd.NA] * length
+    )
+    raw_ids: list[str] = []
+    canon_ids: list[str] = []
+    canon_names: list[object] = []
+    for raw_name, raw_basin in zip(raw_names, basins, strict=True):
+        raw_id = schema.normalize_key(None if pd.isna(raw_name) else str(raw_name))
+        norm_basin = schema.normalize_key(None if pd.isna(raw_basin) else str(raw_basin))
+        canon_id = (
+            _canonicalize_field_id(raw_id, norm_basin)
+            if include_splits
+            else _canonicalize_rename_field_id(raw_id)
+        )
+        raw_ids.append(raw_id)
+        canon_ids.append(canon_id)
+        canon_names.append(_canonical_field_display_name(raw_name, raw_id, canon_id))
+    return (
+        pd.Series(raw_ids, index=field_series.index, dtype="string"),
+        pd.Series(canon_ids, index=field_series.index, dtype="string"),
+        pd.Series(canon_names, index=field_series.index, dtype="string"),
+    )
+
+
+def _canonicalize_facility_fields(value: object, norm_basin: str = "") -> object:
+    """Canonicalize and deduplicate slash-separated LPO ``CAMPOS`` lists."""
+    if pd.isna(value):
+        return pd.NA
+    text = str(value).strip()
+    if not text:
+        return pd.NA
+    seen: dict[str, str] = {}
+    for token in text.split("/"):
+        raw = token.strip()
+        raw_id = schema.normalize_key(raw)
+        canon_id = _canonicalize_field_id(raw_id, norm_basin)
+        if not canon_id:
+            continue
+        display = str(_canonical_field_display_name(raw, raw_id, canon_id))
+        if canon_id not in seen or raw_id == canon_id:
+            seen[canon_id] = display
+    if not seen:
+        return pd.NA
+    return " / ".join(sorted(seen.values()))
+
+
+def _sum_merged_field_rows(work: pd.DataFrame, rate_cols: list[str]) -> pd.DataFrame:
+    """Resolve homonyms + split field aliases (*_ECO, AnC_*, etc.) and sum colliding rates."""
+    raw_ids = work["field_id"].tolist()
+    raw_names = work["field_name"].tolist()
+    basins = work["basin"].tolist()
+    canon_ids: list[str] = []
+    canon_names: list[object] = []
+    is_canon: list[bool] = []
+    for rid, name, raw_basin in zip(raw_ids, raw_names, basins, strict=True):
+        norm_basin = schema.normalize_key(None if pd.isna(raw_basin) else str(raw_basin))
+        cid = _canonicalize_post_dedup_field_id(rid, norm_basin)
+        canon_ids.append(cid)
+        canon_names.append(_canonical_field_display_name(name, rid, cid))
+        is_canon.append(rid == cid)
+
+    work = work.assign(
+        field_id=pd.Series(canon_ids, index=work.index, dtype="string"),
+        field_name=pd.Series(canon_names, index=work.index, dtype="string"),
+    )
+    key = ["entity_id", "field_id", "facility_id", "period"]
+    repeated = work.duplicated(subset=key, keep=False)
+    if not repeated.any():
+        return work
+
+    rows = work.loc[repeated].copy()
+    rows["_prefer"] = pd.Series(is_canon, index=work.index).loc[repeated].astype(int)
+    rows = rows.sort_values("_prefer", ascending=False, kind="mergesort")
+    group = rows.groupby(key, dropna=False, sort=False).ngroup()
+    first_mask = ~group.duplicated()
+    merged = rows.loc[first_mask].drop(columns=["_prefer"]).copy()
+    merged.index = group[first_mask].to_numpy()
+
+    for col in ("field_name", "basin", "region", "environment"):
+        merged[col] = rows[col].groupby(group).first()
+    for col in rate_cols:
+        merged[col] = rows[col].groupby(group).sum(min_count=1)
+
+    return pd.concat([work.loc[~repeated], merged], ignore_index=True)
+
+
 def _warn_known_gaps(table: pa.Table) -> None:
     if table.num_rows == 0:
         return
@@ -586,6 +787,25 @@ def _parse_facilities_csv(path: Path) -> gpd.GeoDataFrame:
     )
     water_depth_col = next((c for k, c in cols.items() if "lamina" in k), None)
 
+    fields_col = (
+        pd.Series(
+            [
+                _canonicalize_facility_fields(
+                    val, schema.normalize_key(None if pd.isna(basin) else str(basin))
+                )
+                for val, basin in zip(
+                    df[cols["campos"]].tolist(),
+                    df[cols["bacia"]].tolist() if "bacia" in cols else [pd.NA] * len(df),
+                    strict=True,
+                )
+            ],
+            index=df.index,
+            dtype="string",
+        )
+        if "campos" in cols
+        else pd.NA
+    )
+
     out = gpd.GeoDataFrame(
         {
             "source": "brazil",
@@ -595,7 +815,7 @@ def _parse_facilities_csv(path: Path) -> gpd.GeoDataFrame:
             else pd.NA,
             "facility_name": names,
             "facility_type": df[cols["classificacao"]] if "classificacao" in cols else pd.NA,
-            "fields": df[cols["campos"]] if "campos" in cols else pd.NA,
+            "fields": fields_col,
             "basin": df[cols["bacia"]] if "bacia" in cols else pd.NA,
             "operator": df[cols["operador"]] if "operador" in cols else pd.NA,
             "status": "Em Operação",
@@ -616,6 +836,79 @@ def _parse_facilities_csv(path: Path) -> gpd.GeoDataFrame:
     return geo.prepare_geo(out, schema.GeoKind.FACILITIES)
 
 
+def _geom_is_covered(geom: object, base_geom: object) -> bool:
+    if not isinstance(geom, shapely.Geometry) or geom.is_empty:
+        return True
+    if not isinstance(base_geom, shapely.Geometry) or base_geom.is_empty:
+        return False
+    area = geom.area
+    if area <= 0.0:
+        return True
+    return float(base_geom.intersection(geom).area) / float(area) >= 0.5
+
+
+def _merge_field_group(group: gpd.GeoDataFrame) -> dict[str, object]:
+    """Combine WFS rows sharing a canonical ``field_id``, preserving canonical metadata."""
+    ordered = group.sort_values("_is_canon", ascending=False, kind="mergesort")
+    base_row: dict[str, object] = ordered.iloc[0].to_dict()
+    base_row.pop("_is_canon", None)
+
+    for col in (
+        "field_code",
+        "basin",
+        "region",
+        "environment",
+        "operator",
+        "status",
+        "primary_fluid",
+        "water_depth_m",
+    ):
+        if pd.isna(base_row.get(col)):
+            non_null = ordered[col].dropna()
+            if len(non_null) > 0:
+                base_row[col] = non_null.iloc[0]
+
+    for date_col in ("discovery_date", "production_start_date"):
+        dates = ordered[date_col].dropna().astype(str)
+        base_row[date_col] = str(dates.min()) if len(dates) > 0 else pd.NA
+
+    areas = pd.to_numeric(ordered["area_km2"], errors="coerce").tolist()
+    geoms = ordered.geometry.tolist()
+    merged_geom = geoms[0]
+    total_area: float | None = float(areas[0]) if pd.notna(areas[0]) else None
+
+    for other_geom, other_area in zip(geoms[1:], areas[1:], strict=True):
+        if not _geom_is_covered(other_geom, merged_geom) and pd.notna(other_area):
+            total_area = float(other_area) if total_area is None else total_area + float(other_area)
+        if isinstance(other_geom, shapely.Geometry) and not other_geom.is_empty:
+            merged_geom = (
+                shapely.unary_union([merged_geom, other_geom])
+                if isinstance(merged_geom, shapely.Geometry) and not merged_geom.is_empty
+                else other_geom
+            )
+
+    if isinstance(merged_geom, shapely.Geometry) and not merged_geom.is_empty:
+        merged_geom = shapely.make_valid(merged_geom)
+    base_row["area_km2"] = total_area if total_area is not None else pd.NA
+    base_row["geometry"] = merged_geom
+    return base_row
+
+
+def _collapse_canonical_fields(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Dissolve WFS rows whose raw names map to the same canonical ``field_id``."""
+    repeated = gdf.duplicated(subset=["field_id"], keep=False)
+    if not repeated.any():
+        return gpd.GeoDataFrame(gdf.drop(columns=["_is_canon"]), geometry="geometry", crs=gdf.crs)
+
+    merged_records = [
+        _merge_field_group(grp) for _, grp in gdf.loc[repeated].groupby("field_id", sort=False)
+    ]
+    merged = gpd.GeoDataFrame(merged_records, geometry="geometry", crs=gdf.crs)
+    untouched = gdf.loc[~repeated].drop(columns=["_is_canon"])
+    combined = pd.concat([untouched, merged], ignore_index=True)
+    return gpd.GeoDataFrame(combined, geometry="geometry", crs=gdf.crs)
+
+
 def _parse_fields_wfs(wfs_path: Path) -> gpd.GeoDataFrame:
     gdf = gpd.read_file(wfs_path)
     cols = {_norm_header(c): c for c in gdf.columns}
@@ -623,27 +916,33 @@ def _parse_fields_wfs(wfs_path: Path) -> gpd.GeoDataFrame:
         raise ValueError(f"not an ANP field polygons file; columns: {sorted(gdf.columns)}")
 
     gdf = gdf.copy()
-    gdf["_field_id"] = gdf[cols["nom_campo"]].map(
+    gdf["_raw_field_id"] = gdf[cols["nom_campo"]].map(
         lambda v: schema.normalize_key(None if pd.isna(v) else str(v))
     )
-    gdf = gdf.loc[gdf["_field_id"] != ""]
+    gdf = gdf.loc[gdf["_raw_field_id"] != ""]
     has_geom = gdf.geometry.notna() & ~gdf.geometry.is_empty
     valid_geom = gdf.loc[has_geom].copy()
     valid_geom = valid_geom.set_geometry(valid_geom.geometry.make_valid())
-    dissolved = valid_geom.dissolve(by="_field_id", aggfunc="first").reset_index()
+    dissolved = valid_geom.dissolve(by="_raw_field_id", aggfunc="first").reset_index()
     if dissolved.crs is None:
         dissolved = dissolved.set_crs(schema.GEO_CRS)
     elif dissolved.crs.to_epsg() != 4326:
         dissolved = dissolved.to_crs(schema.GEO_CRS)
 
-    return gpd.GeoDataFrame(
+    raw_ids, canon_ids, canon_names = _clean_field_columns(
+        dissolved[cols["nom_campo"]],
+        dissolved[cols["nom_bacia"]] if "nom_bacia" in cols else None,
+        len(dissolved),
+        include_splits=True,
+    )
+    fields = gpd.GeoDataFrame(
         {
             "source": "brazil",
-            "field_id": dissolved["_field_id"],
+            "field_id": canon_ids,
             "field_code": dissolved[cols["cod_campo"]].astype("string")
             if "cod_campo" in cols
             else pd.NA,
-            "field_name": dissolved[cols["nom_campo"]].astype("string"),
+            "field_name": canon_names,
             "basin": dissolved[cols["nom_bacia"]] if "nom_bacia" in cols else pd.NA,
             "region": pd.NA,
             "environment": _normalize_environment(
@@ -660,10 +959,13 @@ def _parse_fields_wfs(wfs_path: Path) -> gpd.GeoDataFrame:
             else pd.NA,
             "water_depth_m": dissolved[cols["med_lamina"]] if "med_lamina" in cols else pd.NA,
             "area_km2": dissolved[cols["area"]] if "area" in cols else pd.NA,
+            "_is_canon": raw_ids == canon_ids,
         },
         geometry=dissolved.geometry,
         crs=schema.GEO_CRS,
     )
+    fields = fields.loc[fields["field_id"] != ""].reset_index(drop=True)
+    return _collapse_canonical_fields(fields)
 
 
 def _read_fields_meta_csv(path: Path) -> pd.DataFrame | None:
@@ -672,13 +974,17 @@ def _read_fields_meta_csv(path: Path) -> pd.DataFrame | None:
     if "campo" not in cols:
         return None
     status_col = cols.get("situacao_campo") or cols.get("situacao")
+    raw_ids, canon_ids, canon_names = _clean_field_columns(
+        df[cols["campo"]],
+        df[cols["bacia"]] if "bacia" in cols else None,
+        len(df),
+        include_splits=True,
+    )
     return pd.DataFrame(
         {
-            "field_id": df[cols["campo"]].map(
-                lambda v: schema.normalize_key(None if pd.isna(v) else str(v))
-            ),
+            "field_id": canon_ids,
             "field_code": df[cols["codigo_campo"]] if "codigo_campo" in cols else pd.NA,
-            "field_name": df[cols["campo"]],
+            "field_name": canon_names,
             "basin": df[cols["bacia"]] if "bacia" in cols else pd.NA,
             "region": df[cols["estado"]] if "estado" in cols else pd.NA,
             "environment": _normalize_environment(
@@ -689,6 +995,7 @@ def _read_fields_meta_csv(path: Path) -> pd.DataFrame | None:
             "production_start_date": _parse_br_date(df[cols["data_inicio_producao"]])
             if "data_inicio_producao" in cols
             else pd.NA,
+            "_is_canon": raw_ids == canon_ids,
         }
     )
 
@@ -701,7 +1008,12 @@ def _enrich_fields_from_csv(
     if not frames:
         return base_fields
     meta = pd.concat(frames, ignore_index=True)
-    meta = meta.loc[meta["field_id"] != ""].drop_duplicates(subset=["field_id"], keep="first")
+    meta = (
+        meta.loc[meta["field_id"] != ""]
+        .sort_values("_is_canon", ascending=False, kind="mergesort")
+        .drop_duplicates(subset=["field_id"], keep="first")
+        .drop(columns=["_is_canon"])
+    )
 
     lookup = meta.set_index("field_id")
     enriched = base_fields.copy()
@@ -743,11 +1055,12 @@ def _parse_wells_csv(path: Path) -> gpd.GeoDataFrame:
         for x, y in zip(lon, lat, strict=True)
     ]
 
-    field_col = cols.get("campo")
-    field_name = (
-        df[field_col].astype("string").str.strip() if field_col else pd.Series([pd.NA] * len(df))
+    _, field_id, field_name = _clean_field_columns(
+        df[cols["campo"]] if "campo" in cols else None,
+        df[cols["bacia"]] if "bacia" in cols else None,
+        len(df),
+        include_splits=True,
     )
-    field_id = field_name.map(lambda v: schema.normalize_key(None if pd.isna(v) else str(v)))
     prod_end_col = next((c for k, c in cols.items() if k.startswith("data_ultima_produca")), None)
 
     out = gpd.GeoDataFrame(
@@ -756,7 +1069,7 @@ def _parse_wells_csv(path: Path) -> gpd.GeoDataFrame:
             "well_id": names,
             "well_name": names,
             "field_id": field_id.mask(field_id == "", pd.NA),
-            "field_name": field_name.mask(field_name == "", pd.NA),
+            "field_name": field_name.mask(field_id == "", pd.NA),
             "basin": df[cols["bacia"]] if "bacia" in cols else pd.NA,
             "region": df[cols["estado"]] if "estado" in cols else pd.NA,
             "environment": _normalize_environment(
@@ -857,12 +1170,12 @@ class Brazil(base.Source):
         rates = _compute_anp_rates(frame, cols, days)
         rate_cols = list(rates)
 
-        field_raw = (
-            frame[cols["campo"]].astype("string").str.strip()
-            if "campo" in cols
-            else pd.Series([pd.NA] * len(frame))
+        _, field_id, field_name = _clean_field_columns(
+            frame[cols["campo"]] if "campo" in cols else None,
+            frame[cols["bacia"]] if "bacia" in cols else None,
+            len(frame),
+            include_splits=False,
         )
-        field_id = field_raw.map(lambda v: schema.normalize_key(None if pd.isna(v) else str(v)))
         fac_id, fac_name = _clean_facility(
             frame[cols["instalacao"]] if "instalacao" in cols else None, len(frame)
         )
@@ -871,7 +1184,7 @@ class Brazil(base.Source):
             {
                 "entity_id": frame[cols["poco"]].astype("string").str.strip(),
                 "field_id": field_id,
-                "field_name": field_raw.mask(field_raw == "", pd.NA),
+                "field_name": field_name,
                 "facility_id": fac_id,
                 "facility_name": fac_name,
                 "basin": frame[cols["bacia"]].astype("string").str.strip()
@@ -889,6 +1202,8 @@ class Brazil(base.Source):
         )
         work = _drop_empty_unassigned_facility(work, rate_cols)
         work = _merge_duplicate_rows(work, rate_cols)
+        work = _sum_merged_field_rows(work, rate_cols)
+        work = _drop_empty_unassigned_facility(work, rate_cols)
 
         table = base.build_production_table(
             source=self.name,
