@@ -2,10 +2,12 @@
 
 This document specifies how `ogprod` downloads, normalizes, stores, and exports public oil & gas production, injection, and geospatial data for both local analytics (Python / DuckDB / QGIS) and a static web visualization app (MapLibre GL JS + DuckDB-WASM + PMTiles).
 
-Priority order of sources:
+Priority order of built-in sources:
 1. **Brazil — ANP** (first priority: 1941–2026 well-level production & injection, fields, wells, platforms/FPSOs)
 2. **Norway — Sodir** (field-level production 1971–present, field polygons, facilities, wellbores)
 3. **Mexico — SENER / ex-CNH SIH** (well- and field-level production + spatial layers)
+
+For the broader global survey of candidate countries, regulators, spatial layers, and expansion trade-offs, see [data-sources.md](data-sources.md).
 
 ---
 

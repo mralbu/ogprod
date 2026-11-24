@@ -65,7 +65,7 @@ uv run ogprod export-web --sync-mirror --out-dir site/public/data --data-dir ./d
 npm --prefix site ci && npm --prefix site run dev
 ```
 
-See [docs/data-architecture.md](docs/data-architecture.md) for the full storage layout, source plan (Brazil ANP, Norway Sodir, Mexico SENER/CNH), and static web export contract.
+See [docs/data-architecture.md](docs/data-architecture.md) for the full storage layout, built-in source plan (Brazil ANP, Norway Sodir, Mexico SENER/CNH), and static web export contract, and [docs/data-sources.md](docs/data-sources.md) for the researched global survey of candidate countries and regulators.
 
 ## Development
 
