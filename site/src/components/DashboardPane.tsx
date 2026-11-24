@@ -200,7 +200,7 @@ export function DashboardPane({
           </div>
 
           {loadingSeries ? (
-            <div className="flex h-[310px] flex-col items-center justify-center gap-2 text-xs text-slate-500">
+            <div className="flex h-[330px] flex-col items-center justify-center gap-2 text-xs text-slate-500">
               <Loader2 className="h-5 w-5 animate-spin text-cyan-700" />
               <span>
                 {selection.kind === "well"

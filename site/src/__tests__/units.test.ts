@@ -5,6 +5,7 @@ import {
   formatPercent,
   M3_PER_BBL,
   MMCF_PER_E3M3,
+  UNIT_SYSTEMS,
   unitLabelFor,
 } from "../lib/units";
 
@@ -13,7 +14,18 @@ describe("unit conversions", () => {
     expect(convertRate(100_000, "oil_prod", "oilfield_e3m3")).toBe(100_000);
     expect(convertRate(1_000, "gas_prod", "oilfield_e3m3")).toBe(1_000);
     expect(unitLabelFor("oil_prod", "oilfield_e3m3")).toBe("bbl/d");
-    expect(unitLabelFor("gas_prod", "oilfield_e3m3")).toBe("e3m3/d");
+    expect(unitLabelFor("gas_prod", "oilfield_e3m3")).toBe("10³ m³/d");
+  });
+
+  it("renders human-readable 10³ m³/d labels instead of raw e3m3", () => {
+    const defaultSystem = UNIT_SYSTEMS.find((u) => u.id === "oilfield_e3m3");
+    expect(defaultSystem?.label).toBe("bbl/d & 10³ m³/d");
+    expect(unitLabelFor("gas_prod", "metric_m3")).toBe("10³ m³/d");
+    for (const system of UNIT_SYSTEMS) {
+      expect(system.label).not.toContain("e3m3");
+      expect(system.liquidUnit).not.toContain("e3m3");
+      expect(system.gasUnit).not.toContain("e3m3");
+    }
   });
 
   it("converts gas from e3m3/d to MMcf/d accurately under oilfield_mmcf", () => {

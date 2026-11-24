@@ -92,9 +92,9 @@ export interface UnitSystemMeta {
 export const UNIT_SYSTEMS: readonly UnitSystemMeta[] = [
   {
     id: "oilfield_e3m3",
-    label: "bbl/d & e3m3/d",
+    label: "bbl/d & 10³ m³/d",
     liquidUnit: "bbl/d",
-    gasUnit: "e3m3/d",
+    gasUnit: "10³ m³/d",
   },
   {
     id: "oilfield_mmcf",
@@ -106,7 +106,7 @@ export const UNIT_SYSTEMS: readonly UnitSystemMeta[] = [
     id: "metric_m3",
     label: "m³/d",
     liquidUnit: "m³/d",
-    gasUnit: "e3m3/d",
+    gasUnit: "10³ m³/d",
   },
 ] as const;
 
