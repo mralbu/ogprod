@@ -108,3 +108,77 @@ def write_geoparquet(
 def read_geoparquet(path: Path) -> gpd.GeoDataFrame:
     """Read a GeoParquet file back into a GeoDataFrame."""
     return gpd.read_parquet(path)
+
+
+def _prepare_overlay_frame(
+    gdf: gpd.GeoDataFrame,
+    column: str,
+    rename_to: str,
+    equal_area_crs: str,
+    *,
+    drop_blank: bool = False,
+) -> gpd.GeoDataFrame:
+    has_geom = gdf.geometry.notna() & ~gdf.geometry.is_empty
+    if drop_blank:
+        vals = gdf[column].astype("string").str.strip()
+        keep = has_geom & vals.notna() & (vals != "")
+    else:
+        vals = gdf[column]
+        keep = has_geom & vals.notna()
+    sub = gpd.GeoDataFrame(
+        {rename_to: vals.loc[keep]},
+        geometry=gdf.geometry.loc[keep],
+        crs=gdf.crs or GEO_CRS,
+    )
+    if len(sub) == 0:
+        return sub
+    invalid = ~sub.geometry.is_valid
+    if invalid.any():
+        sub.loc[invalid, "geometry"] = sub.loc[invalid, "geometry"].make_valid()
+    return sub.to_crs(equal_area_crs)
+
+
+def assign_by_largest_overlap(
+    targets: gpd.GeoDataFrame,
+    regions: gpd.GeoDataFrame,
+    *,
+    id_column: str,
+    label_column: str,
+    equal_area_crs: str,
+) -> pd.Series:
+    """Assign each target polygon the label of the region with largest summed overlap area.
+
+    Returns a ``string`` Series aligned with ``targets.index`` (``pd.NA`` when a target has
+    null/empty geometry or does not overlap any region). Ties break alphabetically by label.
+    """
+    empty = pd.Series([pd.NA] * len(targets), index=targets.index, dtype="string")
+    if len(targets) == 0 or len(regions) == 0:
+        return empty
+
+    t_proj = _prepare_overlay_frame(targets, id_column, "_target_id", equal_area_crs)
+    r_proj = _prepare_overlay_frame(
+        regions, label_column, "_region_label", equal_area_crs, drop_blank=True
+    )
+    if len(t_proj) == 0 or len(r_proj) == 0:
+        return empty
+
+    inter = gpd.overlay(t_proj, r_proj, how="intersection", keep_geom_type=False)
+    if len(inter) == 0:
+        return empty
+
+    inter = inter.assign(_area=inter.geometry.area)
+    inter = inter.loc[inter["_area"] > 0]
+    if len(inter) == 0:
+        return empty
+
+    totals = inter.groupby(["_target_id", "_region_label"], as_index=False, sort=False)[
+        "_area"
+    ].sum()
+    totals = totals.sort_values(
+        ["_target_id", "_area", "_region_label"],
+        ascending=[True, False, True],
+        kind="mergesort",
+    )
+    winners = totals.drop_duplicates(subset=["_target_id"], keep="first")
+    lookup = dict(zip(winners["_target_id"], winners["_region_label"], strict=True))
+    return targets[id_column].map(lookup).astype("string")

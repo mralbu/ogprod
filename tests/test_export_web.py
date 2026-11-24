@@ -400,3 +400,68 @@ def test_write_geojsonl_layer_attaches_tippecanoe_minzoom(
             assert row["tippecanoe"] == {"minzoom": minzoom}
         else:
             assert "tippecanoe" not in row
+
+
+def test_export_web_basin_rollup_falls_back_to_field_basin_and_region(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    out_dir = tmp_path / "web"
+
+    # Mexico production carries no basin/region; geo/fields supplies basin.
+    mx_prod = base.build_production_table(
+        source="mexico",
+        entity_type=schema.EntityType.FIELD,
+        entity_id=pd.Series(["MALOOB", "DEPLETED"]),
+        entity_name=pd.Series(["Maloob", "Depleted"]),
+        period=pd.Series([date(2026, 1, 1), date(2026, 1, 1)]),
+        field_id=pd.Series(["MALOOB", "DEPLETED"]),
+        field_name=pd.Series(["Maloob", "Depleted"]),
+        rates={"oil_prod": pd.Series([250_000.0, 500.0])},
+    )
+    write_production(mx_prod, root=data_dir)
+
+    # Norway production carries no basin/region; geo/fields supplies region only (basin is NA).
+    no_prod = base.build_production_table(
+        source="norway",
+        entity_type=schema.EntityType.FIELD,
+        entity_id=pd.Series(["26376286"]),
+        entity_name=pd.Series(["JOHAN SVERDRUP"]),
+        period=pd.Series([date(2026, 1, 1)]),
+        field_id=pd.Series(["26376286"]),
+        field_name=pd.Series(["JOHAN SVERDRUP"]),
+        rates={"oil_prod": pd.Series([700_000.0])},
+    )
+    write_production(no_prod, root=data_dir)
+
+    fields = gpd.GeoDataFrame(
+        {
+            "source": ["mexico", "norway"],
+            "field_id": ["MALOOB", "26376286"],
+            "field_name": ["Maloob", "JOHAN SVERDRUP"],
+            "basin": ["CUENCAS DEL SURESTE", pd.NA],
+            "region": [pd.NA, "North Sea"],
+        },
+        geometry=[
+            shapely.box(-92.3, 19.5, -92.1, 19.7),
+            shapely.box(2.4, 58.7, 2.7, 58.9),
+        ],
+        crs="EPSG:4326",
+    )
+    write_geo(fields, schema.GeoKind.FIELDS, root=data_dir)
+
+    export_web.export_web(data_dir=data_dir, out_dir=out_dir, skip_tiles=True)
+
+    basin_json = json.loads((out_dir / "rollups" / "basin_monthly.json").read_text("utf-8"))
+    assert basin_json["mexico"]["CUENCAS DEL SURESTE"][0]["oil_prod"] == 250_000.0
+    assert basin_json["mexico"]["Unassigned"][0]["oil_prod"] == 500.0
+    assert basin_json["norway"]["North Sea"][0]["oil_prod"] == 700_000.0
+
+    search = json.loads((out_dir / "search" / "index.json").read_text("utf-8"))
+    by_id = {(e["s"], e["id"]): e for e in search if e["t"] == "field"}
+    assert by_id[("mexico", "MALOOB")]["b"] == "CUENCAS DEL SURESTE"
+    assert by_id[("norway", "26376286")]["b"] == "North Sea"
+
+    poly_feats, _ = export_web._field_tile_features(fields, {})
+    by_tile_id = {(f["properties"]["source"], f["properties"]["field_id"]): f for f in poly_feats}
+    assert by_tile_id[("mexico", "MALOOB")]["properties"]["basin"] == "CUENCAS DEL SURESTE"
+    assert by_tile_id[("norway", "26376286")]["properties"]["region"] == "North Sea"
+    assert "basin" not in by_tile_id[("norway", "26376286")]["properties"]

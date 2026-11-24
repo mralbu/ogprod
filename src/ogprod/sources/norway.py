@@ -136,6 +136,12 @@ def _fetch_arcgis_geojson(
     )
 
 
+def _normalize_main_area(series: pd.Series) -> pd.Series:
+    """Normalize Sodir sea-area casing (``'North sea'`` / ``'NORTH SEA'`` -> ``'North Sea'``)."""
+    cleaned = series.astype("string").str.strip()
+    return cleaned.mask(cleaned == "", pd.NA).str.title()
+
+
 def _parse_fields_geojson(path: Path) -> gpd.GeoDataFrame:
     gdf = gpd.read_file(path)
     cols = {c.lower(): c for c in gdf.columns}
@@ -174,7 +180,11 @@ def _parse_fields_geojson(path: Path) -> gpd.GeoDataFrame:
             "field_code": dissolved["_fid"],
             "field_name": dissolved[cols["fldname"]].astype("string"),
             "basin": pd.NA,
-            "region": dissolved[cols["fldmainarea"]] if "fldmainarea" in cols else pd.NA,
+            "region": (
+                _normalize_main_area(dissolved[cols["fldmainarea"]])
+                if "fldmainarea" in cols
+                else pd.NA
+            ),
             "environment": "offshore",
             "operator": dissolved[cols["cmplongname"]] if "cmplongname" in cols else pd.NA,
             "status": (
@@ -242,7 +252,9 @@ def _parse_wells_geojson(path: Path) -> gpd.GeoDataFrame:
             else pd.NA,
             "field_name": gdf[cols["wlbfield"]] if "wlbfield" in cols else pd.NA,
             "basin": pd.NA,
-            "region": gdf[cols["wlbmainarea"]] if "wlbmainarea" in cols else pd.NA,
+            "region": (
+                _normalize_main_area(gdf[cols["wlbmainarea"]]) if "wlbmainarea" in cols else pd.NA
+            ),
             "environment": "offshore",
             "operator": (
                 gdf[cols["wlbdrillingoperator"]] if "wlbdrillingoperator" in cols else pd.NA

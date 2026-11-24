@@ -72,7 +72,7 @@ export function OverviewLeaderboards({
             [
               ["fields", "Top Fields"],
               ["facilities", "FPSOs & Platforms"],
-              ["basins", "Basins"],
+              ["basins", "Basins & Areas"],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -97,7 +97,7 @@ export function OverviewLeaderboards({
             <thead className="sticky top-0 bg-slate-50 text-[11px] text-slate-500">
               <tr>
                 <th className="px-3.5 py-2 font-medium">Field</th>
-                <th className="px-2 py-2 font-medium">Basin</th>
+                <th className="px-2 py-2 font-medium">Basin / Area</th>
                 <th className="px-2 py-2 text-right font-medium">
                   Oil ({unitLabelFor("oil_prod", unitSystem)})
                 </th>
@@ -126,7 +126,7 @@ export function OverviewLeaderboards({
                       {f.source}
                     </span>
                   </td>
-                  <td className="px-2 py-2 text-slate-500">{f.basin ?? "—"}</td>
+                  <td className="px-2 py-2 text-slate-500">{f.basin ?? f.region ?? "—"}</td>
                   <td className="font-tabular px-2 py-2 text-right text-slate-800">
                     {formatCompactNumber(convertRate(f.latest_oil_bpd, "oil_prod", unitSystem))}
                   </td>
@@ -194,7 +194,7 @@ export function OverviewLeaderboards({
           <table className="w-full text-left text-xs">
             <thead className="sticky top-0 bg-slate-50 text-[11px] text-slate-500">
               <tr>
-                <th className="px-3.5 py-2 font-medium">Basin</th>
+                <th className="px-3.5 py-2 font-medium">Basin / Area</th>
                 <th className="px-2 py-2 font-medium">Source</th>
                 <th className="px-2 py-2 text-right font-medium">
                   Oil ({unitLabelFor("oil_prod", unitSystem)})

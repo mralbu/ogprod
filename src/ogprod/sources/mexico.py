@@ -12,7 +12,8 @@ bulk downloads at ``sih-hidrocarburos.energia.gob.mx/downloads/``:
 Spatial data comes from SENER's Mapa de Hidrocarburos public shapefile export
 service (``mapa-hidrocarburos.energia.gob.mx``):
 
-- Fields: ``cmp_cmp_rsv`` polygons (477 fields, ``EPSG:4326``).
+- Fields: ``cmp_cmp_rsv`` polygons (477 fields, ``EPSG:4326``), enriched with
+  ``basin`` from ``geo_petro_prov`` (Provincias Petroleras).
 - Facilities: ``v_iftep_instalaciones`` points (1,363 platforms/stations).
 - Wells: 6 regional zones (``v_zon_pozos_*`` points).
 """
@@ -44,6 +45,9 @@ _POZOS_PROD_URL = _SIH_DOWNLOADS + "PRODUCCION_POZOS.zip"
 _MAP_BASE = "https://mapa-hidrocarburos.energia.gob.mx"
 _EXPORT_URL = f"{_MAP_BASE}/php/ws/export.php"
 _GET_FILE_URL = f"{_MAP_BASE}/php/tools/getFile.php"
+_PETRO_PROV_LAYER = "geo_petro_prov"
+# INEGI Mexico ITRF2008 / Lambert Conformal Conic for metric polygon overlap areas.
+_EQUAL_AREA_CRS = "EPSG:6372"
 
 _WELL_ZONE_LAYERS: tuple[str, ...] = (
     "v_zon_pozos_burgos",
@@ -335,7 +339,31 @@ def _export_map_layer(
     return base.download_file(http, url, dest)
 
 
-def _parse_fields_shp(path: Path) -> gpd.GeoDataFrame:
+def _assign_mexico_basins(dissolved: gpd.GeoDataFrame, provinces_path: Path) -> pd.Series:
+    prov = gpd.read_file(provinces_path)
+    prov_cols = {_norm_header(c): c for c in prov.columns}
+    if "nombre" not in prov_cols:
+        raise ValueError(
+            f"not a Mexico petroleum provinces shapefile; columns: {sorted(prov.columns)}"
+        )
+    return geo.assign_by_largest_overlap(
+        dissolved,
+        prov,
+        id_column="_fid",
+        label_column=prov_cols["nombre"],
+        equal_area_crs=_EQUAL_AREA_CRS,
+    )
+
+
+def _split_field_paths(paths: list[Path]) -> tuple[Path, Path | None]:
+    if len(paths) == 1:
+        return paths[0], None
+    prov_path = next((p for p in paths if "provincia" in p.stem.lower()), paths[1])
+    fields_path = next((p for p in paths if p != prov_path), paths[0])
+    return fields_path, prov_path
+
+
+def _parse_fields_shp(path: Path, provinces_path: Path | None = None) -> gpd.GeoDataFrame:
     gdf = gpd.read_file(path)
     cols = {_norm_header(c): c for c in gdf.columns}
     if "nombre" not in cols:
@@ -351,12 +379,16 @@ def _parse_fields_shp(path: Path) -> gpd.GeoDataFrame:
     with_geom = with_geom.set_geometry(with_geom.geometry.make_valid())
     dissolved = with_geom.dissolve(by="_fid", aggfunc="first").reset_index()
 
+    basin: pd.Series | object = (
+        _assign_mexico_basins(dissolved, provinces_path) if provinces_path is not None else pd.NA
+    )
     env_col = next((c for k, c in cols.items() if k.startswith("ubicaci")), None)
     out = gpd.GeoDataFrame(
         {
             "source": "mexico",
             "field_id": dissolved["_fid"],
             "field_name": dissolved[cols["nombre"]].astype("string").str.strip(),
+            "basin": basin,
             "environment": _normalize_environment(
                 dissolved[env_col] if env_col else None, len(dissolved)
             ),
@@ -502,7 +534,15 @@ class Mexico(base.Source):
         """Export and download shapefiles from Mapa de Hidrocarburos."""
         with base.open_client(client) as http:
             if kind is schema.GeoKind.FIELDS:
-                return [_export_map_layer(http, "cmp_cmp_rsv", "campos", dest_dir / "campos.zip")]
+                return [
+                    _export_map_layer(http, "cmp_cmp_rsv", "campos", dest_dir / "campos.zip"),
+                    _export_map_layer(
+                        http,
+                        _PETRO_PROV_LAYER,
+                        "provincias_petroleras",
+                        dest_dir / "provincias_petroleras.zip",
+                    ),
+                ]
             if kind is schema.GeoKind.FACILITIES:
                 return [
                     _export_map_layer(
@@ -522,7 +562,8 @@ class Mexico(base.Source):
     def parse_geo(self, kind: schema.GeoKind, paths: list[Path]) -> gpd.GeoDataFrame:
         """Parse downloaded Mapa de Hidrocarburos shapefile ZIPs into GeoParquet-ready frames."""
         if kind is schema.GeoKind.FIELDS:
-            return _parse_fields_shp(paths[0])
+            fields_path, provinces_path = _split_field_paths(paths)
+            return _parse_fields_shp(fields_path, provinces_path)
         if kind is schema.GeoKind.FACILITIES:
             return _parse_facilities_shp(paths[0])
         if kind is schema.GeoKind.WELLS:

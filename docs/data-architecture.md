@@ -135,7 +135,7 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
   - `PRODUCCION_CAMPOS.csv` (1960–present, ~18 MB, default on `ingest mexico`): field-level daily rates — oil, condensate, water (`Mbd` = thousand bbl/d → `bbl/d`), associated + non-associated gas (`MMpcd` = million scf/d → `e3m3/d`).
   - `PRODUCCION_POZOS.zip` / `POZOS_COMPILADO.csv` (1930–present, ~155 MB): well-level daily rates, auto-detected by `parse_production` when ingested via `--files`.
 - **Geo (`mapa-hidrocarburos.energia.gob.mx` public shapefile export API):**
-  - `geo/fields`: `cmp_cmp_rsv` (477 field polygons, `EPSG:4326`; drops 1P/2P/3P reserve columns).
+  - `geo/fields`: `cmp_cmp_rsv` (477 field polygons, `EPSG:4326`; drops 1P/2P/3P reserve columns), enriched with `basin` via area-weighted overlay against `geo_petro_prov` (Provincias Petroleras, `EPSG:6372`; see [ADR 0010](adr/0010-basin-and-region-enrichment.md)).
   - `geo/facilities`: `v_iftep_instalaciones` (1,363 platforms/installations, `EPSG:4326`).
   - `geo/wells`: 6 regional well layers (`v_zon_pozos_{burgos,tampico,ver,cuenca_sur,agu_som,agu_pro}`).
 
@@ -146,5 +146,5 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
 Built by `ogprod export-web` from Layer 1 for static hosting (Cloudflare R2 / S3 / GitHub Pages):
 1. `tiles/ogprod.pmtiles` — MapLibre vector tiles (`fields`, `facilities`, `wells`).
 2. `geo/{fields,facilities,wells}.parquet` — GeoParquet 1.1 with `bbox` + Hilbert sort.
-3. `rollups/{country,basin,field,facility}_monthly.parquet` — pre-aggregated daily rates for instant DuckDB-WASM charts & FPSO utilization (`actual / oil_capacity_bpd`).
+3. `rollups/{country,basin,field,facility}_monthly.parquet` — pre-aggregated daily rates for instant DuckDB-WASM charts & FPSO utilization (`actual / oil_capacity_bpd`); `basin_monthly` falls back from `production.basin` to `fields.basin`, `production.region`, and `fields.region` (see [ADR 0010](adr/0010-basin-and-region-enrichment.md)).
 4. `well_series/` — bucketed Parquet for fast well-level drill-down over HTTP range requests.

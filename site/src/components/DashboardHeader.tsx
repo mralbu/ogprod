@@ -48,7 +48,7 @@ export function DashboardHeader({
           <h2 className="text-lg font-semibold tracking-tight text-slate-900">{title}</h2>
           {selection.kind !== "overview" && (
             <span className="rounded bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-700">
-              {selection.kind}
+              {selection.kind === "basin" ? "basin / area" : selection.kind}
             </span>
           )}
           {selection.kind === "well" && wellPartitionsQueried !== null && (
@@ -63,7 +63,9 @@ export function DashboardHeader({
           {selection.kind === "field" && selectedField && (
             <>
               {selectedField.source.toUpperCase()}
-              {selectedField.basin ? ` · ${selectedField.basin} Basin` : ""}
+              {selectedField.basin ?? selectedField.region
+                ? ` · ${selectedField.basin ?? selectedField.region}`
+                : ""}
               {selectedField.operator ? ` · ${selectedField.operator}` : ""}
               {selectedField.water_depth_m ? ` · ${selectedField.water_depth_m} m depth` : ""}
             </>

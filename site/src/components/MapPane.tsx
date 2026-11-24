@@ -163,8 +163,9 @@ export function MapPane({
             <div class="text-[11px] text-slate-500">${props.facility_type ?? "Facility"} · ${String(props.source ?? "").toUpperCase()}</div>
             ${props.oil_capacity_bpd ? `<div class="font-tabular mt-1 text-[11px]">Cap: ${formatCompactNumber(Number(props.oil_capacity_bpd))} bbl/d${props.oil_utilization ? ` · Util: ${formatPercent(Number(props.oil_utilization))}` : ""}</div>` : ""}`;
         } else {
+          const area = props.basin ?? props.region;
           html = `<div class="font-semibold text-slate-900">${props.field_name ?? props.field_id}</div>
-            <div class="text-[11px] text-slate-500">Field · ${String(props.source ?? "").toUpperCase()}${props.basin ? ` · ${props.basin}` : ""}</div>
+            <div class="text-[11px] text-slate-500">Field · ${String(props.source ?? "").toUpperCase()}${area ? ` · ${area}` : ""}</div>
             ${props.latest_oil_bpd ? `<div class="font-tabular mt-1 text-[11px]">Latest Oil: ${formatCompactNumber(Number(props.latest_oil_bpd))} bbl/d</div>` : ""}`;
         }
         popupRef.current?.setLngLat(e.lngLat).setHTML(html).addTo(map);

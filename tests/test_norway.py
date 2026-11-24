@@ -146,6 +146,8 @@ def test_norway_end_to_end_mock_ingest(tmp_path: Path) -> None:
 
     fields = db.fields(source="norway").set_index("field_id")
     assert fields.loc["26376286", "discovery_date"] == "2010-01-01"
+    assert fields.loc["26376286", "region"] == "North Sea"
+    assert fields["basin"].isna().loc["26376286"]
     assert fields.loc["46437"].geometry is None
 
     fac = db.facilities(source="norway").set_index("facility_id")
@@ -153,6 +155,7 @@ def test_norway_end_to_end_mock_ingest(tmp_path: Path) -> None:
 
     wells = db.wells(source="norway").set_index("well_id")
     assert wells.loc["2", "field_id"] == "26376286"
+    assert wells.loc["2", "region"] == "North Sea"
 
     manifest = json.loads((tmp_path / "store" / "manifest.json").read_text(encoding="utf-8"))
     no_meta = manifest["sources"]["norway"]

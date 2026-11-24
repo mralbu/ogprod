@@ -121,7 +121,7 @@ export function DashboardPane({
     if (selection.kind === "facility")
       return selectedFacility?.facility_name ?? selection.name ?? selection.id;
     if (selection.kind === "well") return selection.name ?? selection.id;
-    if (selection.kind === "basin") return `${selection.basin} Basin`;
+    if (selection.kind === "basin") return selection.basin;
     if (activeSource === null) return "All Sources Overview";
     const s = meta.sources.find((item) => item.id === activeSource);
     return s ? `${s.country} (${s.publisher})` : activeSource;

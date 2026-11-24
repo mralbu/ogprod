@@ -66,18 +66,26 @@ ORDER BY source, period
 """
 
 _BASIN_MONTHLY_SQL = """
-SELECT source,
-       coalesce(nullif(trim(basin), ''), 'Unassigned') AS basin,
-       period,
-       SUM(CAST(oil_prod AS DOUBLE)) AS oil_prod,
-       SUM(CAST(condensate_prod AS DOUBLE)) AS condensate_prod,
-       SUM(CAST(ngl_prod AS DOUBLE)) AS ngl_prod,
-       SUM(CAST(gas_prod AS DOUBLE)) AS gas_prod,
-       SUM(CAST(water_prod AS DOUBLE)) AS water_prod,
-       SUM(CAST(water_inj AS DOUBLE)) AS water_inj,
-       SUM(CAST(gas_inj AS DOUBLE)) AS gas_inj,
-       SUM(CAST(co2_inj AS DOUBLE)) AS co2_inj
-FROM production
+SELECT p.source,
+       coalesce(
+           nullif(trim(CAST(p.basin AS VARCHAR)), ''),
+           nullif(trim(CAST(f.basin AS VARCHAR)), ''),
+           nullif(trim(CAST(p.region AS VARCHAR)), ''),
+           nullif(trim(CAST(f.region AS VARCHAR)), ''),
+           'Unassigned'
+       ) AS basin,
+       p.period,
+       SUM(CAST(p.oil_prod AS DOUBLE)) AS oil_prod,
+       SUM(CAST(p.condensate_prod AS DOUBLE)) AS condensate_prod,
+       SUM(CAST(p.ngl_prod AS DOUBLE)) AS ngl_prod,
+       SUM(CAST(p.gas_prod AS DOUBLE)) AS gas_prod,
+       SUM(CAST(p.water_prod AS DOUBLE)) AS water_prod,
+       SUM(CAST(p.water_inj AS DOUBLE)) AS water_inj,
+       SUM(CAST(p.gas_inj AS DOUBLE)) AS gas_inj,
+       SUM(CAST(p.co2_inj AS DOUBLE)) AS co2_inj
+FROM production p
+LEFT JOIN fields f
+       ON p.source = f.source AND p.field_id = f.field_id AND p.field_id <> ''
 GROUP BY 1, 2, 3
 ORDER BY 1, 2, 3
 """
@@ -543,7 +551,7 @@ def _build_search_index(
                     "s": f["source"],
                     "id": f["field_id"],
                     "n": f["field_name"],
-                    "b": f["basin"],
+                    "b": f["basin"] or f["region"],
                     "lon": f["lon"],
                     "lat": f["lat"],
                     "fy": f["first_year"],
@@ -583,7 +591,7 @@ def _build_search_index(
                     "id": key[1],
                     "n": _str_opt(row.get("well_name")) or key[1],
                     "f": _str_opt(row.get("field_name")),
-                    "b": _str_opt(row.get("basin")),
+                    "b": _str_opt(row.get("basin")) or _str_opt(row.get("region")),
                     "lon": lon,
                     "lat": lat,
                     "fy": _int_opt(st.get("first_year")),
@@ -629,6 +637,7 @@ def _field_tile_features(
                 "field_id": key[1],
                 "field_name": _str_opt(row.get("field_name")) or key[1],
                 "basin": _str_opt(row.get("basin")),
+                "region": _str_opt(row.get("region")),
                 "operator": _str_opt(row.get("operator")),
                 "environment": _str_opt(row.get("environment")),
                 "status": _str_opt(row.get("status")),

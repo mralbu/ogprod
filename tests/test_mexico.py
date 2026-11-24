@@ -94,6 +94,21 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
         zips_dir / "campos.zip",
         "campos",
     )
+    provinces_zip = _write_shp_zip(
+        gpd.GeoDataFrame(
+            {
+                "nombre": ["CUENCAS DEL SURESTE", "BURGOS"],
+                "situacin": ["PRODUCTORAS", "PRODUCTORAS"],
+            },
+            geometry=[
+                shapely.box(-94.0, 18.0, -91.0, 21.0),
+                shapely.box(-99.5, 24.5, -97.0, 26.5),
+            ],
+            crs="EPSG:4326",
+        ),
+        zips_dir / "provincias_petroleras.zip",
+        "provincias_petroleras",
+    )
     fac_zip = _write_shp_zip(
         gpd.GeoDataFrame(
             {
@@ -126,6 +141,17 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
         "pozos",
     )
 
+    export_targets = {
+        "cmp_cmp_rsv": "tmp/campos.zip",
+        "geo_petro_prov": "tmp/provincias_petroleras.zip",
+        "v_iftep_instalaciones": "tmp/instalaciones.zip",
+    }
+    zip_files = {
+        "provincias_petroleras.zip": provinces_zip,
+        "campos.zip": fields_zip,
+        "instalaciones.zip": fac_zip,
+    }
+
     def handler(request: httpx2.Request) -> httpx2.Response:
         url = str(request.url)
         if url.endswith("PRODUCCION_CAMPOS.csv"):
@@ -134,17 +160,11 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
             )
         if url.endswith("export.php"):
             body = request.content.decode("utf-8")
-            if "cmp_cmp_rsv" in body:
-                return httpx2.Response(200, json={"filePath": "tmp/campos.zip"})
-            if "v_iftep_instalaciones" in body:
-                return httpx2.Response(200, json={"filePath": "tmp/instalaciones.zip"})
-            return httpx2.Response(200, json={"filePath": "tmp/pozos.zip"})
+            path = next((p for k, p in export_targets.items() if k in body), "tmp/pozos.zip")
+            return httpx2.Response(200, json={"filePath": path})
         if "getFile.php" in url:
-            if "campos.zip" in url:
-                return httpx2.Response(200, content=fields_zip.read_bytes())
-            if "instalaciones.zip" in url:
-                return httpx2.Response(200, content=fac_zip.read_bytes())
-            return httpx2.Response(200, content=well_zip.read_bytes())
+            src = next((z for k, z in zip_files.items() if k in url), well_zip)
+            return httpx2.Response(200, content=src.read_bytes())
         return httpx2.Response(404)
 
     client = httpx2.Client(transport=httpx2.MockTransport(handler))
@@ -156,6 +176,7 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
     assert (tmp_path / "data" / "store" / "geo" / "fields" / "mexico.parquet").exists()
 
     fields = db.fields(source="mexico").set_index("field_id")
+    assert fields.loc["MALOOB", "basin"] == "CUENCAS DEL SURESTE"
     assert fields.loc["MALOOB", "environment"] == "offshore"
     assert math.isclose(float(fields.loc["MALOOB", "area_km2"]), 45.2, rel_tol=1e-4)
 
@@ -174,6 +195,36 @@ def test_mexico_end_to_end_mock_ingest(tmp_path: Path) -> None:
     assert mx_meta["publisher"] == "SENER / CNIH"
     assert "PRODUCCION_CAMPOS.csv" in mx_meta["files"]
     assert schema.GeoKind.FIELDS.value in summary.geo_counts
+
+
+def test_mexico_fields_parse_without_provinces_and_reversed_path_order(tmp_path: Path) -> None:
+    fields_zip = _write_shp_zip(
+        gpd.GeoDataFrame(
+            {"nombre": ["IXACHI"], "ubicacin": ["Terrestre"], "superficie": ["12.0"]},
+            geometry=[shapely.box(-96.2, 18.6, -96.0, 18.8)],
+            crs="EPSG:4326",
+        ),
+        tmp_path / "campos.zip",
+        "campos",
+    )
+    provinces_zip = _write_shp_zip(
+        gpd.GeoDataFrame(
+            {"nombre": ["VERACRUZ"]},
+            geometry=[shapely.box(-97.0, 18.0, -95.5, 19.5)],
+            crs="EPSG:4326",
+        ),
+        tmp_path / "provincias_petroleras.zip",
+        "provincias_petroleras",
+    )
+
+    connector = mexico.Mexico()
+    without_prov = connector.parse_geo(schema.GeoKind.FIELDS, [fields_zip]).set_index("field_id")
+    assert without_prov["basin"].isna().loc["IXACHI"]
+
+    reversed_order = connector.parse_geo(
+        schema.GeoKind.FIELDS, [provinces_zip, fields_zip]
+    ).set_index("field_id")
+    assert reversed_order.loc["IXACHI", "basin"] == "VERACRUZ"
 
 
 def test_mexico_field_id_normalization_and_bad_fecha_rejected() -> None:

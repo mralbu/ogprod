@@ -5,8 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import geopandas as gpd
+import pandas as pd
 import pyarrow.parquet as pq
 import shapely
+from hypothesis import given
+from hypothesis import strategies as st
 
 from ogprod import geo, schema
 
@@ -76,3 +79,58 @@ def test_prepare_geo_strips_whitespace_and_nullifies_blank_strings() -> None:
     assert prepared.loc[0, "well_name"] == "W-1"
     assert prepared.loc[0, "basin"] == "Recôncavo"
     assert prepared["status"].isna().iloc[0]
+
+
+@given(
+    split=st.floats(min_value=0.05, max_value=0.95, allow_nan=False, allow_infinity=False).filter(
+        lambda v: abs(v - 0.5) > 0.02
+    )
+)
+def test_assign_by_largest_overlap_picks_majority_region(split: float) -> None:
+    # Two adjacent rectangles covering [0, split] and [split, 1] inside a target covering [0, 1].
+    regions = gpd.GeoDataFrame(
+        {"label": ["WEST", "EAST"]},
+        geometry=[
+            shapely.box(-95.0, 19.0, -95.0 + split, 20.0),
+            shapely.box(-95.0 + split, 19.0, -94.0, 20.0),
+        ],
+        crs="EPSG:4326",
+    )
+    targets = gpd.GeoDataFrame(
+        {"fid": ["F1"]},
+        geometry=[shapely.box(-95.0, 19.2, -94.0, 19.8)],
+        crs="EPSG:4326",
+    )
+    assigned = geo.assign_by_largest_overlap(
+        targets, regions, id_column="fid", label_column="label", equal_area_crs="EPSG:6372"
+    )
+    expected = "WEST" if split > 0.5 else "EAST"
+    assert assigned.iloc[0] == expected
+
+
+def test_assign_by_largest_overlap_sums_multi_part_regions_and_handles_nulls() -> None:
+    regions = gpd.GeoDataFrame(
+        {"label": ["SPLIT", "SPLIT", "SINGLE", "   "]},
+        geometry=[
+            shapely.box(-94.0, 19.0, -93.65, 20.0),
+            shapely.box(-93.35, 19.0, -93.0, 20.0),
+            shapely.box(-93.65, 19.0, -93.35, 20.0),
+            shapely.box(-94.0, 19.0, -93.0, 20.0),
+        ],
+        crs="EPSG:4326",
+    )
+    targets = gpd.GeoDataFrame(
+        {"fid": ["OVERLAP", "OUTSIDE", "NO_GEOM"]},
+        geometry=[
+            shapely.box(-94.0, 19.1, -93.0, 19.9),
+            shapely.box(-100.0, 25.0, -99.5, 25.5),
+            None,
+        ],
+        crs="EPSG:4326",
+    )
+    assigned = geo.assign_by_largest_overlap(
+        targets, regions, id_column="fid", label_column="label", equal_area_crs="EPSG:6372"
+    )
+    assert assigned.iloc[0] == "SPLIT"
+    assert pd.isna(assigned.iloc[1])
+    assert pd.isna(assigned.iloc[2])
