@@ -1,10 +1,11 @@
-"""Layer-2 web visualization exporter (rollups, search index, meta.json, PMTiles).
+"""Layer-2 web visualization exporter (rollups, search index, meta.json, llms.txt, PMTiles).
 
 Reads canonical Layer-1 Parquet & GeoParquet 1.1 files from :class:`ogprod.Store`
 (optionally syncing from the Hugging Face mirror first) and produces static web
 assets ready for the MapLibre GL JS + ECharts + lazy DuckDB-WASM explorer:
 
 - ``meta.json``: source attribution, bounding boxes, years, freshness, mirror URL, gaps.
+- ``llms.txt``: LLM-oriented guide to endpoints, units, schemas, DuckDB queries, and deep links.
 - ``rollups/``: Parquet and compact JSON monthly aggregations (country, basin, field,
   facility with FPSO utilization ``actual_oil_bpd / oil_capacity_bpd``).
 - ``search/index.json``: compact lazy-loaded index for fields, facilities, and wells.
@@ -30,7 +31,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import shapely
 
-from ogprod import mirror, schema, sources, store
+from ogprod import llms_txt, mirror, schema, sources, store
 from ogprod.sources import brazil
 
 _LICENCES: dict[str, tuple[str, str]] = {
@@ -234,12 +235,16 @@ class ExportSummary:
     has_tiles: bool
 
 
-def _atomic_write_json(path: Path, payload: Any) -> None:
+def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.tmp")
-    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    tmp.write_text(text + "\n", encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
+
+
+def _atomic_write_json(path: Path, payload: Any) -> None:
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    _atomic_write_text(path, text + "\n")
 
 
 def _atomic_write_df_parquet(df: pd.DataFrame, path: Path) -> None:
@@ -957,9 +962,11 @@ def export_web(
     mirror_repo: str | None = None,
     revision: str = "main",
     skip_tiles: bool = False,
+    site_url: str | None = None,
     client: Any | None = None,
 ) -> ExportSummary:
-    """Export Layer-2 web visualization artifacts (meta, rollups, search, PMTiles)."""
+    """Export Layer-2 web visualization artifacts (meta, llms.txt, rollups, search, PMTiles)."""
+    normalized_site_url = llms_txt.normalize_site_url(site_url)
     db = store.Store(data_dir)
     resolved_mirror = mirror.resolve_mirror(mirror_repo)
     if sync_mirror:
@@ -1015,6 +1022,19 @@ def export_web(
             has_tiles=has_tiles,
         )
         _atomic_write_json(target_dir / "meta.json", meta)
+
+    sample_field = (
+        (str(fields_summary[0]["source"]), str(fields_summary[0]["field_id"]))
+        if fields_summary
+        else None
+    )
+    llms_content = llms_txt.render_llms_txt(
+        meta,
+        asset_sizes=llms_txt.collect_asset_sizes(target_dir),
+        site_url=normalized_site_url or None,
+        sample_field=sample_field,
+    )
+    _atomic_write_text(target_dir / "llms.txt", llms_content)
 
     exported_sources = tuple(s["id"] for s in meta["sources"])
     return ExportSummary(

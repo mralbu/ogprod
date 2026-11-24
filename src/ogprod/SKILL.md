@@ -22,7 +22,7 @@ list every option.
 | `coverage [--data-dir DIR]` | Summarize stored production rows, periods, and geo counts per source |
 | `audit [OPTIONS]` | Audit stored Parquet and GeoParquet tables for continuity, zero-hydrocarbon months, staleness, join coverage, and geo hygiene. Supports `--source`, `--stale-months`, `--strict`, `--json`, `--data-dir` |
 | `sql QUERY [--data-dir DIR]` | Run a DuckDB SQL query over `production`, `fields`, `facilities`, and `wells` |
-| `export-web [OPTIONS]` | Export Layer-2 static web visualization artifacts (`meta.json`, `rollups/`, `search/index.json`, `tiles/ogprod.pmtiles`). Supports `--data-dir`, `--out-dir`, `--sync-mirror`, `--mirror`, `--revision`, `--skip-tiles` |
+| `export-web [OPTIONS]` | Export Layer-2 static web visualization artifacts (`meta.json`, `llms.txt`, `rollups/`, `search/index.json`, `tiles/ogprod.pmtiles`). Supports `--data-dir`, `--out-dir`, `--sync-mirror`, `--mirror`, `--revision`, `--skip-tiles`, `--site-url` |
 | `completion SHELL` | Print the completion script for bash, zsh or fish |
 | `skill [--install]` | Print this file, or install it as an agent skill |
 

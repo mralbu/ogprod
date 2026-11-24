@@ -8,6 +8,12 @@
       name="description"
       content="Interactive map and production analytics for public oil, gas, injection, field, FPSO, and well data across Brazil (ANP), Norway (Sodir), and Mexico (SENER/CNIH)."
     />
+    <link
+      rel="alternate"
+      type="text/markdown"
+      href="./llms.txt"
+      title="LLM Data &amp; Query Guide (llms.txt)"
+    />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -17,6 +23,46 @@
   </head>
   <body class="bg-[#f4f5f7] text-[#0f172a] antialiased">
     <div id="root"></div>
+    <noscript>
+      <main
+        style="
+          max-width: 48rem;
+          margin: 2rem auto;
+          padding: 0 1rem;
+          font-family: system-ui, sans-serif;
+          line-height: 1.5;
+        "
+      >
+        <h1>ogprod — Public Oil &amp; Gas Production Explorer</h1>
+        <p>
+          This interactive map and chart explorer requires JavaScript, but all underlying
+          production and geospatial datasets are published directly as static JSON and Parquet
+          files:
+        </p>
+        <ul>
+          <li>
+            <a href="./llms.txt">llms.txt</a> — LLM &amp; agent guide to endpoints, schemas,
+            units, known data gaps, DuckDB queries, and Explorer deep links
+          </li>
+          <li>
+            <a href="./data/meta.json">data/meta.json</a> — machine-readable catalog and source
+            coverage
+          </li>
+          <li>
+            <a href="./data/rollups/country_monthly.json">data/rollups/country_monthly.json</a> —
+            monthly country production &amp; injection rates
+          </li>
+          <li>
+            <a href="./data/rollups/fields_summary.json">data/rollups/fields_summary.json</a> —
+            field summary table
+          </li>
+          <li>
+            <a href="./data/rollups/facilities_summary.json">data/rollups/facilities_summary.json</a>
+            — platform / FPSO summary and utilization
+          </li>
+        </ul>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

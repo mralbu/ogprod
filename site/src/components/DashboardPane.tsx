@@ -1,6 +1,7 @@
 import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { useMemo, useRef } from "react";
 import { buildSeriesCsv, downloadCsv } from "../lib/csvExport";
+import { llmsTxtUrl } from "../lib/dataClient";
 import { type ScopedKnownGap, selectApplicableGaps } from "../lib/knownGaps";
 import { formatPercent, PRODUCT_SPECS } from "../lib/units";
 import type {
@@ -341,6 +342,15 @@ function DashboardFooter({
             className="underline hover:text-slate-800"
           >
             {meta.mirror.repo}@{meta.mirror.revision}
+          </a>{" "}
+          ·{" "}
+          <a
+            href={llmsTxtUrl()}
+            target="_blank"
+            rel="noreferrer"
+            className="underline hover:text-slate-800"
+          >
+            llms.txt
           </a>{" "}
           · Built {meta.generated_at.slice(0, 10)}
         </div>

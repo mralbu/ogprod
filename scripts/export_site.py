@@ -17,6 +17,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mirror", default=None)
     parser.add_argument("--revision", default="main")
     parser.add_argument("--skip-tiles", action="store_true")
+    parser.add_argument("--site-url", default=None)
     return parser.parse_args(argv)
 
 
@@ -29,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
         mirror_repo=args.mirror,
         revision=args.revision,
         skip_tiles=args.skip_tiles,
+        site_url=args.site_url,
     )
     print(
         f"exported {summary.out_dir}: sources={list(summary.sources)} "

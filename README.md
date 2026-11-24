@@ -61,7 +61,7 @@ wells = db.wells()  # GeoParquet 1.1 well points
 
 ### Web Visualization (`site/`)
 
-Export Layer-2 static assets (rollups, search index, `meta.json`, and `ogprod.pmtiles` via Felt's `tippecanoe`) and run the MapLibre + ECharts + lazy DuckDB-WASM explorer:
+Export Layer-2 static assets (rollups, search index, `meta.json`, `llms.txt`, and `ogprod.pmtiles` via Felt's `tippecanoe`) and run the MapLibre + ECharts + lazy DuckDB-WASM explorer:
 
 ```sh
 uv run ogprod export-web --sync-mirror --out-dir site/public/data --data-dir ./data

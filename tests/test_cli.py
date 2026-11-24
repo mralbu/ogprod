@@ -95,5 +95,6 @@ def test_ingest_and_export_web_help_options() -> None:
         "--mirror",
         "--revision",
         "--skip-tiles",
+        "--site-url",
     ):
         assert flag in export_help

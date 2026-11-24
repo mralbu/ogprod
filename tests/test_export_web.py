@@ -469,3 +469,61 @@ def test_export_web_basin_rollup_falls_back_to_field_basin_and_region(tmp_path: 
     assert by_tile_id[("mexico", "MALOOB")]["properties"]["basin"] == "CUENCAS DEL SURESTE"
     assert by_tile_id[("norway", "26376286")]["properties"]["region"] == "North Sea"
     assert "basin" not in by_tile_id[("norway", "26376286")]["properties"]
+
+
+def test_export_web_writes_llms_txt_with_sizes_gaps_and_site_url(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    out_dir = tmp_path / "web"
+    _seed_multi_source_store(data_dir)
+
+    export_web.export_web(
+        data_dir=data_dir,
+        out_dir=out_dir,
+        mirror_repo="mralbu/ogprod",
+        revision="v2",
+        skip_tiles=True,
+        site_url="https://mralbu.github.io/ogprod",
+    )
+
+    llms_path = out_dir / "llms.txt"
+    assert llms_path.exists()
+    content = llms_path.read_text(encoding="utf-8")
+
+    assert content.startswith("# ogprod")
+    assert "https://mralbu.github.io/ogprod/data/meta.json" in content
+    assert "https://mralbu.github.io/ogprod/data/rollups/country_monthly.json" in content
+    assert "https://mralbu.github.io/ogprod/data/rollups/field_monthly/brazil.json" in content
+    assert "https://mralbu.github.io/ogprod/data/rollups/field_monthly/norway.json" in content
+    assert "https://mralbu.github.io/ogprod/data/rollups/facility_monthly/brazil.json" in content
+    # Norway has no facility rows in the seeded store, so no dead link should be emitted.
+    assert "facility_monthly/norway.json" not in content
+    assert "https://huggingface.co/datasets/mralbu/ogprod/resolve/v2/manifest.json" in content
+    assert "2003-07-01 to 2005-06-01" in content
+    # Top oil field in the seeded store is Norway's Johan Sverdrup (26376286).
+    assert "https://mralbu.github.io/ogprod/?source=norway&entity=field:norway/26376286" in content
+    # File sizes should be embedded next to endpoint links.
+    assert " B):" in content or " KB):" in content
+
+
+def test_export_web_cli_site_url_and_empty_store_llms_txt(tmp_path: Path) -> None:
+    data_dir = tmp_path / "empty_data"
+    out_dir = tmp_path / "empty_web"
+
+    res = CliRunner().invoke(
+        cli,
+        [
+            "export-web",
+            "--data-dir",
+            str(data_dir),
+            "--out-dir",
+            str(out_dir),
+            "--skip-tiles",
+            "--site-url",
+            "https://example.org/ogprod/",
+        ],
+        prog_name=APP_NAME,
+    )
+    assert res.exit_code == 0, res.output
+    content = (out_dir / "llms.txt").read_text(encoding="utf-8")
+    assert "No sources are currently present in this export." in content
+    assert "https://example.org/ogprod/data/meta.json" in content

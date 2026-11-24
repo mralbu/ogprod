@@ -24,6 +24,12 @@ export function pmtilesUrl(): string {
   return dataUrl("tiles/ogprod.pmtiles");
 }
 
+export function llmsTxtUrl(): string {
+  const base = import.meta.env.BASE_URL ?? "/";
+  const normalizedBase = base.endsWith("/") ? base : `${base}/`;
+  return `${normalizedBase}llms.txt`;
+}
+
 export async function loadInitialBundle(): Promise<{
   meta: SiteMeta;
   countryMonthly: Record<string, MonthlyPoint[]>;

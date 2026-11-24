@@ -256,7 +256,12 @@ def run_sql(query: str, data_dir: Path | None) -> None:
 @click.option(
     "--skip-tiles",
     is_flag=True,
-    help="Skip tippecanoe PMTiles generation (exports meta, rollups, and search index only).",
+    help="Skip tippecanoe PMTiles generation (exports meta, rollups, search index, and llms.txt).",
+)
+@click.option(
+    "--site-url",
+    default=None,
+    help="Public base URL of the Web Explorer embedded in generated llms.txt links.",
 )
 def export_web_cmd(
     data_dir: Path | None,
@@ -265,8 +270,9 @@ def export_web_cmd(
     mirror: str | None,
     revision: str,
     skip_tiles: bool,
+    site_url: str | None = None,
 ) -> None:
-    """Export Layer-2 web visualization artifacts (meta, rollups, search, PMTiles)."""
+    """Export Layer-2 web visualization artifacts (meta, rollups, search, llms.txt, PMTiles)."""
     from ogprod.export_web import export_web
 
     summary = export_web(
@@ -276,6 +282,7 @@ def export_web_cmd(
         mirror_repo=mirror,
         revision=revision,
         skip_tiles=skip_tiles,
+        site_url=site_url,
     )
     src_list = ", ".join(summary.sources) or "(none)"
     tiles_status = "yes" if summary.has_tiles else "no"
