@@ -579,13 +579,11 @@ def _canonicalize_rename_field_id(norm_id: str) -> str:
 
 def _canonicalize_post_dedup_field_id(norm_id: str, norm_basin: str = "") -> str:
     """Resolve basin homonyms and proportionally split (*_ECO, AnC_*, etc.) field IDs."""
-    if (norm_id, norm_basin) in _FIELD_BASIN_DISAMBIGUATION:
-        return _FIELD_BASIN_DISAMBIGUATION[(norm_id, norm_basin)]
-    if norm_id in _FIELD_SPLIT_ALIASES:
-        return _FIELD_SPLIT_ALIASES[norm_id]
     if norm_id.endswith("_ECO") and len(norm_id) > 4:
-        return norm_id[:-4]
-    return norm_id
+        norm_id = _canonicalize_rename_field_id(norm_id[:-4])
+    if norm_id in _FIELD_SPLIT_ALIASES:
+        norm_id = _FIELD_SPLIT_ALIASES[norm_id]
+    return _FIELD_BASIN_DISAMBIGUATION.get((norm_id, norm_basin), norm_id)
 
 
 def _canonicalize_field_id(norm_id: str, norm_basin: str = "") -> str:
@@ -602,7 +600,7 @@ def _canonical_field_display_name(raw_name: object, raw_id: str, canon_id: str) 
         return str(raw_name).strip()
     if canon_id in _CANONICAL_FIELD_NAMES:
         return _CANONICAL_FIELD_NAMES[canon_id]
-    if raw_id.endswith("_ECO") and not pd.isna(raw_name):
+    if raw_id.endswith("_ECO") and raw_id[:-4] == canon_id and not pd.isna(raw_name):
         return _ECO_SUFFIX_RE.sub("", str(raw_name).strip())
     return canon_id
 

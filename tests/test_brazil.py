@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from ogprod import Store, schema, units
@@ -436,6 +436,9 @@ _KNOWN_RAW_FIELDS = sorted(
         "ATAPU_ECO",
         "SEPIA_ECO",
         "ITAPU_ECO",
+        "LULA_ECO",
+        "MERO_ECO",
+        "SERRA_ECO",
         "MARLIM",
         "SUL DE TUPI",
     }
@@ -443,6 +446,9 @@ _KNOWN_RAW_FIELDS = sorted(
 _KNOWN_BASINS = ["", "SANTOS", "CAMPOS", "POTIGUAR", "RECONCAVO", "SERGIPE", "ESPIRITO SANTO"]
 
 
+@example(raw_id="ANC_MERO", basin="SERGIPE")
+@example(raw_id="MERO_ECO", basin="SERGIPE")
+@example(raw_id="LULA_ECO", basin="SANTOS")
 @given(
     raw_id=st.sampled_from(_KNOWN_RAW_FIELDS),
     basin=st.sampled_from(_KNOWN_BASINS),
@@ -455,19 +461,25 @@ def test_canonicalize_field_id_is_idempotent(raw_id: str, basin: str) -> None:
     assert not once.startswith("ANC_")
 
 
+@example(base_name="LULA", basin="SANTOS")
+@example(base_name="MERO", basin="SERGIPE")
 @given(
-    base_name=st.from_regex(r"[A-Z]{2,12}", fullmatch=True).filter(
-        lambda s: (
-            s not in brazil._MISSING_SENTINELS
-            and not s.endswith("_ECO")
-            and not s.startswith("ANC_")
-        )
+    base_name=st.one_of(
+        st.sampled_from([f for f in _KNOWN_RAW_FIELDS if not f.endswith("_ECO")]),
+        st.from_regex(r"[A-Z]{2,12}", fullmatch=True).filter(
+            lambda s: (
+                s not in brazil._MISSING_SENTINELS
+                and not s.endswith("_ECO")
+                and not s.startswith("ANC_")
+            )
+        ),
     ),
+    basin=st.sampled_from(_KNOWN_BASINS),
 )
-def test_canonicalize_field_id_strips_any_eco_suffix(base_name: str) -> None:
-    assert brazil._canonicalize_field_id(f"{base_name}_ECO") == brazil._canonicalize_field_id(
-        base_name
-    )
+def test_canonicalize_field_id_strips_any_eco_suffix(base_name: str, basin: str) -> None:
+    assert brazil._canonicalize_field_id(
+        f"{base_name}_ECO", basin
+    ) == brazil._canonicalize_field_id(base_name, basin)
 
 
 def _fmt_br_opt(val: float | None) -> str:
