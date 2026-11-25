@@ -64,7 +64,7 @@ export function shouldTriggerBasemapFallback(
   return errMsg.toLowerCase().includes("openfreemap.org");
 }
 
-/** Pick overview center and zoom so all Atlantic/European/American sources fit on narrow phones. */
+/** Pick fallback overview center and zoom when source bboxes are unavailable or span the globe. */
 export function getOverviewView(containerWidth: number): {
   center: [number, number];
   zoom: number;
@@ -73,6 +73,38 @@ export function getOverviewView(containerWidth: number): {
     return { center: [-30, 18], zoom: MOBILE_OVERVIEW_ZOOM };
   }
   return { center: [-30, 14], zoom: INITIAL_MAP_ZOOM };
+}
+
+/**
+ * Compute the union [[minLng, minLat], [maxLng, maxLat]] bounding box across all
+ * sources with valid bboxes. Returns null when no valid bboxes exist or when the
+ * span exceeds 300° longitude (where a full-world center/zoom view frames better).
+ */
+export function computeOverviewBounds(
+  sources: readonly { bbox: [number, number, number, number] | null }[],
+): [[number, number], [number, number]] | null {
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  let count = 0;
+
+  for (const src of sources) {
+    const b = src.bbox;
+    if (!b || b.length !== 4 || b.some((v) => !Number.isFinite(v))) continue;
+    if (b[0] < minLng) minLng = b[0];
+    if (b[1] < minLat) minLat = b[1];
+    if (b[2] > maxLng) maxLng = b[2];
+    if (b[3] > maxLat) maxLat = b[3];
+    count += 1;
+  }
+
+  if (count === 0) return null;
+  if (maxLng - minLng > 300) return null;
+  return [
+    [Math.max(-180, minLng), Math.max(-75, minLat)],
+    [Math.min(180, maxLng), Math.min(80, maxLat)],
+  ];
 }
 
 // MapLibre's symbol_sdf shader defines SDF_PX = 8 and edge alpha = 0.75 (cutoff = 0.25).

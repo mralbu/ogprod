@@ -3,6 +3,7 @@ import {
   buildFallbackLayers,
   buildSelectionFilter,
   buildVectorLayers,
+  computeOverviewBounds,
   createDiamondSdfImage,
   FACILITY_ICON_ID,
   FALLBACK_BASEMAP,
@@ -100,6 +101,28 @@ describe("basemap fallback and mobile overview framing", () => {
     expect(getOverviewView(390)).toEqual({ center: [-30, 18], zoom: MOBILE_OVERVIEW_ZOOM });
     expect(getOverviewView(800)).toEqual({ center: [-30, 14], zoom: INITIAL_MAP_ZOOM });
     expect(getOverviewView(0)).toEqual({ center: [-30, 14], zoom: INITIAL_MAP_ZOOM });
+  });
+
+  it("derives union overview bounds from valid source bboxes and falls back when global or empty", () => {
+    expect(computeOverviewBounds([])).toBeNull();
+    expect(computeOverviewBounds([{ bbox: null }])).toBeNull();
+    expect(
+      computeOverviewBounds([
+        { bbox: [-48, -28, -34, 4] },
+        { bbox: [1, 56, 25, 72] },
+        { bbox: null },
+      ]),
+    ).toEqual([
+      [-48, -28],
+      [25, 72],
+    ]);
+    // Span > 300 deg longitude falls back to full-world overview view.
+    expect(
+      computeOverviewBounds([
+        { bbox: [-165, 58, -140, 71] },
+        { bbox: [140, -35, 155, -10] },
+      ]),
+    ).toBeNull();
   });
 });
 

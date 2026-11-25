@@ -1,6 +1,13 @@
 import * as echarts from "echarts";
-import type { ChartSeriesKey, KnownGap, MonthlyPoint, UnitSystem } from "../types/data";
+import type {
+  ChartSeriesKey,
+  KnownGap,
+  MonthlyPoint,
+  SourceMeta,
+  UnitSystem,
+} from "../types/data";
 import { isDerivedSeries } from "../types/data";
+import { formatCountryName, formatSourceDisplayName } from "./sourceLabels";
 import {
   type AxisGroup,
   computeSeriesValue,
@@ -294,6 +301,231 @@ export function buildTimeSeriesOption({
     yAxis,
     dataZoom:
       rows.length > 18
+        ? [
+            {
+              type: "slider",
+              height: 18,
+              bottom: 6,
+              borderColor: "#e2e8f0",
+              fillerColor: "rgba(14, 116, 144, 0.14)",
+              handleStyle: { color: "#0e7490" },
+            },
+            { type: "inside" },
+          ]
+        : [],
+    series,
+  };
+}
+
+/** Max individual lines on the All Sources comparison chart before bucketing tail into "Other". */
+export const MAX_COMPARISON_SERIES = 8;
+
+export const SOURCE_SERIES_COLORS: readonly string[] = [
+  "#c26d0a",
+  "#0284c7",
+  "#0d9488",
+  "#7c3aed",
+  "#dc2626",
+  "#2563eb",
+  "#d97706",
+  "#475569",
+];
+
+export interface SourceComparisonSeries {
+  id: string;
+  label: string;
+  color: string;
+  values: (number | null)[];
+  latestValue: number;
+}
+
+export interface SourceComparisonTable {
+  periods: string[];
+  product: ChartSeriesKey;
+  unitLabel: string;
+  decimals: number;
+  series: SourceComparisonSeries[];
+}
+
+export interface BuildSourceComparisonParams {
+  countryMonthly: Record<string, MonthlyPoint[]>;
+  sources: readonly SourceMeta[];
+  product: ChartSeriesKey;
+  unitSystem: UnitSystem;
+  maxSeries?: number;
+}
+
+interface RawSourceTrack {
+  id: string;
+  label: string;
+  byPeriod: Map<string, number>;
+  latestValue: number;
+}
+
+function roundTo(value: number, decimals: number): number {
+  return Number(value.toFixed(decimals));
+}
+
+function resolveComparisonLabel(sourceId: string, sources: readonly SourceMeta[]): string {
+  const match = sources.find((s) => s.id === sourceId);
+  if (match) {
+    return formatSourceDisplayName(match, sources);
+  }
+  return formatCountryName(sourceId, sources);
+}
+
+/**
+ * Align per-source monthly series onto a shared sorted period axis for a single metric,
+ * preserving each source's own start and end months (null outside) so lagging regulators
+ * never create a synthetic drop-off or fabricated carry-forward values.
+ */
+export function buildSourceComparisonTable({
+  countryMonthly,
+  sources,
+  product,
+  unitSystem,
+  maxSeries = MAX_COMPARISON_SERIES,
+}: BuildSourceComparisonParams): SourceComparisonTable {
+  const decimals = product === "water_cut" ? 1 : 2;
+  const unitLabel = unitLabelFor(product, unitSystem);
+  const periodSet = new Set<string>();
+  const tracks: RawSourceTrack[] = [];
+
+  for (const [sourceId, points] of Object.entries(countryMonthly)) {
+    const byPeriod = new Map<string, number>();
+    let latestPeriod = "";
+    let latestValue = 0;
+
+    for (const pt of points) {
+      const val = computeSeriesValue(pt, product, unitSystem);
+      if (val === null) continue;
+      byPeriod.set(pt.p, val);
+      periodSet.add(pt.p);
+      if (pt.p >= latestPeriod) {
+        latestPeriod = pt.p;
+        latestValue = val;
+      }
+    }
+
+    if (byPeriod.size > 0) {
+      tracks.push({
+        id: sourceId,
+        label: resolveComparisonLabel(sourceId, sources),
+        byPeriod,
+        latestValue,
+      });
+    }
+  }
+
+  tracks.sort((a, b) => b.latestValue - a.latestValue || a.id.localeCompare(b.id));
+  const periods = Array.from(periodSet).sort((a, b) => a.localeCompare(b));
+
+  const limit = Math.max(1, maxSeries);
+  const canAggregateOther = !isDerivedSeries(product) && tracks.length > limit;
+  const directTracks = canAggregateOther ? tracks.slice(0, limit - 1) : tracks.slice(0, limit);
+  const tailTracks = canAggregateOther ? tracks.slice(limit - 1) : [];
+
+  const series: SourceComparisonSeries[] = directTracks.map((track, idx) => ({
+    id: track.id,
+    label: track.label,
+    color: SOURCE_SERIES_COLORS[idx % SOURCE_SERIES_COLORS.length],
+    latestValue: roundTo(track.latestValue, decimals),
+    values: periods.map((p) => {
+      const val = track.byPeriod.get(p);
+      return val === undefined ? null : roundTo(val, decimals);
+    }),
+  }));
+
+  if (tailTracks.length > 0) {
+    let otherLatest = 0;
+    const otherValues = periods.map((p) => {
+      let sum = 0;
+      let present = false;
+      for (const track of tailTracks) {
+        const val = track.byPeriod.get(p);
+        if (val !== undefined) {
+          sum += val;
+          present = true;
+        }
+      }
+      if (!present) return null;
+      otherLatest = sum;
+      return roundTo(sum, decimals);
+    });
+    series.push({
+      id: "__other__",
+      label: `Other (${tailTracks.length})`,
+      color: SOURCE_SERIES_COLORS[SOURCE_SERIES_COLORS.length - 1],
+      latestValue: roundTo(otherLatest, decimals),
+      values: otherValues,
+    });
+  }
+
+  return { periods, product, unitLabel, decimals, series };
+}
+
+export function buildSourceComparisonOption(
+  table: SourceComparisonTable,
+  unitSystem: UnitSystem,
+): echarts.EChartsOption {
+  const unitMeta = UNIT_SYSTEMS.find((u) => u.id === unitSystem) ?? UNIT_SYSTEMS[0];
+  const spec = getSeriesSpec(table.product);
+  const periods = table.periods.map((p) => p.slice(0, 7));
+  const yAxis = [buildYAxisOption(spec.axisGroup, 0, 1, unitMeta)];
+
+  const series: echarts.LineSeriesOption[] = table.series.map((item) => ({
+    name: item.label,
+    type: "line",
+    yAxisIndex: 0,
+    showSymbol: periods.length <= 24,
+    symbolSize: 4,
+    smooth: false,
+    connectNulls: false,
+    lineStyle: {
+      width: item.id === "__other__" ? 1.5 : 2,
+      type: item.id === "__other__" ? "dashed" : "solid",
+    },
+    itemStyle: { color: item.color },
+    data: item.values,
+  }));
+
+  return {
+    animationDuration: 260,
+    grid: {
+      left: 56,
+      right: 20,
+      top: GRID_TOP_PX,
+      bottom: periods.length > 18 ? 58 : 30,
+    },
+    tooltip: {
+      trigger: "axis",
+      backgroundColor: "rgba(255,255,255,0.97)",
+      borderColor: "#cbd5e1",
+      textStyle: { color: "#0f172a", fontSize: 12, fontFamily: SANS_FONT },
+    },
+    legend: {
+      type: "scroll",
+      top: LEGEND_TOP_PX,
+      left: "center",
+      itemWidth: 14,
+      itemHeight: 8,
+      itemGap: 14,
+      pageIconSize: 10,
+      pageIconColor: "#475569",
+      pageIconInactiveColor: "#cbd5e1",
+      pageTextStyle: { color: "#64748b", fontSize: 10, fontFamily: SANS_FONT },
+      textStyle: { color: "#334155", fontSize: 11, fontFamily: SANS_FONT },
+    },
+    xAxis: {
+      type: "category",
+      data: periods,
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: "#cbd5e1" } },
+      axisLabel: { color: "#64748b", fontSize: 11, fontFamily: SANS_FONT },
+    },
+    yAxis,
+    dataZoom:
+      periods.length > 18
         ? [
             {
               type: "slider",

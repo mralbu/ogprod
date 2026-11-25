@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildWellPartitionUrls, buildWellQuerySql } from "../lib/duckdbWell";
+import {
+  buildWellPartitionUrls,
+  buildWellQuerySql,
+  resolveWellQueryPlan,
+} from "../lib/duckdbWell";
 
 describe("lazy DuckDB-WASM well query pruning", () => {
   it("requests only partitions between firstYear and lastYear", () => {
@@ -27,5 +31,24 @@ describe("lazy DuckDB-WASM well query pruning", () => {
     );
     expect(sql).toContain("WHERE entity_id = '7-O''NEIL-1-RJS'");
     expect(sql).toContain("read_parquet(['https://example.com/production/source=brazil/year=2026/data.parquet'])");
+  });
+
+  it("skips DuckDB-WASM for field-level sources and wellbores without production years", () => {
+    expect(
+      resolveWellQueryPlan({ sourceEntityType: "field", firstYear: 1975, lastYear: 2026 }),
+    ).toEqual({ canQuery: false, reason: "field_level_source" });
+
+    expect(resolveWellQueryPlan({ sourceEntityType: "well" })).toEqual({
+      canQuery: false,
+      reason: "no_well_history",
+    });
+
+    expect(
+      resolveWellQueryPlan({ sourceEntityType: "well", firstYear: 2026, lastYear: 2020 }),
+    ).toEqual({ canQuery: false, reason: "no_well_history" });
+
+    expect(
+      resolveWellQueryPlan({ sourceEntityType: "well", firstYear: 2021, lastYear: 2026 }),
+    ).toEqual({ canQuery: true, firstYear: 2021, lastYear: 2026 });
   });
 });

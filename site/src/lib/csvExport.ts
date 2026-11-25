@@ -1,4 +1,5 @@
 import type { ChartSeriesKey, MonthlyPoint, UnitSystem } from "../types/data";
+import type { SourceComparisonTable } from "./timeSeriesOption";
 import { computeSeriesValue, getSeriesSpec, unitLabelFor } from "./units";
 
 function escapeCsvCell(value: string): string {
@@ -28,6 +29,23 @@ export function buildSeriesCsv(
     }
     if (options?.includeUtilization) {
       cells.push(row.oil_util === undefined ? "" : (row.oil_util * 100).toFixed(2));
+    }
+    lines.push(cells.map(escapeCsvCell).join(","));
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+export function buildComparisonCsv(table: SourceComparisonTable): string {
+  const headers = [
+    "period",
+    ...table.series.map((s) => `${s.label} (${table.unitLabel})`),
+  ];
+  const lines = [headers.map(escapeCsvCell).join(",")];
+  for (let i = 0; i < table.periods.length; i += 1) {
+    const cells: string[] = [table.periods[i]];
+    for (const s of table.series) {
+      const val = s.values[i];
+      cells.push(val === null || val === undefined ? "" : val.toFixed(table.decimals));
     }
     lines.push(cells.map(escapeCsvCell).join(","));
   }

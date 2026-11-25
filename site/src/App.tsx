@@ -8,7 +8,7 @@ import {
   loadFieldMonthlyShard,
   loadInitialBundle,
 } from "./lib/dataClient";
-import { queryWellSeriesFromMirror } from "./lib/duckdbWell";
+import { queryWellSeriesFromMirror, resolveWellQueryPlan } from "./lib/duckdbWell";
 import { parseUrlState, serializeUrlState } from "./lib/urlState";
 import type {
   ChartSeriesKey,
@@ -21,30 +21,6 @@ import type {
   SourceFilter,
   UnitSystem,
 } from "./types/data";
-import { ALL_RATE_COLUMNS } from "./types/data";
-
-function mergeCountryMonthly(
-  countryMonthly: Record<string, MonthlyPoint[]>,
-  activeSource: SourceFilter,
-): MonthlyPoint[] {
-  if (activeSource !== null) {
-    return countryMonthly[activeSource] ?? [];
-  }
-  const byPeriod = new Map<string, MonthlyPoint>();
-  for (const series of Object.values(countryMonthly)) {
-    for (const pt of series) {
-      const existing = byPeriod.get(pt.p) ?? { p: pt.p };
-      for (const col of ALL_RATE_COLUMNS) {
-        const val = pt[col];
-        if (val !== undefined) {
-          existing[col] = (existing[col] ?? 0) + val;
-        }
-      }
-      byPeriod.set(pt.p, existing);
-    }
-  }
-  return Array.from(byPeriod.values()).sort((a, b) => a.p.localeCompare(b.p));
-}
 
 export function App() {
   const initial = useMemo(() => parseUrlState(window.location.search), []);
@@ -66,6 +42,9 @@ export function App() {
   const [loadingSeries, setLoadingSeries] = useState(false);
   const [seriesError, setSeriesError] = useState<string | null>(null);
   const [wellPartitionsQueried, setWellPartitionsQueried] = useState<number | null>(null);
+  const [wellNoSeriesReason, setWellNoSeriesReason] = useState<
+    "field_level_source" | "no_well_history" | null
+  >(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,9 +84,10 @@ export function App() {
     let cancelled = false;
     setSeriesError(null);
     setWellPartitionsQueried(null);
+    setWellNoSeriesReason(null);
 
     if (selection.kind === "overview") {
-      setSeries(mergeCountryMonthly(countryMonthly, activeSource));
+      setSeries(activeSource === null ? [] : (countryMonthly[activeSource] ?? []));
       setLoadingSeries(false);
       return;
     }
@@ -152,11 +132,14 @@ export function App() {
     }
     if (selection.kind === "well") {
       const srcMeta = meta.sources.find((s) => s.id === selection.source);
-      const years = srcMeta?.years ?? [];
-      const firstYear = selection.firstYear ?? years[0];
-      const lastYear = selection.lastYear ?? years[years.length - 1];
-      if (!firstYear || !lastYear) {
+      const plan = resolveWellQueryPlan({
+        sourceEntityType: srcMeta?.entity_type,
+        firstYear: selection.firstYear,
+        lastYear: selection.lastYear,
+      });
+      if (!plan.canQuery) {
         setSeries([]);
+        setWellNoSeriesReason(plan.reason);
         setLoadingSeries(false);
         return;
       }
@@ -165,14 +148,17 @@ export function App() {
         mirrorBaseUrl: meta.mirror.base_url,
         source: selection.source,
         wellId: selection.id,
-        firstYear,
-        lastYear,
-        availableYears: years,
+        firstYear: plan.firstYear,
+        lastYear: plan.lastYear,
+        availableYears: srcMeta?.years,
       })
         .then((res) => {
           if (cancelled) return;
           setSeries(res.rows);
           setWellPartitionsQueried(res.partitionsQueried);
+          if (res.rows.length === 0) {
+            setWellNoSeriesReason("no_well_history");
+          }
           setLoadingSeries(false);
         })
         .catch((err: unknown) => {
@@ -189,6 +175,9 @@ export function App() {
   const handleSelectSource = useCallback((source: SourceFilter) => {
     setActiveSource(source);
     setSelection({ kind: "overview" });
+    if (source === null) {
+      setActiveProducts((prev) => [prev[0] ?? "oil_prod"]);
+    }
   }, []);
 
   const handleSelectEntity = useCallback((next: EntitySelection) => {
@@ -198,53 +187,59 @@ export function App() {
     }
   }, []);
 
-  const handleSelectSearchEntry = useCallback(
-    (entry: SearchEntry) => {
-      setActiveSource(entry.s);
-      if (entry.t === "field") {
-        setSelection({
-          kind: "field",
-          source: entry.s,
-          id: entry.id,
-          name: entry.n,
-          lon: entry.lon,
-          lat: entry.lat,
-        });
-      } else if (entry.t === "facility") {
-        setSelection({
-          kind: "facility",
-          source: entry.s,
-          id: entry.id,
-          name: entry.n,
-          lon: entry.lon,
-          lat: entry.lat,
-        });
-      } else {
-        setSelection({
-          kind: "well",
-          source: entry.s,
-          id: entry.id,
-          name: entry.n,
-          fieldName: entry.f,
-          basin: entry.b,
-          firstYear: entry.fy,
-          lastYear: entry.ly,
-          lon: entry.lon,
-          lat: entry.lat,
-        });
-      }
-    },
-    [],
-  );
-
-  const handleToggleProduct = useCallback((col: ChartSeriesKey) => {
-    setActiveProducts((prev) => {
-      if (prev.includes(col)) {
-        return prev.length > 1 ? prev.filter((c) => c !== col) : prev;
-      }
-      return [...prev, col];
-    });
+  const handleSelectSearchEntry = useCallback((entry: SearchEntry) => {
+    setActiveSource(entry.s);
+    if (entry.t === "field") {
+      setSelection({
+        kind: "field",
+        source: entry.s,
+        id: entry.id,
+        name: entry.n,
+        lon: entry.lon,
+        lat: entry.lat,
+      });
+    } else if (entry.t === "facility") {
+      setSelection({
+        kind: "facility",
+        source: entry.s,
+        id: entry.id,
+        name: entry.n,
+        lon: entry.lon,
+        lat: entry.lat,
+      });
+    } else {
+      setSelection({
+        kind: "well",
+        source: entry.s,
+        id: entry.id,
+        name: entry.n,
+        fieldName: entry.f,
+        basin: entry.b,
+        firstYear: entry.fy,
+        lastYear: entry.ly,
+        lon: entry.lon,
+        lat: entry.lat,
+      });
+    }
   }, []);
+
+  const isAllSourcesOverview = activeSource === null && selection.kind === "overview";
+
+  const handleToggleProduct = useCallback(
+    (col: ChartSeriesKey) => {
+      if (isAllSourcesOverview) {
+        setActiveProducts([col]);
+        return;
+      }
+      setActiveProducts((prev) => {
+        if (prev.includes(col)) {
+          return prev.length > 1 ? prev.filter((c) => c !== col) : prev;
+        }
+        return [...prev, col];
+      });
+    },
+    [isAllSourcesOverview],
+  );
 
   if (bootError) {
     return (
@@ -293,9 +288,11 @@ export function App() {
           activeSource={activeSource}
           selection={selection}
           series={series}
+          countryMonthly={countryMonthly}
           loadingSeries={loadingSeries}
           seriesError={seriesError}
           wellPartitionsQueried={wellPartitionsQueried}
+          wellNoSeriesReason={wellNoSeriesReason}
           activeProducts={activeProducts}
           onToggleProduct={handleToggleProduct}
           unitSystem={unitSystem}

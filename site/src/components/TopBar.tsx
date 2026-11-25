@@ -1,7 +1,11 @@
 import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadSearchIndex } from "../lib/dataClient";
-import { formatCountryName } from "../lib/sourceLabels";
+import {
+  formatCountryName,
+  formatSourceDisplayName,
+  SOURCE_PILL_MAX,
+} from "../lib/sourceLabels";
 import { formatCompactNumber, UNIT_SYSTEMS } from "../lib/units";
 import type { SearchEntry, SourceFilter, SourceMeta, UnitSystem } from "../types/data";
 
@@ -75,6 +79,8 @@ export function TopBar({
     return filtered.slice(0, 14);
   }, [index, query, activeSource]);
 
+  const useDropdown = sources.length > SOURCE_PILL_MAX;
+
   return (
     <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
       <div className="flex items-center gap-4">
@@ -92,41 +98,63 @@ export function TopBar({
           </div>
         </div>
 
-        <nav
-          aria-label="Data sources"
-          className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5"
-        >
-          <button
-            id="source-btn-all"
-            type="button"
-            onClick={() => onSelectSource(null)}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-              activeSource === null
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
+        {useDropdown ? (
+          <label className="flex items-center gap-1.5 text-xs text-slate-500">
+            <span className="hidden sm:inline">Source</span>
+            <select
+              id="source-select"
+              aria-label="Data sources"
+              value={activeSource ?? "__all__"}
+              onChange={(e) =>
+                onSelectSource(e.target.value === "__all__" ? null : e.target.value)
+              }
+              className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-cyan-700 focus:bg-white focus:outline-none"
+            >
+              <option value="__all__">All Sources ({sources.length})</option>
+              {sources.map((src) => (
+                <option key={src.id} value={src.id}>
+                  {formatSourceDisplayName(src, sources)} ({src.country_code})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <nav
+            aria-label="Data sources"
+            className="flex flex-wrap items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5"
           >
-            All
-          </button>
-          {sources.map((src) => (
             <button
-              id={`source-btn-${src.id}`}
-              key={src.id}
+              id="source-btn-all"
               type="button"
-              onClick={() => onSelectSource(src.id)}
+              onClick={() => onSelectSource(null)}
               className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                activeSource === src.id
+                activeSource === null
                   ? "bg-white text-slate-900 shadow-xs"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              <span>{src.country}</span>
-              <span className="ml-1 text-[10px] font-normal text-slate-400">
-                {src.country_code}
-              </span>
+              All
             </button>
-          ))}
-        </nav>
+            {sources.map((src) => (
+              <button
+                id={`source-btn-${src.id}`}
+                key={src.id}
+                type="button"
+                onClick={() => onSelectSource(src.id)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                  activeSource === src.id
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <span>{formatSourceDisplayName(src, sources)}</span>
+                <span className="ml-1 text-[10px] font-normal text-slate-400">
+                  {src.country_code}
+                </span>
+              </button>
+            ))}
+          </nav>
+        )}
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-3 sm:flex-initial">

@@ -1,8 +1,9 @@
 import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { useMemo, useRef } from "react";
-import { buildSeriesCsv, downloadCsv } from "../lib/csvExport";
+import { buildComparisonCsv, buildSeriesCsv, downloadCsv } from "../lib/csvExport";
 import { llmsTxtUrl } from "../lib/dataClient";
 import { type ScopedKnownGap, selectApplicableGaps } from "../lib/knownGaps";
+import { buildSourceComparisonTable } from "../lib/timeSeriesOption";
 import {
   computeSeriesValue,
   DERIVED_SPECS,
@@ -24,7 +25,7 @@ import type {
 } from "../types/data";
 import { ALL_DERIVED_SERIES, ALL_RATE_COLUMNS } from "../types/data";
 import { DashboardHeader } from "./DashboardHeader";
-import { KpiStrip } from "./KpiStrip";
+import { type AllSourcesKpiSummary, KpiStrip } from "./KpiStrip";
 import { OverviewLeaderboards } from "./OverviewLeaderboards";
 import { TimeSeriesChart, type TimeSeriesChartHandle } from "./TimeSeriesChart";
 import { UtilizationChart } from "./UtilizationChart";
@@ -34,9 +35,11 @@ interface DashboardPaneProps {
   activeSource: SourceFilter;
   selection: EntitySelection;
   series: MonthlyPoint[];
+  countryMonthly: Record<string, MonthlyPoint[]>;
   loadingSeries: boolean;
   seriesError: string | null;
   wellPartitionsQueried: number | null;
+  wellNoSeriesReason: "field_level_source" | "no_well_history" | null;
   activeProducts: ChartSeriesKey[];
   onToggleProduct: (col: ChartSeriesKey) => void;
   unitSystem: UnitSystem;
@@ -51,9 +54,11 @@ export function DashboardPane({
   activeSource,
   selection,
   series,
+  countryMonthly,
   loadingSeries,
   seriesError,
   wellPartitionsQueried,
+  wellNoSeriesReason,
   activeProducts,
   onToggleProduct,
   unitSystem,
@@ -63,6 +68,7 @@ export function DashboardPane({
   onSelectEntity,
 }: DashboardPaneProps) {
   const chartRef = useRef<TimeSeriesChartHandle>(null);
+  const isAllSourcesOverview = activeSource === null && selection.kind === "overview";
 
   const activeSourcesMeta = useMemo(() => {
     const scopeSource = selection.kind === "overview" ? activeSource : selection.source;
@@ -88,9 +94,14 @@ export function DashboardPane({
     );
   }, [selection, facilitiesSummary]);
 
+  const allCountryRows = useMemo(
+    () => (isAllSourcesOverview ? Object.values(countryMonthly).flat() : series),
+    [isAllSourcesOverview, countryMonthly, series],
+  );
+
   const availableRateProducts = useMemo(() => {
     const present = new Set<RateColumn>();
-    for (const row of series) {
+    for (const row of allCountryRows) {
       for (const col of ALL_RATE_COLUMNS) {
         if (row[col] !== undefined && row[col] !== null) {
           present.add(col);
@@ -103,18 +114,18 @@ export function DashboardPane({
       }
     }
     return ALL_RATE_COLUMNS.filter((c) => present.has(c));
-  }, [series, activeSourcesMeta]);
+  }, [allCountryRows, activeSourcesMeta]);
 
   const availableDerivedSeries = useMemo(() => {
-    if (series.length === 0) {
+    if (allCountryRows.length === 0) {
       return ALL_DERIVED_SERIES.filter((key) =>
         DERIVED_SPECS[key].dependsOn.every((dep) => availableRateProducts.includes(dep)),
       );
     }
     return ALL_DERIVED_SERIES.filter((key) =>
-      series.some((row) => computeSeriesValue(row, key, unitSystem) !== null),
+      allCountryRows.some((row) => computeSeriesValue(row, key, unitSystem) !== null),
     );
-  }, [series, availableRateProducts, unitSystem]);
+  }, [allCountryRows, availableRateProducts, unitSystem]);
 
   const availableProducts = useMemo<ChartSeriesKey[]>(
     () => [...availableRateProducts, ...availableDerivedSeries],
@@ -123,22 +134,80 @@ export function DashboardPane({
 
   const visibleProducts = useMemo(() => {
     const filtered = activeProducts.filter((c) => availableProducts.includes(c));
+    if (isAllSourcesOverview) {
+      const single = filtered[0] ?? availableRateProducts[0];
+      return single ? [single] : [];
+    }
     return filtered.length > 0 ? filtered : availableRateProducts.slice(0, 2);
-  }, [activeProducts, availableProducts, availableRateProducts]);
+  }, [activeProducts, availableProducts, availableRateProducts, isAllSourcesOverview]);
+
+  const comparisonTable = useMemo(() => {
+    if (!isAllSourcesOverview || visibleProducts.length === 0) return null;
+    return buildSourceComparisonTable({
+      countryMonthly,
+      sources: meta.sources,
+      product: visibleProducts[0],
+      unitSystem,
+    });
+  }, [isAllSourcesOverview, visibleProducts, countryMonthly, meta.sources, unitSystem]);
+
+  const allSourcesOverview = useMemo<AllSourcesKpiSummary | null>(() => {
+    if (!isAllSourcesOverview) return null;
+    let oilSum = 0;
+    let hasOil = false;
+    let gasSum = 0;
+    let hasGas = false;
+    let firstPeriod: string | null = null;
+    let lastPeriod: string | null = null;
+
+    for (const src of meta.sources) {
+      if (src.latest_oil_bpd !== null) {
+        oilSum += src.latest_oil_bpd;
+        hasOil = true;
+      }
+      if (src.latest_gas_e3m3d !== null) {
+        gasSum += src.latest_gas_e3m3d;
+        hasGas = true;
+      }
+      if (src.first_period && (!firstPeriod || src.first_period < firstPeriod)) {
+        firstPeriod = src.first_period;
+      }
+      if (src.last_period && (!lastPeriod || src.last_period > lastPeriod)) {
+        lastPeriod = src.last_period;
+      }
+    }
+
+    if (!firstPeriod && comparisonTable && comparisonTable.periods.length > 0) {
+      firstPeriod = comparisonTable.periods[0];
+      lastPeriod = comparisonTable.periods[comparisonTable.periods.length - 1];
+    }
+
+    return {
+      latestOilBpd: hasOil ? oilSum : null,
+      latestGasE3m3d: hasGas ? gasSum : null,
+      firstPeriod,
+      lastPeriod,
+      sourceCount: meta.sources.length,
+    };
+  }, [isAllSourcesOverview, meta.sources, comparisonTable]);
 
   const latestRow = series.length > 0 ? series[series.length - 1] : null;
   const firstRow = series.length > 0 ? series[0] : null;
+  const hasChartData = isAllSourcesOverview
+    ? Boolean(comparisonTable && comparisonTable.periods.length > 0)
+    : series.length > 0;
 
-  const applicableGaps = useMemo<ScopedKnownGap[]>(
-    () =>
-      selectApplicableGaps({
-        sourcesMeta: activeSourcesMeta,
-        selectionKind: selection.kind,
-        visibleProducts,
-        series,
-      }),
-    [activeSourcesMeta, selection.kind, visibleProducts, series],
-  );
+  const applicableGaps = useMemo<ScopedKnownGap[]>(() => {
+    const gapSeries = isAllSourcesOverview
+      ? (comparisonTable?.periods.map((p) => ({ p })) ?? [])
+      : series;
+    return selectApplicableGaps({
+      sourcesMeta: activeSourcesMeta,
+      selectionKind: selection.kind,
+      visibleProducts,
+      series: gapSeries,
+    });
+  }, [activeSourcesMeta, selection.kind, visibleProducts, series, isAllSourcesOverview, comparisonTable]);
 
   const title = useMemo(() => {
     if (selection.kind === "field") return selectedField?.field_name ?? selection.name ?? selection.id;
@@ -151,6 +220,20 @@ export function DashboardPane({
     return s ? `${s.country} (${s.publisher})` : activeSource;
   }, [selection, selectedField, selectedFacility, activeSource, meta.sources]);
 
+  const emptySeriesMessage = useMemo(() => {
+    if (selection.kind === "well" && wellNoSeriesReason === "field_level_source") {
+      const src = activeSourcesMeta[0];
+      if (src) {
+        return `${src.country} (${src.publisher}) reports monthly production at field level. Select a field to view production history.`;
+      }
+      return "This source reports monthly production at field level rather than per well.";
+    }
+    if (selection.kind === "well" && wellNoSeriesReason === "no_well_history") {
+      return "No well-level monthly production records reported for this wellbore.";
+    }
+    return "No monthly production records available for this selection.";
+  }, [selection.kind, wellNoSeriesReason, activeSourcesMeta]);
+
   const exportSlug =
     title
       .toLowerCase()
@@ -158,6 +241,11 @@ export function DashboardPane({
       .replace(/^-|-$/g, "") || "ogprod";
 
   const handleExportCsv = () => {
+    if (comparisonTable) {
+      const csv = buildComparisonCsv(comparisonTable);
+      downloadCsv(`${exportSlug}-${comparisonTable.product}.csv`, csv);
+      return;
+    }
     const csv = buildSeriesCsv(series, visibleProducts, unitSystem, {
       includeUtilization: selection.kind === "facility",
     });
@@ -178,7 +266,7 @@ export function DashboardPane({
           selectedFacility={selectedFacility}
           activeSourcesMeta={activeSourcesMeta}
           wellPartitionsQueried={wellPartitionsQueried}
-          canExport={series.length > 0}
+          canExport={hasChartData}
           onBackToOverview={() => onSelectEntity({ kind: "overview" })}
           onExportPng={handleExportPng}
           onExportCsv={handleExportCsv}
@@ -192,6 +280,7 @@ export function DashboardPane({
           latestRow={latestRow}
           seriesLength={series.length}
           unitSystem={unitSystem}
+          allSourcesOverview={allSourcesOverview}
         />
 
         {applicableGaps.length > 0 && <KnownGapsBanner gaps={applicableGaps} />}
@@ -263,9 +352,9 @@ export function DashboardPane({
               <p className="font-medium">Unable to load production series</p>
               <p className="max-w-md text-slate-500">{seriesError}</p>
             </div>
-          ) : series.length === 0 ? (
-            <div className="flex h-[220px] items-center justify-center text-xs text-slate-500">
-              No monthly production records available for this selection.
+          ) : !hasChartData ? (
+            <div className="flex h-[220px] items-center justify-center px-4 text-center text-xs text-slate-500">
+              {emptySeriesMessage}
             </div>
           ) : (
             <TimeSeriesChart
@@ -277,6 +366,7 @@ export function DashboardPane({
                 selection.kind === "facility" ? selectedFacility?.oil_capacity_bpd : null
               }
               knownGaps={applicableGaps}
+              comparisonTable={comparisonTable}
             />
           )}
         </div>

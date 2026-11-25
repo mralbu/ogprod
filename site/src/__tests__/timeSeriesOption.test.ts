@@ -1,13 +1,15 @@
 import type * as echarts from "echarts";
 import { describe, expect, it } from "vitest";
 import {
+  buildSourceComparisonOption,
+  buildSourceComparisonTable,
   buildTimeSeriesOption,
   GRID_TOP_PX,
   LEGEND_TOP_PX,
   RIGHT_AXIS_OFFSET_PX,
   Y_AXIS_NAME_GAP_PX,
 } from "../lib/timeSeriesOption";
-import type { KnownGap, MonthlyPoint } from "../types/data";
+import type { KnownGap, MonthlyPoint, SourceMeta } from "../types/data";
 
 const SAMPLE_ROWS: MonthlyPoint[] = [
   { p: "2025-01-01", oil_prod: 6_400_000, gas_prod: 520_700, water_prod: 1_600_000 },
@@ -208,5 +210,84 @@ describe("buildTimeSeriesOption", () => {
     const series = option.series as echarts.LineSeriesOption[];
     expect(series[0].markArea).toBeUndefined();
     expect(series[1].markArea).toBeUndefined();
+  });
+});
+
+describe("buildSourceComparisonTable & buildSourceComparisonOption", () => {
+  const MOCK_SOURCES = [
+    { id: "brazil", country: "Brazil", country_code: "BR" },
+    { id: "norway", country: "Norway", country_code: "NO" },
+    { id: "uk", country: "United Kingdom", country_code: "GB" },
+  ] as unknown as SourceMeta[];
+
+  it("preserves staggered start and end dates per source without lag cliffs or imputation", () => {
+    const table = buildSourceComparisonTable({
+      countryMonthly: {
+        brazil: [
+          { p: "2025-01-01", oil_prod: 3_000_000 },
+          { p: "2025-02-01", oil_prod: 3_100_000 },
+          { p: "2025-03-01", oil_prod: 3_200_000 },
+        ],
+        norway: [
+          { p: "2025-02-01", oil_prod: 1_800_000 },
+        ],
+        uk: [
+          { p: "2025-01-01", oil_prod: 600_000 },
+          { p: "2025-02-01", oil_prod: 580_000 },
+        ],
+      },
+      sources: MOCK_SOURCES,
+      product: "oil_prod",
+      unitSystem: "oilfield_e3m3",
+    });
+
+    expect(table.periods).toEqual(["2025-01-01", "2025-02-01", "2025-03-01"]);
+    expect(table.series.map((s) => s.label)).toEqual(["Brazil", "Norway", "United Kingdom"]);
+    expect(table.series[0].values).toEqual([3_000_000, 3_100_000, 3_200_000]);
+    expect(table.series[1].values).toEqual([null, 1_800_000, null]);
+    expect(table.series[2].values).toEqual([600_000, 580_000, null]);
+
+    const option = buildSourceComparisonOption(table, "oilfield_e3m3");
+    const optSeries = option.series as echarts.LineSeriesOption[];
+    expect(optSeries).toHaveLength(3);
+    expect(optSeries.every((s) => s.connectNulls === false)).toBe(true);
+    const yAxes = option.yAxis as echarts.YAXisComponentOption[];
+    expect(yAxes).toHaveLength(1);
+    expect(yAxes[0].name).toBe("bbl/d");
+  });
+
+  it("buckets tail sources into Other for additive rates, but never sums derived ratios", () => {
+    const sources = [
+      { id: "s1", country: "S1" },
+      { id: "s2", country: "S2" },
+      { id: "s3", country: "S3" },
+      { id: "s4", country: "S4" },
+    ] as unknown as SourceMeta[];
+    const countryMonthly: Record<string, MonthlyPoint[]> = {
+      s1: [{ p: "2026-01-01", oil_prod: 4000, water_prod: 1000 }],
+      s2: [{ p: "2026-01-01", oil_prod: 3000, water_prod: 3000 }],
+      s3: [{ p: "2026-01-01", oil_prod: 2000, water_prod: 2000 }],
+      s4: [{ p: "2026-01-01", oil_prod: 1000, water_prod: 9000 }],
+    };
+
+    const oilTable = buildSourceComparisonTable({
+      countryMonthly,
+      sources,
+      product: "oil_prod",
+      unitSystem: "oilfield_e3m3",
+      maxSeries: 3,
+    });
+    expect(oilTable.series.map((s) => s.label)).toEqual(["S1", "S2", "Other (2)"]);
+    expect(oilTable.series[2].values).toEqual([3000]);
+
+    const wcutTable = buildSourceComparisonTable({
+      countryMonthly,
+      sources,
+      product: "water_cut",
+      unitSystem: "oilfield_e3m3",
+      maxSeries: 3,
+    });
+    expect(wcutTable.series.map((s) => s.id)).toEqual(["s4", "s2", "s3"]);
+    expect(wcutTable.series.some((s) => s.id === "__other__")).toBe(false);
   });
 });

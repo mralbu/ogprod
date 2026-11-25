@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCountryName } from "../lib/sourceLabels";
+import { formatCountryName, formatSourceDisplayName } from "../lib/sourceLabels";
 import type { SourceMeta } from "../types/data";
 
 const SOURCES = [
@@ -23,5 +23,18 @@ describe("formatCountryName", () => {
     expect(formatCountryName("")).toBe("");
     expect(formatCountryName(null)).toBe("");
     expect(formatCountryName(undefined)).toBe("");
+  });
+});
+
+describe("formatSourceDisplayName", () => {
+  it("keeps unique country names concise and disambiguates duplicate sub-national slugs", () => {
+    const multi = [
+      { id: "brazil", country: "Brazil" },
+      { id: "us-gom", country: "United States" },
+      { id: "us-ak", country: "United States" },
+    ];
+    expect(formatSourceDisplayName(multi[0], multi)).toBe("Brazil");
+    expect(formatSourceDisplayName(multi[1], multi)).toBe("United States (GOM)");
+    expect(formatSourceDisplayName(multi[2], multi)).toBe("United States (AK)");
   });
 });

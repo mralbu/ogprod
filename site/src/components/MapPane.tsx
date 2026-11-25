@@ -9,6 +9,7 @@ import {
   buildFallbackLayers,
   buildSelectionFilter,
   buildVectorLayers,
+  computeOverviewBounds,
   createDiamondSdfImage,
   FACILITY_ICON_ID,
   FALLBACK_BASEMAP,
@@ -315,14 +316,29 @@ export function MapPane({
     }
   }, [activeSource, showFields, showFacilities, showWells, selection, mapReady, styleRevision]);
 
+  const didInitialOverviewFitRef = useRef(false);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || selection.kind !== "overview") return;
     if (activeSource === null) {
-      const overview = getOverviewView(containerRef.current?.clientWidth ?? 0);
-      map.flyTo({ center: overview.center, zoom: overview.zoom, duration: 700 });
+      const width = containerRef.current?.clientWidth ?? 0;
+      const bounds = computeOverviewBounds(meta.sources);
+      const duration = didInitialOverviewFitRef.current ? 700 : 0;
+      didInitialOverviewFitRef.current = true;
+      if (bounds) {
+        map.fitBounds(bounds, {
+          padding: width > 0 && width < 640 ? 20 : 40,
+          duration,
+          maxZoom: 4,
+        });
+      } else {
+        const overview = getOverviewView(width);
+        map.flyTo({ center: overview.center, zoom: overview.zoom, duration });
+      }
       return;
     }
+    didInitialOverviewFitRef.current = true;
     const metaSrc = meta.sources.find((s) => s.id === activeSource);
     if (metaSrc?.bbox) {
       const [minx, miny, maxx, maxy] = metaSrc.bbox;

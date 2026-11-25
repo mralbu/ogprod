@@ -1,5 +1,40 @@
 import type { MonthlyPoint } from "../types/data";
 
+export type WellQueryPlan =
+  | {
+      canQuery: true;
+      firstYear: number;
+      lastYear: number;
+    }
+  | {
+      canQuery: false;
+      reason: "field_level_source" | "no_well_history";
+    };
+
+/**
+ * Decide whether a selected well has well-level production partitions to query.
+ * Avoids booting DuckDB-WASM or scanning full history for field-only sources and dry wellbores.
+ */
+export function resolveWellQueryPlan(params: {
+  sourceEntityType?: "well" | "field";
+  firstYear?: number;
+  lastYear?: number;
+}): WellQueryPlan {
+  if (params.sourceEntityType && params.sourceEntityType !== "well") {
+    return { canQuery: false, reason: "field_level_source" };
+  }
+  if (
+    params.firstYear === undefined ||
+    params.lastYear === undefined ||
+    !Number.isInteger(params.firstYear) ||
+    !Number.isInteger(params.lastYear) ||
+    params.firstYear > params.lastYear
+  ) {
+    return { canQuery: false, reason: "no_well_history" };
+  }
+  return { canQuery: true, firstYear: params.firstYear, lastYear: params.lastYear };
+}
+
 /** Build the pruned list of HF Parquet URLs covering ONLY year=firstYear..lastYear. */
 export function buildWellPartitionUrls(
   mirrorBaseUrl: string,

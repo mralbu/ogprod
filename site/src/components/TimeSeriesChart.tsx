@@ -1,6 +1,10 @@
 import * as echarts from "echarts";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { buildTimeSeriesOption } from "../lib/timeSeriesOption";
+import {
+  buildSourceComparisonOption,
+  buildTimeSeriesOption,
+  type SourceComparisonTable,
+} from "../lib/timeSeriesOption";
 import type { ChartSeriesKey, KnownGap, MonthlyPoint, UnitSystem } from "../types/data";
 
 export interface TimeSeriesChartHandle {
@@ -13,12 +17,21 @@ interface TimeSeriesChartProps {
   unitSystem: UnitSystem;
   oilCapacityBpd?: number | null;
   knownGaps?: readonly KnownGap[];
+  comparisonTable?: SourceComparisonTable | null;
   height?: number;
 }
 
 export const TimeSeriesChart = forwardRef<TimeSeriesChartHandle, TimeSeriesChartProps>(
   function TimeSeriesChart(
-    { rows, activeProducts, unitSystem, oilCapacityBpd, knownGaps, height = 330 },
+    {
+      rows,
+      activeProducts,
+      unitSystem,
+      oilCapacityBpd,
+      knownGaps,
+      comparisonTable,
+      height = 330,
+    },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -57,11 +70,11 @@ export const TimeSeriesChart = forwardRef<TimeSeriesChartHandle, TimeSeriesChart
     useEffect(() => {
       const chart = chartRef.current;
       if (!chart) return;
-      chart.setOption(
-        buildTimeSeriesOption({ rows, activeProducts, unitSystem, oilCapacityBpd, knownGaps }),
-        true,
-      );
-    }, [rows, activeProducts, unitSystem, oilCapacityBpd, knownGaps]);
+      const option = comparisonTable
+        ? buildSourceComparisonOption(comparisonTable, unitSystem)
+        : buildTimeSeriesOption({ rows, activeProducts, unitSystem, oilCapacityBpd, knownGaps });
+      chart.setOption(option, true);
+    }, [rows, activeProducts, unitSystem, oilCapacityBpd, knownGaps, comparisonTable]);
 
     return <div ref={containerRef} style={{ height }} className="w-full" />;
   },
