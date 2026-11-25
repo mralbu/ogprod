@@ -585,3 +585,55 @@ def test_export_web_cli_site_url_and_empty_store_llms_txt(tmp_path: Path) -> Non
     content = (out_dir / "llms.txt").read_text(encoding="utf-8")
     assert "No sources are currently present in this export." in content
     assert "https://example.org/ogprod/data/meta.json" in content
+
+
+def test_search_index_excludes_non_producing_wells_and_tiles_respect_web_wells(
+    tmp_path: Path,
+) -> None:
+    from ogprod import sources
+
+    data_dir = tmp_path / "data"
+    out_dir = tmp_path / "web"
+    _seed_multi_source_store(data_dir)
+
+    # Add a dry Brazil wellbore (no production), a Norway wellbore (field-level source,
+    # web_wells=True), and a Mexico wellbore (field-level onshore source, web_wells=False).
+    wells = gpd.GeoDataFrame(
+        {
+            "source": ["brazil", "brazil", "norway", "mexico"],
+            "well_id": ["7-BUZ-1-RJS", "1-DRY-EXPL-RJS", "NO-WB-1", "MX-WELL-1"],
+            "well_name": ["7-BUZ-1-RJS", "1-DRY-EXPL-RJS", "16/2-6", "CANTARELL-1"],
+            "field_id": ["BUZIOS", "BUZIOS", "26376286", "MALOOB"],
+            "field_name": ["BÚZIOS", "BÚZIOS", "JOHAN SVERDRUP", "Maloob"],
+            "basin": ["Santos", "Santos", pd.NA, "CUENCAS DEL SURESTE"],
+            "environment": ["offshore", "offshore", "offshore", "onshore"],
+            "status": ["Produzindo", "Abandonado", "CLOSED", "ACTIVO"],
+        },
+        geometry=[
+            shapely.Point(-42.52, -24.58),
+            shapely.Point(-42.50, -24.55),
+            shapely.Point(2.55, 58.80),
+            shapely.Point(-92.20, 19.60),
+        ],
+        crs="EPSG:4326",
+    )
+    write_geo(wells, schema.GeoKind.WELLS, root=data_dir)
+
+    export_web.export_web(data_dir=data_dir, out_dir=out_dir, skip_tiles=True)
+
+    search = json.loads((out_dir / "search" / "index.json").read_text("utf-8"))
+    indexed_wells = [(e["s"], e["id"]) for e in search if e["t"] == "well"]
+    assert indexed_wells == [("brazil", "7-BUZ-1-RJS")]
+
+    tile_feats = export_web._well_tile_features(wells, {})
+    tile_sources = {f["properties"]["source"] for f in tile_feats}
+    assert tile_sources == {"brazil", "norway"}
+    assert "mexico" not in tile_sources
+
+    # Verify every registered connector carries its own licence metadata.
+    for name in sources.available():
+        conn = sources.get(name)
+        assert conn.licence.strip()
+        assert conn.licence_url.startswith("https://")
+    assert sources.get("mexico").web_wells is False
+    assert sources.get("brazil").web_wells is True

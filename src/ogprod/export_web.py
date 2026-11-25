@@ -32,27 +32,8 @@ import pyarrow.parquet as pq
 import shapely
 
 from ogprod import llms_txt, mirror, schema, sources, store
+from ogprod.sources import base as sources_base
 from ogprod.sources import brazil
-
-_LICENCES: dict[str, tuple[str, str]] = {
-    "brazil": (
-        "Open Government Data (Decreto nº 8.777/2016) — ANP",
-        "https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm",
-    ),
-    "norway": (
-        "NLOD 2.0 — Norwegian Offshore Directorate (Sodir)",
-        "https://data.norge.no/nlod/en/2.0",
-    ),
-    "mexico": (
-        "Datos Abiertos (Libre Uso MX) — SENER / CNIH (with Pemex data)",
-        "https://sih-hidrocarburos.energia.gob.mx/",
-    ),
-    "uk": (
-        "NSTA User Agreement (non-commercial) — Contains information provided by"
-        " the North Sea Transition Authority and/or other third parties.",
-        "https://www.nstauthority.co.uk/site-tools/access-to-information/",
-    ),
-}
 
 # Synced with site/src/lib/mapStyle.ts (MAP_LAYER_MIN_ZOOM).
 _TILE_MIN_ZOOM = 0
@@ -289,24 +270,40 @@ def _int_opt(value: Any) -> int | None:
     return int(value)
 
 
+def _date_opt(value: Any) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    return value.strftime("%Y-%m-%d") if hasattr(value, "strftime") else str(value)[:10]
+
+
+def _connector_for_source(source_name: str) -> sources_base.Source | None:
+    return sources.get(source_name) if source_name in sources.available() else None
+
+
+def _source_exports_web_wells(source_name: str) -> bool:
+    conn = _connector_for_source(source_name)
+    return conn.web_wells if conn is not None else True
+
+
 def _known_gaps_for_source(source_name: str) -> list[dict[str, Any]]:
-    if source_name == "brazil":
-        return [
-            {
-                "column": g.column,
-                "start": g.start.isoformat(),
-                "end": g.end.isoformat(),
-                "description": g.description,
-                "resolved_in_country_rollup": g.resolved_in_country_rollup,
-                **(
-                    {"country_rollup_source": g.country_rollup_source}
-                    if g.country_rollup_source
-                    else {}
-                ),
-            }
-            for g in brazil.KNOWN_GAPS
-        ]
-    return []
+    conn = _connector_for_source(source_name)
+    if conn is None:
+        return []
+    return [
+        {
+            "column": g.column,
+            "start": g.start.isoformat(),
+            "end": g.end.isoformat(),
+            "description": g.description,
+            "resolved_in_country_rollup": g.resolved_in_country_rollup,
+            **(
+                {"country_rollup_source": g.country_rollup_source}
+                if g.country_rollup_source
+                else {}
+            ),
+        }
+        for g in conn.known_gaps
+    ]
 
 
 def _apply_country_gap_backfills(country_df: pd.DataFrame) -> pd.DataFrame:
@@ -324,21 +321,35 @@ def _apply_country_gap_backfills(country_df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _mask_source_basin_gaps(
+    out: pd.DataFrame,
+    original: pd.DataFrame,
+    periods: pd.Series,
+    source_name: str,
+    gaps: tuple[sources_base.KnownGap, ...],
+) -> pd.DataFrame:
+    is_src = out["source"] == source_name
+    for gap in gaps:
+        if gap.column not in out.columns:
+            continue
+        mask = is_src & (periods >= gap.start) & (periods <= gap.end)
+        if mask.any():
+            if out is original:
+                out = original.copy()
+            out.loc[mask, gap.column] = float("nan")
+    return out
+
+
 def _mask_basin_known_gaps(basin_df: pd.DataFrame) -> pd.DataFrame:
-    """Mask incomplete months in Brazil basin rollups so charts show a break instead of ~5%."""
+    """Mask incomplete months in basin rollups so charts show a break instead of partial sums."""
     if basin_df.empty:
         return basin_df
     out = basin_df
     periods = pd.to_datetime(basin_df["period"]).dt.date
-    is_br = basin_df["source"] == "brazil"
-    for gap in brazil.KNOWN_GAPS:
-        if gap.column not in out.columns:
-            continue
-        mask = is_br & (periods >= gap.start) & (periods <= gap.end)
-        if mask.any():
-            if out is basin_df:
-                out = basin_df.copy()
-            out.loc[mask, gap.column] = float("nan")
+    for src_name in sorted(set(basin_df["source"].astype(str))):
+        conn = _connector_for_source(src_name)
+        if conn is not None and conn.known_gaps:
+            out = _mask_source_basin_gaps(out, basin_df, periods, src_name, conn.known_gaps)
     return out
 
 
@@ -609,7 +620,9 @@ def _build_search_index(
         )
     for _, row in wells_gdf.iterrows():
         key = (str(row["source"]), str(row["well_id"]))
-        st = well_stats.get(key, {})
+        st = well_stats.get(key)
+        if st is None:
+            continue
         lon, lat = _geom_lon_lat(row.geometry)
         entries.append(
             _compact_entry(
@@ -742,7 +755,10 @@ def _well_tile_features(
         geom = row.geometry
         if not _has_valid_geom(geom):
             continue
-        key = (str(row["source"]), str(row["well_id"]))
+        src = str(row["source"])
+        if not _source_exports_web_wells(src):
+            continue
+        key = (src, str(row["well_id"]))
         st = well_stats.get(key, {})
         props = _compact_entry(
             {
@@ -888,14 +904,15 @@ def _build_meta(
 
     for rec in cov.to_dict("records"):
         src = str(rec["source"])
-        conn = sources.get(src) if src in sources.available() else None
+        conn = _connector_for_source(src)
         years, products = _source_years_and_products(con, src)
         src_country = country_df.loc[country_df["source"] == src]
         latest_oil = _round_opt(src_country["oil_prod"].iloc[-1], 1) if len(src_country) else None
         latest_gas = _round_opt(src_country["gas_prod"].iloc[-1], 1) if len(src_country) else None
         first_p = rec.get("first_period")
         last_p = rec.get("last_period")
-        licence_label, licence_url = _LICENCES.get(src, ("Public open data", ""))
+        licence_label = conn.licence if conn else "Public open data"
+        licence_url = conn.licence_url if conn else ""
         sources_list.append(
             {
                 "id": src,
@@ -908,10 +925,8 @@ def _build_meta(
                 "entity_type": conn.entity_type.value if conn else "field",
                 "bbox": _source_bbox(src, geo_frames),
                 "years": years,
-                "first_period": first_p.strftime("%Y-%m-%d")
-                if hasattr(first_p, "strftime")
-                else None,
-                "last_period": last_p.strftime("%Y-%m-%d") if hasattr(last_p, "strftime") else None,
+                "first_period": _date_opt(first_p),
+                "last_period": _date_opt(last_p),
                 "updated_at": local_manifest.get(src, {}).get("updated_at"),
                 "counts": {
                     "production_rows": int(rec["rows"]),
