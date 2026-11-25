@@ -370,6 +370,7 @@ Before implementing the next wave of connectors, decide on a few small cross-cut
    - **Gas reference conditions:** NLOG and ENS report `Nm³` (0 °C) vs `Sm³` (15 °C) in Sodir/ANP (~5.5% difference). Decide whether to convert `Nm³ → Sm³` in `units.py` or document the standard-condition nuance.
    - **Mass-reported crude:** Italy UNMIG reports `kg`; decide whether `ogprod` accepts assumed-density conversion or requires volumetric reporting.
 5. **Mirror redistribution check:** Confirm licence compatibility before enabling `scripts/publish_mirror.py` for any new source (public domain / CC BY / CC BY-SA are clear; verify NSTA User Agreement, Argentine portal terms, and AER copyright rules).
+6. **Tiered well granularity & overview scaling ([ADR 0011](adr/0011-multi-country-scaling-and-overview.md)):** Keep well-level production and Layer-2 well maps for offshore / low-well-count sources (< ~30k producing wells), default high-well-count onshore sources to field-level rollups in the public mirror & Web Explorer (with optional local well-level parsing in Python), and use split per-source lines on the `"All Sources"` overview to avoid lag cliffs.
 
 ### Recommended Expansion Waves
 
