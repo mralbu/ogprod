@@ -19,7 +19,6 @@ import re
 import unicodedata
 import warnings
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -214,16 +213,7 @@ NATIONAL_GAS_GAP_VOLUMES_E3M3: Mapping[date, float] = MappingProxyType(
 )
 
 
-@dataclass(frozen=True)
-class Gap:
-    """A known stretch of months where ANP's well-level reporting is incomplete."""
-
-    column: str
-    start: date
-    end: date
-    description: str
-    resolved_in_country_rollup: bool = False
-    country_rollup_source: str | None = None
+Gap = base.KnownGap
 
 
 KNOWN_GAPS: tuple[Gap, ...] = (
@@ -1106,6 +1096,10 @@ class Brazil(base.Source):
     publisher = "ANP"
     entity_type = schema.EntityType.WELL
     docs_url = _PORTAL_URL
+    licence = "Open Government Data (Decreto nº 8.777/2016) — ANP"
+    licence_url = "https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm"
+    known_gaps = KNOWN_GAPS
+    web_wells = True
 
     def discover_production(
         self,

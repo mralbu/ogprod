@@ -7,10 +7,19 @@ from ogprod.sources import brazil as brazil
 from ogprod.sources import mexico as mexico
 from ogprod.sources import norway as norway
 from ogprod.sources import uk as uk
-from ogprod.sources.base import DownloadResult, RemoteFile, Source, available, get, register
+from ogprod.sources.base import (
+    DownloadResult,
+    KnownGap,
+    RemoteFile,
+    Source,
+    available,
+    get,
+    register,
+)
 
 __all__ = [
     "DownloadResult",
+    "KnownGap",
     "RemoteFile",
     "Source",
     "available",

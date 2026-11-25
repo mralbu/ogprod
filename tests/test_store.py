@@ -162,3 +162,45 @@ def test_refresh_replaces_requested_year_without_wiping_spillover_or_other_env(
 
     df_2017 = db.production(source="brazil", start="2017-01", end="2017-12")
     assert set(df_2017["entity_id"]) == {"W-ON-17", "W-OFF-17"}
+
+
+def test_multi_source_pruning_matches_filtered_full_scan(tmp_path: Path) -> None:
+    from hypothesis import given, settings
+    from hypothesis import strategies as st
+
+    from ogprod.store import _production_files
+
+    all_sources = ("brazil", "norway", "mexico", "uk")
+    for idx, src in enumerate(all_sources):
+        tbl = base.build_production_table(
+            source=src,
+            entity_type=schema.EntityType.FIELD,
+            entity_id=pd.Series([f"F-{idx}"]),
+            entity_name=pd.Series([f"Field {idx}"]),
+            period=pd.Series([date(2026, 1, 1)]),
+            field_id=pd.Series([f"F-{idx}"]),
+            field_name=pd.Series([f"Field {idx}"]),
+            rates={"oil_prod": pd.Series([float((idx + 1) * 1_000)])},
+        )
+        write_production(tbl, root=tmp_path)
+
+    full_df = load_production(root=tmp_path)
+
+    @settings(max_examples=30, deadline=None)
+    @given(chosen=st.lists(st.sampled_from(all_sources), min_size=0, max_size=6))
+    def check(chosen: list[str]) -> None:
+        chosen_set = set(chosen)
+        pruned_files = _production_files(tmp_path, chosen, None, None)
+        pruned_sources = {p.parent.parent.name.split("=", 1)[1] for p in pruned_files}
+        assert pruned_sources == chosen_set
+
+        # Also verify single-use iterators work cleanly without exhaustion bugs.
+        actual = load_production(source=iter(chosen), root=tmp_path)
+        expected = full_df.loc[full_df["source"].isin(chosen_set)].reset_index(drop=True)
+        if not chosen_set:
+            assert len(actual) == 0
+            assert list(actual.columns) == list(expected.columns)
+        else:
+            pd.testing.assert_frame_equal(actual.reset_index(drop=True), expected)
+
+    check()

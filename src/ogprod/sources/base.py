@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import BinaryIO
 
@@ -35,6 +36,18 @@ class RemoteFile:
     key: str
     year_min: int | None = None
     year_max: int | None = None
+
+
+@dataclass(frozen=True)
+class KnownGap:
+    """A known stretch of months where a source's reporting is incomplete."""
+
+    column: str
+    start: date
+    end: date
+    description: str
+    resolved_in_country_rollup: bool = False
+    country_rollup_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -327,6 +340,11 @@ class Source(ABC):
     publisher: str
     entity_type: schema.EntityType
     docs_url: str
+    licence: str = "Public open data"
+    licence_url: str = ""
+    known_gaps: tuple[KnownGap, ...] = ()
+    #: Include geo/wells in Layer-2 tiles (False for high-well-count onshore sources).
+    web_wells: bool = True
 
     @abstractmethod
     def discover_production(

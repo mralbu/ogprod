@@ -286,6 +286,9 @@ class Norway(base.Source):
     publisher = "Sodir"
     entity_type = schema.EntityType.FIELD
     docs_url = _DOCS_URL
+    licence = "NLOD 2.0 — Norwegian Offshore Directorate (Sodir)"
+    licence_url = "https://data.norge.no/nlod/en/2.0"
+    web_wells = True
 
     def discover_production(
         self,

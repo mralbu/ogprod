@@ -248,18 +248,24 @@ def load_geo(
     return gpd.GeoDataFrame(combined, geometry="geometry", crs=schema.GEO_CRS)
 
 
+def _source_dirs(prod_dir: Path, source: str | Iterable[str] | None) -> list[Path]:
+    names = _normalize_filter_values(source)
+    if names is None:
+        return sorted(prod_dir.glob("source=*"))
+    return [prod_dir / f"source={s}" for s in sorted(dict.fromkeys(names))]
+
+
 def _production_files(
     root: Path,
-    source: str | None,
+    source: str | Iterable[str] | None,
     start: date | None,
     end: date | None,
 ) -> list[Path]:
     prod_dir = store_dir(root) / "production"
     if not prod_dir.exists():
         return []
-    source_dirs = [prod_dir / f"source={source}"] if source else sorted(prod_dir.glob("source=*"))
     files: list[Path] = []
-    for src_dir in source_dirs:
+    for src_dir in _source_dirs(prod_dir, source):
         if not src_dir.exists():
             continue
         for yr_dir in sorted(src_dir.glob("year=*")):
@@ -308,13 +314,13 @@ def load_production(
     """Query production/injection rates from the Parquet store using DuckDB pushdown."""
     start_d = _parse_date(start)
     end_d = _parse_date(end)
-    single_source = source if isinstance(source, str) else None
-    files = _production_files(resolve_root(root), single_source, start_d, end_d)
+    source_vals = _normalize_filter_values(source)
+    files = _production_files(resolve_root(root), source_vals, start_d, end_d)
     if not files:
         return schema.empty_production().to_pandas()
 
     filters: dict[str, list[str] | None] = {
-        "source": _normalize_filter_values(source),
+        "source": source_vals,
         "entity_type": _normalize_filter_values(entity_type),
         "entity_id": _normalize_filter_values(entity_id),
         "field_id": _normalize_filter_values(field_id),

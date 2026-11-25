@@ -551,6 +551,9 @@ class Mexico(base.Source):
     publisher = "SENER / CNIH"
     entity_type = schema.EntityType.FIELD
     docs_url = _DOCS_URL
+    licence = "Datos Abiertos (Libre Uso MX) — SENER / CNIH (with Pemex data)"
+    licence_url = "https://sih-hidrocarburos.energia.gob.mx/"
+    web_wells = False
 
     def discover_production(
         self,

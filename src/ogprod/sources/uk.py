@@ -622,6 +622,12 @@ class UK(base.Source):
     publisher = "NSTA"
     entity_type = schema.EntityType.FIELD
     docs_url = _DOCS_URL
+    licence = (
+        "NSTA User Agreement (non-commercial) — Contains information provided by"
+        " the North Sea Transition Authority and/or other third parties."
+    )
+    licence_url = "https://www.nstauthority.co.uk/site-tools/access-to-information/"
+    web_wells = True
 
     def discover_production(
         self,
