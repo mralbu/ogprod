@@ -154,7 +154,11 @@ _FIELD_STATS_SQL = """
 WITH monthly AS (
     SELECT source, field_id AS eid, period,
            SUM(CAST(oil_prod AS DOUBLE)) AS oil_bpd,
-           SUM(CAST(gas_prod AS DOUBLE)) AS gas_e3m3d
+           SUM(CAST(gas_prod AS DOUBLE)) AS gas_e3m3d,
+           max(nullif(trim(CAST(basin AS VARCHAR)), '')) AS basin,
+           max(nullif(trim(CAST(region AS VARCHAR)), '')) AS region,
+           max(nullif(trim(CAST(environment AS VARCHAR)), '')) AS environment,
+           max(nullif(trim(CAST(operator AS VARCHAR)), '')) AS operator
     FROM production WHERE field_id <> ''
     GROUP BY source, field_id, period
 ),
@@ -168,7 +172,11 @@ SELECT source, eid,
        max(period) AS latest_period,
        SUM(coalesce(oil_bpd, 0.0) * day(last_day(period))) / 1e6 AS cum_oil_mmbbl,
        max(CASE WHEN rn = 1 THEN oil_bpd END) AS latest_oil_bpd,
-       max(CASE WHEN rn = 1 THEN gas_e3m3d END) AS latest_gas_e3m3d
+       max(CASE WHEN rn = 1 THEN gas_e3m3d END) AS latest_gas_e3m3d,
+       arg_max(basin, period) FILTER (WHERE basin IS NOT NULL) AS prod_basin,
+       arg_max(region, period) FILTER (WHERE region IS NOT NULL) AS prod_region,
+       arg_max(environment, period) FILTER (WHERE environment IS NOT NULL) AS prod_environment,
+       arg_max(operator, period) FILTER (WHERE operator IS NOT NULL) AS prod_operator
 FROM ranked GROUP BY source, eid
 """
 
@@ -445,10 +453,11 @@ def _build_fields_summary(
                 "source": key[0],
                 "field_id": key[1],
                 "field_name": _str_opt(row.get("field_name")) or key[1],
-                "basin": _str_opt(row.get("basin")),
-                "region": _str_opt(row.get("region")),
-                "environment": _str_opt(row.get("environment")),
-                "operator": _str_opt(row.get("operator")),
+                "basin": _str_opt(row.get("basin")) or _str_opt(st.get("prod_basin")),
+                "region": _str_opt(row.get("region")) or _str_opt(st.get("prod_region")),
+                "environment": _str_opt(row.get("environment"))
+                or _str_opt(st.get("prod_environment")),
+                "operator": _str_opt(row.get("operator")) or _str_opt(st.get("prod_operator")),
                 "status": _str_opt(row.get("status")),
                 "water_depth_m": _round_opt(row.get("water_depth_m"), 1),
                 "area_km2": _round_opt(row.get("area_km2"), 2),
@@ -473,10 +482,10 @@ def _build_fields_summary(
                 "source": src,
                 "field_id": fid,
                 "field_name": fid,
-                "basin": None,
-                "region": None,
-                "environment": None,
-                "operator": None,
+                "basin": _str_opt(st.get("prod_basin")),
+                "region": _str_opt(st.get("prod_region")),
+                "environment": _str_opt(st.get("prod_environment")),
+                "operator": _str_opt(st.get("prod_operator")),
                 "status": None,
                 "water_depth_m": None,
                 "area_km2": None,
@@ -655,10 +664,11 @@ def _field_tile_features(
                 "source": key[0],
                 "field_id": key[1],
                 "field_name": _str_opt(row.get("field_name")) or key[1],
-                "basin": _str_opt(row.get("basin")),
-                "region": _str_opt(row.get("region")),
-                "operator": _str_opt(row.get("operator")),
-                "environment": _str_opt(row.get("environment")),
+                "basin": _str_opt(row.get("basin")) or _str_opt(st.get("prod_basin")),
+                "region": _str_opt(row.get("region")) or _str_opt(st.get("prod_region")),
+                "operator": _str_opt(row.get("operator")) or _str_opt(st.get("prod_operator")),
+                "environment": _str_opt(row.get("environment"))
+                or _str_opt(st.get("prod_environment")),
                 "status": _str_opt(row.get("status")),
                 "first_year": _int_opt(st.get("first_year")),
                 "last_year": _int_opt(st.get("last_year")),

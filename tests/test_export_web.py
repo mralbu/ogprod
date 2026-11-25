@@ -8,6 +8,7 @@ import stat
 from datetime import date
 from pathlib import Path
 
+import duckdb
 import geopandas as gpd
 import pandas as pd
 import pyarrow.parquet as pq
@@ -17,7 +18,7 @@ from click.testing import CliRunner
 from hypothesis import given
 from hypothesis import strategies as st
 
-from ogprod import export_web, schema
+from ogprod import export_web, schema, store
 from ogprod.cli import APP_NAME, cli
 from ogprod.sources import base
 from ogprod.store import write_geo, write_production
@@ -469,6 +470,63 @@ def test_export_web_basin_rollup_falls_back_to_field_basin_and_region(tmp_path: 
     assert by_tile_id[("mexico", "MALOOB")]["properties"]["basin"] == "CUENCAS DEL SURESTE"
     assert by_tile_id[("norway", "26376286")]["properties"]["region"] == "North Sea"
     assert "basin" not in by_tile_id[("norway", "26376286")]["properties"]
+
+
+def test_export_web_fields_summary_and_tiles_fallback_to_production_region(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    out_dir = tmp_path / "web"
+
+    # UK offshore production carries region (FIELDAREA) & operator; geo/fields has region=NA.
+    uk_prod = base.build_production_table(
+        source="uk",
+        entity_type=schema.EntityType.FIELD,
+        entity_id=pd.Series(["CLAIR-PHASE 1", "ARGYLL"]),
+        entity_name=pd.Series(["CLAIR-PHASE 1", "ARGYLL"]),
+        period=pd.Series([date(2026, 8, 1), date(2026, 8, 1)]),
+        field_id=pd.Series(["CLAIR", "ARGYLL"]),
+        field_name=pd.Series(["CLAIR", "ARGYLL"]),
+        region=pd.Series(["West of Shetland", "Central North Sea"]),
+        environment=pd.Series(["offshore", "offshore"]),
+        operator=pd.Series(["BP EXPLORATION", "HAMILTON BROTHERS"]),
+        rates={"oil_prod": pd.Series([55_000.0, 1_200.0])},
+    )
+    write_production(uk_prod, root=data_dir)
+
+    uk_fields = gpd.GeoDataFrame(
+        {
+            "source": ["uk"],
+            "field_id": ["CLAIR"],
+            "field_name": ["CLAIR"],
+            "basin": [pd.NA],
+            "region": [pd.NA],
+            "environment": ["offshore"],
+            "operator": ["BP EXPLORATION"],
+        },
+        geometry=[shapely.box(-2.6, 60.6, -2.4, 60.8)],
+        crs="EPSG:4326",
+    )
+    write_geo(uk_fields, schema.GeoKind.FIELDS, root=data_dir)
+
+    export_web.export_web(data_dir=data_dir, out_dir=out_dir, skip_tiles=True)
+
+    summary_rows = json.loads((out_dir / "rollups" / "fields_summary.json").read_text("utf-8"))
+    by_fid = {r["field_id"]: r for r in summary_rows}
+    assert by_fid["CLAIR"]["region"] == "West of Shetland"
+    assert by_fid["CLAIR"]["basin"] is None
+    assert by_fid["ARGYLL"]["region"] == "Central North Sea"
+    assert by_fid["ARGYLL"]["environment"] == "offshore"
+    assert by_fid["ARGYLL"]["operator"] == "HAMILTON BROTHERS"
+
+    search = json.loads((out_dir / "search" / "index.json").read_text("utf-8"))
+    by_search = {e["id"]: e for e in search if e["t"] == "field"}
+    assert by_search["CLAIR"]["b"] == "West of Shetland"
+    assert by_search["ARGYLL"]["b"] == "Central North Sea"
+
+    with duckdb.connect() as con:
+        store._register_store_views(con, data_dir)
+        stats = export_web._load_entity_stats(con)
+    poly_feats, _ = export_web._field_tile_features(uk_fields, stats["fields"])
+    assert poly_feats[0]["properties"]["region"] == "West of Shetland"
 
 
 def test_export_web_writes_llms_txt_with_sizes_gaps_and_site_url(tmp_path: Path) -> None:
