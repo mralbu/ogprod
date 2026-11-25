@@ -7,10 +7,12 @@ covering January 2014 to present:
 - Crude oil (`fdvb-hsrf`): monthly total barrels (``produccion_bls``) -> ``bbl/d``.
 - Natural gas (`5dux-bfvx`): monthly total thousand cubic feet (``produccionkpc``,
   Mcf) -> ``e3m3/d`` via exact ISO ``0.028316846592 e3m3/Mcf``.
-- Fields (`geo/fields`): field point coordinates embedded in the Socrata tables
-  (replacing missing ``(0, 0)`` coordinates with ``NULL`` geometry) enriched with
-  sedimentary basin polygons and onshore/offshore classification from ANH's
-  Geovisor ``Cuenca Sedimentaria`` layer
+- Fields (`geo/fields`): official ANH RUTY reservoir ring-fence polygons from the
+  public ``Yacimientos:Yacimientos`` OGC WFS dissolved to field grain (with
+  ``area_km2`` computed in ``EPSG:9377``), falling back to Socrata field ``Point``
+  coordinates (with ``(0, 0)`` mapped to ``NULL``) for fields not yet in RUTY,
+  all enriched with sedimentary basin polygons and onshore/offshore classification
+  from ANH Geovisor's ``Cuenca Sedimentaria`` layer
   (``GEOVISOR_v32/ANH_InsGDB/MapServer/4``).
 
 Production is field-level (``entity_type = "field"``, ``web_wells = False`` per
@@ -49,6 +51,10 @@ _GAS_DATASET_ID = "5dux-bfvx"
 _BASINS_QUERY_URL = (
     "https://geovisor.anh.gov.co/server/rest/services/GEOVISOR_v32/ANH_InsGDB/MapServer/4/query"
 )
+_YACIMIENTOS_WFS_URL = (
+    "https://geovisor.anh.gov.co/server/services/Yacimientos/Yacimientos/MapServer/WFSServer"
+)
+_COLOMBIA_METRIC_CRS = "EPSG:9377"
 
 FIRST_YEAR = 2014
 _HISTORY_CHUNK_YEARS = 5
@@ -460,7 +466,14 @@ def _enrich_fields_with_basins(
 
     tipo_col = next((c for c in basins.columns if c.upper() == "TIPO"), None)
     cols = [name_col, "geometry"] + ([tipo_col] if tipo_col else [])
-    pts = out.loc[has_geom, ["field_id", "geometry"]]
+    rep_pts = out.geometry.loc[has_geom].apply(
+        lambda g: g if g.geom_type == "Point" else g.representative_point()
+    )
+    pts = gpd.GeoDataFrame(
+        {"field_id": out.loc[has_geom, "field_id"]},
+        geometry=rep_pts,
+        crs=schema.GEO_CRS,
+    )
     joined = gpd.sjoin(pts, basins[cols], how="left", predicate="intersects")
     joined = joined.drop_duplicates(subset=["field_id"], keep="first")
 
@@ -489,22 +502,103 @@ def _primary_fluid(streams: set[str]) -> str | None:
     return None
 
 
-def _parse_fields_geo(paths: list[Path]) -> gpd.GeoDataFrame:
-    frames: list[pd.DataFrame] = []
-    basins_path: Path | None = None
-    for path in paths:
-        lower = path.name.lower()
-        if lower.endswith((".geojson", ".json")):
-            basins_path = path
-        elif "gas" in lower:
-            frames.append(_read_field_summary_csv(path, stream="gas"))
-        else:
-            frames.append(_read_field_summary_csv(path, stream="oil"))
+def _map_ruty_fluid(value: Any) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    norm = schema.normalize_key(str(value))
+    has_oil = "PETROLEO" in norm or "CRUDO" in norm or "CONDENSADO" in norm
+    has_gas = "GAS" in norm
+    if has_oil and has_gas:
+        return "oil_and_gas"
+    if has_oil:
+        return "oil"
+    if has_gas:
+        return "gas"
+    return None
 
+
+def _clean_ruty_status(value: Any) -> str | None:
+    text = _clean_text(value)
+    if text is None or text.lower() in {"null", "sin dato", "no aplica"}:
+        return None
+    return _title_case_es(text)
+
+
+def _extract_polygonal(geom: Any) -> Any:
+    if geom is None or geom.is_empty:
+        return None
+    valid = geom if geom.is_valid else shapely.make_valid(geom)
+    if valid.geom_type in {"Polygon", "MultiPolygon"}:
+        return valid
+    if valid.geom_type == "GeometryCollection":
+        polys = [g for g in valid.geoms if g.geom_type in {"Polygon", "MultiPolygon"}]
+        if not polys:
+            return None
+        return shapely.unary_union(polys)
+    return None
+
+
+def _parse_yacimientos_polygons(path: Path | None) -> gpd.GeoDataFrame | None:
+    """Load and dissolve ANH RUTY reservoir polygons into one ring fence per ``field_id``."""
+    if path is None or not path.exists():
+        return None
+    raw = gpd.read_file(path)
+    if raw.empty:
+        return None
+    if raw.crs is None:
+        raw = raw.set_crs(schema.GEO_CRS)
+    elif raw.crs.to_epsg() != 4326:
+        raw = raw.to_crs(schema.GEO_CRS)
+
+    campo_col = next((c for c in raw.columns if c.upper() == "CAMPO"), None)
+    if campo_col is None:
+        return None
+
+    work = raw.copy()
+    work["field_name"] = work[campo_col].astype("string").str.strip()
+    work["field_id"] = work["field_name"].map(schema.normalize_key)
+    work["geometry"] = work.geometry.map(_extract_polygonal)
+    work = work.loc[(work["field_id"] != "") & work.geometry.notna()]
+    if work.empty:
+        return None
+
+    code_col = next((c for c in work.columns if c.upper() == "CAMPO_ID"), None)
+    status_col = next((c for c in work.columns if c.upper() == "ESTADO_YACIMIENTO"), None)
+    fluid_col = next(
+        (c for c in work.columns if c.upper() in {"TIPO_HIDROCARBURO", "TIPO_HIDRO"}), None
+    )
+
+    work["field_code"] = work[code_col].map(_clean_text) if code_col else None
+    work["status"] = work[status_col].map(_clean_ruty_status) if status_col else None
+    work["primary_fluid"] = work[fluid_col].map(_map_ruty_fluid) if fluid_col else None
+
+    dissolved = work[
+        ["field_id", "field_name", "field_code", "status", "primary_fluid", "geometry"]
+    ].dissolve(
+        by="field_id",
+        aggfunc={
+            "field_name": "first",
+            "field_code": "first",
+            "status": "first",
+            "primary_fluid": "first",
+        },
+        as_index=False,
+    )
+    dissolved["geometry"] = dissolved.geometry.map(_extract_polygonal)
+    dissolved["area_km2"] = (dissolved.to_crs(_COLOMBIA_METRIC_CRS).geometry.area / 1e6).astype(
+        "float32"
+    )
+    return dissolved
+
+
+def _build_socrata_points(frames: list[pd.DataFrame]) -> gpd.GeoDataFrame:
     non_empty = [f for f in frames if not f.empty]
     if not non_empty:
-        return schema.empty_geo(schema.GeoKind.FIELDS)
-
+        return gpd.GeoDataFrame(
+            columns=["field_id", "field_name", "region", "operator", "primary_fluid", "geometry"],
+            geometry="geometry",
+            crs=schema.GEO_CRS,
+        )
     combined = pd.concat(non_empty, ignore_index=True)
     combined["has_coord"] = [
         _valid_colombia_point(lon, lat) is not None
@@ -517,7 +611,6 @@ def _parse_fields_geo(paths: list[Path]) -> gpd.GeoDataFrame:
         ascending=[True, False, False, True],
         kind="mergesort",
     )
-
     fluids = combined.groupby("field_id")["stream"].agg(lambda s: _primary_fluid(set(s)))
     dedup = combined.groupby("field_id", as_index=False, sort=False).agg(
         {
@@ -531,9 +624,8 @@ def _parse_fields_geo(paths: list[Path]) -> gpd.GeoDataFrame:
     geoms = [
         _valid_colombia_point(lon, lat) for lon, lat in zip(dedup["lon"], dedup["lat"], strict=True)
     ]
-    gdf = gpd.GeoDataFrame(
+    return gpd.GeoDataFrame(
         {
-            "source": "colombia",
             "field_id": dedup["field_id"],
             "field_name": dedup["field_name"],
             "region": dedup["region"],
@@ -543,7 +635,68 @@ def _parse_fields_geo(paths: list[Path]) -> gpd.GeoDataFrame:
         geometry=gpd.GeoSeries(geoms, crs=schema.GEO_CRS),
         crs=schema.GEO_CRS,
     )
-    enriched = _enrich_fields_with_basins(gdf, basins_path)
+
+
+def _merge_points_and_polygons(
+    points_gdf: gpd.GeoDataFrame,
+    polys_gdf: gpd.GeoDataFrame | None,
+) -> gpd.GeoDataFrame:
+    if polys_gdf is None or polys_gdf.empty:
+        out = points_gdf.copy()
+        out["source"] = "colombia"
+        return out
+    if points_gdf.empty:
+        out = polys_gdf.copy()
+        out["source"] = "colombia"
+        return out
+
+    pts = pd.DataFrame(points_gdf).rename(columns={"geometry": "pt_geom"})
+    ply = pd.DataFrame(polys_gdf).rename(columns={"geometry": "poly_geom"})
+    merged = pts.merge(ply, on="field_id", how="outer", suffixes=("_pt", "_ply"))
+    geoms = [
+        pg if pg is not None and not pd.isna(pg) else ptg
+        for pg, ptg in zip(merged["poly_geom"], merged["pt_geom"], strict=True)
+    ]
+    return gpd.GeoDataFrame(
+        {
+            "source": "colombia",
+            "field_id": merged["field_id"],
+            "field_code": merged["field_code"],
+            "field_name": merged["field_name_pt"].combine_first(merged["field_name_ply"]),
+            "region": merged["region"],
+            "operator": merged["operator"],
+            "status": merged["status"],
+            "primary_fluid": merged["primary_fluid_pt"].combine_first(merged["primary_fluid_ply"]),
+            "area_km2": merged["area_km2"],
+        },
+        geometry=gpd.GeoSeries(geoms, crs=schema.GEO_CRS),
+        crs=schema.GEO_CRS,
+    )
+
+
+def _parse_fields_geo(paths: list[Path]) -> gpd.GeoDataFrame:
+    frames: list[pd.DataFrame] = []
+    basins_path: Path | None = None
+    yacimientos_path: Path | None = None
+    for path in paths:
+        lower = path.name.lower()
+        if lower.endswith((".geojson", ".json")):
+            if "yacimiento" in lower:
+                yacimientos_path = path
+            else:
+                basins_path = path
+        elif "gas" in lower:
+            frames.append(_read_field_summary_csv(path, stream="gas"))
+        else:
+            frames.append(_read_field_summary_csv(path, stream="oil"))
+
+    points_gdf = _build_socrata_points(frames)
+    polys_gdf = _parse_yacimientos_polygons(yacimientos_path)
+    if points_gdf.empty and (polys_gdf is None or polys_gdf.empty):
+        return schema.empty_geo(schema.GeoKind.FIELDS)
+
+    combined = _merge_points_and_polygons(points_gdf, polys_gdf)
+    enriched = _enrich_fields_with_basins(combined, basins_path)
     return geo.prepare_geo(enriched, schema.GeoKind.FIELDS)
 
 
@@ -634,7 +787,7 @@ class Colombia(base.Source):
         *,
         client: httpx2.Client | None = None,
     ) -> list[base.DownloadResult]:
-        """Download grouped Socrata field points and ANH sedimentary basin polygons."""
+        """Download ANH RUTY field polygons, Socrata field points, and sedimentary basins."""
         if kind is not schema.GeoKind.FIELDS:
             return super().fetch_geo(kind, dest_dir, client=client)
 
@@ -659,6 +812,16 @@ class Colombia(base.Source):
             }
         )
         basins_url = f"{_BASINS_QUERY_URL}?{basins_params}"
+        yac_params = urlencode(
+            {
+                "service": "WFS",
+                "version": "2.0.0",
+                "request": "GetFeature",
+                "typeNames": "Yacimientos:Yacimientos",
+                "outputFormat": "GEOJSON",
+            }
+        )
+        yac_url = f"{_YACIMIENTOS_WFS_URL}?{yac_params}"
 
         dest_dir.mkdir(parents=True, exist_ok=True)
         with base.open_client(client) as http:
@@ -666,10 +829,11 @@ class Colombia(base.Source):
                 base.download_file(http, oil_url, dest_dir / "colombia_fields_oil.csv"),
                 base.download_file(http, gas_url, dest_dir / "colombia_fields_gas.csv"),
                 base.download_file(http, basins_url, dest_dir / "colombia_basins.geojson"),
+                base.download_file(http, yac_url, dest_dir / "colombia_yacimientos.geojson"),
             ]
 
     def parse_geo(self, kind: schema.GeoKind, paths: list[Path]) -> gpd.GeoDataFrame:
-        """Parse Colombia field points enriched with ANH sedimentary basin polygons."""
+        """Parse Colombia field polygons/points enriched with ANH sedimentary basins."""
         if kind is schema.GeoKind.FIELDS:
             return _parse_fields_geo(paths)
         return super().parse_geo(kind, paths)

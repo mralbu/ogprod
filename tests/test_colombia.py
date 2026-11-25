@@ -203,6 +203,80 @@ def test_fetch_production_paginates_and_bundles(tmp_path: Path) -> None:
     assert table.num_rows == 2
 
 
+def _sample_yacimientos_geojson() -> dict[str, object]:
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {
+                    "CAMPO_ID": "101",
+                    "CAMPO": "RUBIALES",
+                    "FORMACION": "CARBONERA C7",
+                    "ESTADO_YACIMIENTO": "ACTIVO",
+                    "TIPO_HIDROCARBURO": "PETROLEO",
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [-71.50, 3.75],
+                            [-71.40, 3.75],
+                            [-71.40, 3.85],
+                            [-71.50, 3.85],
+                            [-71.50, 3.75],
+                        ]
+                    ],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {
+                    "CAMPO_ID": "101",
+                    "CAMPO": "RUBIALES",
+                    "FORMACION": "CARBONERA C5",
+                    "ESTADO_YACIMIENTO": "ACTIVO",
+                    "TIPO_HIDROCARBURO": "PETROLEO",
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [-71.45, 3.78],
+                            [-71.35, 3.78],
+                            [-71.35, 3.88],
+                            [-71.45, 3.88],
+                            [-71.45, 3.78],
+                        ]
+                    ],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {
+                    "CAMPO_ID": "999",
+                    "CAMPO": "RUTY ONLY FIELD",
+                    "FORMACION": "MIRADOR",
+                    "ESTADO_YACIMIENTO": "ACTIVO",
+                    "TIPO_HIDROCARBURO": "PETROLEO-GAS",
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [-72.00, 4.00],
+                            [-71.95, 4.00],
+                            [-71.95, 4.05],
+                            [-72.00, 4.05],
+                            [-72.00, 4.00],
+                        ]
+                    ],
+                },
+            },
+        ],
+    }
+
+
 def test_fetch_and_parse_geo_fields_with_basins(tmp_path: Path) -> None:
     oil_csv = (
         "campo,departamento,operadora,longitud,latitud,last_year\n"
@@ -216,6 +290,7 @@ def test_fetch_and_parse_geo_fields_with_basins(tmp_path: Path) -> None:
         "CHUCHUPA,GUAJIRA,HOCOL S.A.,-72.8300,11.8111,2026\n"
     )
     basins_bytes = json.dumps(_sample_basins_geojson()).encode("utf-8")
+    yac_bytes = json.dumps(_sample_yacimientos_geojson()).encode("utf-8")
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         url = str(request.url)
@@ -225,6 +300,8 @@ def test_fetch_and_parse_geo_fields_with_basins(tmp_path: Path) -> None:
             return httpx2.Response(200, text=gas_csv)
         if "ANH_InsGDB/MapServer/4" in url:
             return httpx2.Response(200, content=basins_bytes)
+        if "Yacimientos/MapServer/WFSServer" in url:
+            return httpx2.Response(200, content=yac_bytes)
         return httpx2.Response(404)
 
     src = colombia.Colombia()
@@ -232,19 +309,31 @@ def test_fetch_and_parse_geo_fields_with_basins(tmp_path: Path) -> None:
         downloads = src.fetch_geo(schema.GeoKind.FIELDS, tmp_path, client=client)
 
     gdf = src.parse_geo(schema.GeoKind.FIELDS, [d.path for d in downloads]).set_index("field_id")
-    assert len(gdf) == 4
+    assert len(gdf) == 5
 
+    # Rubiales gets dissolved RUTY polygon + area_km2 + field_code + status.
     rub = gdf.loc["RUBIALES"]
-    assert rub.geometry.geom_type == "Point"
+    assert rub.geometry.geom_type in {"Polygon", "MultiPolygon"}
+    assert rub["field_code"] == "101"
+    assert rub["status"] == "Activo"
+    assert rub["area_km2"] > 100.0
     assert rub["basin"] == "Llanos Orientales"
     assert rub["environment"] == "onshore"
     assert rub["region"] == "Meta"
     assert rub["primary_fluid"] == "oil_and_gas"
 
+    # Non-RUTY field falls back to Socrata Point.
     chu = gdf.loc["CHUCHUPA"]
+    assert chu.geometry.geom_type == "Point"
     assert chu["basin"] == "Guajira Offshore"
     assert chu["environment"] == "offshore"
     assert chu["primary_fluid"] == "gas"
+
+    # RUTY-only field retains its polygon, basin, and primary_fluid.
+    ruty_only = gdf.loc["RUTY ONLY FIELD"]
+    assert ruty_only.geometry.geom_type in {"Polygon", "MultiPolygon"}
+    assert ruty_only["basin"] == "Llanos Orientales"
+    assert ruty_only["primary_fluid"] == "oil_and_gas"
 
     no_coord = gdf.loc["NO COORD FIELD"]
     assert no_coord.geometry is None

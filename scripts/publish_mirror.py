@@ -269,15 +269,17 @@ the upstream terms for each source partition they use:
   Publisher: Agencia Nacional de Hidrocarburos (ANH) via datos.gov.co
   Source: https://www.datos.gov.co/Minas-y-Energ-a/Produccion-Fiscalizada-Crudo-Consolidada/fdvb-hsrf
           https://www.datos.gov.co/Minas-y-Energ-a/Produccion-Fiscalizada-Gas-Consolidada/5dux-bfvx
+          https://geovisor.anh.gov.co/server/services/Yacimientos/Yacimientos/MapServer/WFSServer
           https://geovisor.anh.gov.co/server/rest/services/GEOVISOR_v32/ANH_InsGDB/MapServer/4
   License: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
            https://creativecommons.org/licenses/by-sa/4.0/
   Attribution: Credit Agencia Nacional de Hidrocarburos (ANH) / datos.gov.co.
   Modifications: ogprod summed multi-municipality rows to field-month grain, converted
                  monthly barrels and thousand cubic feet (kpc) to calendar-day average
-                 rates (bbl/d, e3m3/d), replaced missing (0, 0) coordinates with NULL
-                 geometry, and enriched field points with ANH sedimentary basin and
-                 onshore/offshore attributes in GeoParquet 1.1 (EPSG:4326).
+                 rates (bbl/d, e3m3/d), dissolved ANH RUTY reservoir polygons to field
+                 grain with Socrata point fallback (replacing (0, 0) with NULL), and
+                 enriched fields with ANH sedimentary basin and onshore/offshore
+                 attributes in GeoParquet 1.1 (EPSG:4326).
 
 3. Disclaimer
 -------------

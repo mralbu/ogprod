@@ -24,7 +24,7 @@ Last reviewed: November 2026.
 | **Tier 1 (v1 spec'd)** | USA — Federal Offshore | `us-gom` / `us-ocs` | BSEE / BOEM (*OGOR-A*) | Well | Monthly, 1996–present (1947+ hist) | O, G, W | Leases/Units, Fac, W | Direct HTTPS ZIPs + BOEM SHP (NAD 27); CI-friendly |
 | **Built (v2)** | Netherlands | `netherlands` | NLOG (TNO) | Well | Monthly, 2003–present | O, C, G, W, WI, GI | F, Fac, W | Datacenter REST API + OGC WFS (ED50/UTM31N); CI-friendly |
 | **Tier 1** | USA — Alaska | `us-ak` | AOGCC | Well | Monthly, all history (pre/post-2000) | O, NGL, G, W, Inj | Fac, W | Single ~30 MB `DataMinerAll.zip`, updated daily (NAD 27) |
-| **Built (v2)** | Colombia | `colombia` | ANH (`datos.gov.co`) | Field | Monthly, 2014–present | O, G | Field pts + ANH basins | Socrata API / CSV (CC BY-SA 4.0) + ANH Geovisor; CI-friendly |
+| **Built (v2)** | Colombia | `colombia` | ANH (`datos.gov.co`) | Field | Monthly, 2014–present | O, G | F (RUTY WFS) + pt fallback + basins | Socrata API (CC BY-SA 4.0) + ANH Geovisor WFS; CI-friendly |
 | **Tier 2** | Denmark | `denmark` | Danish Energy Agency (ENS) | Field | Monthly 2018+ (yearly 1972+) | O, G, W, WI, GI | F, Fac, W | Excel spreadsheets + SHP/WFS (ED50/UTM32N) |
 | **Tier 2** | Canada — Offshore NL | `canada-nl` | C-NLOER (ex-C-NLOPB) | Well & Field | Monthly, 1997–present | O, G, W | Licences, W (5 fields, 4 hubs) | HTML/tables + Data Hub SHP; small high-value offshore set |
 | **Tier 2** | Italy | `italy` | MASE / UNMIG | Concession | Monthly, 2004–present | O (`kg`), C (`kg`), G | Conc, Fac, W | Single CSV (CC BY 4.0) + ArcGIS Online WebGIS |
