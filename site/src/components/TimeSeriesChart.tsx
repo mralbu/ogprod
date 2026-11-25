@@ -1,7 +1,7 @@
 import * as echarts from "echarts";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { buildTimeSeriesOption } from "../lib/timeSeriesOption";
-import type { KnownGap, MonthlyPoint, RateColumn, UnitSystem } from "../types/data";
+import type { ChartSeriesKey, KnownGap, MonthlyPoint, UnitSystem } from "../types/data";
 
 export interface TimeSeriesChartHandle {
   exportPng: (filename: string) => void;
@@ -9,7 +9,7 @@ export interface TimeSeriesChartHandle {
 
 interface TimeSeriesChartProps {
   rows: MonthlyPoint[];
-  activeProducts: RateColumn[];
+  activeProducts: ChartSeriesKey[];
   unitSystem: UnitSystem;
   oilCapacityBpd?: number | null;
   knownGaps?: readonly KnownGap[];

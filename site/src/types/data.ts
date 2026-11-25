@@ -19,6 +19,21 @@ export const ALL_RATE_COLUMNS: readonly RateColumn[] = [
   "co2_inj",
 ] as const;
 
+export type DerivedSeriesKey = "gor" | "water_cut";
+
+export const ALL_DERIVED_SERIES: readonly DerivedSeriesKey[] = ["gor", "water_cut"] as const;
+
+export type ChartSeriesKey = RateColumn | DerivedSeriesKey;
+
+export const ALL_CHART_SERIES: readonly ChartSeriesKey[] = [
+  ...ALL_RATE_COLUMNS,
+  ...ALL_DERIVED_SERIES,
+] as const;
+
+export function isDerivedSeries(key: ChartSeriesKey): key is DerivedSeriesKey {
+  return key === "gor" || key === "water_cut";
+}
+
 export type UnitSystem = "oilfield_e3m3" | "oilfield_mmcf" | "metric_m3";
 
 export type SourceFilter = string | null;

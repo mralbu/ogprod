@@ -33,6 +33,18 @@ describe("URL query-param state sync", () => {
     expect(parseUrlState(qs)).toEqual(state);
   });
 
+  it("round-trips derived gor and water_cut series in products param", () => {
+    const state = {
+      source: "norway",
+      selection: { kind: "field" as const, source: "norway", id: "JOHAN SVERDRUP" },
+      products: ["oil_prod" as const, "gor" as const, "water_cut" as const],
+      units: "oilfield_e3m3" as const,
+    };
+    const qs = serializeUrlState(state);
+    expect(qs).toContain("products=oil_prod%2Cgor%2Cwater_cut");
+    expect(parseUrlState(qs)).toEqual(state);
+  });
+
   it("ignores invalid product names and unknown unit systems", () => {
     const parsed = parseUrlState("?source=norway&products=oil_prod,bogus&units=invalid");
     expect(parsed.source).toBe("norway");

@@ -16,7 +16,7 @@ from urllib.parse import quote
 from ogprod import schema
 
 _EXPLORER_PRODUCTS_CSV = (
-    "oil_prod,gas_prod,water_prod,condensate_prod,ngl_prod,water_inj,gas_inj,co2_inj"
+    "oil_prod,gas_prod,water_prod,condensate_prod,ngl_prod,water_inj,gas_inj,co2_inj,gor,water_cut"
 )
 
 

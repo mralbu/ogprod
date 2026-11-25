@@ -1,7 +1,7 @@
 import {
-  ALL_RATE_COLUMNS,
+  ALL_CHART_SERIES,
+  type ChartSeriesKey,
   type EntitySelection,
-  type RateColumn,
   type SourceFilter,
   type UnitSystem,
 } from "../types/data";
@@ -10,14 +10,14 @@ import { UNIT_SYSTEMS } from "./units";
 export interface AppUrlState {
   source: SourceFilter;
   selection: EntitySelection;
-  products: RateColumn[];
+  products: ChartSeriesKey[];
   units: UnitSystem;
 }
 
-export const DEFAULT_PRODUCTS: RateColumn[] = ["oil_prod", "gas_prod"];
+export const DEFAULT_PRODUCTS: ChartSeriesKey[] = ["oil_prod", "gas_prod"];
 export const DEFAULT_UNITS: UnitSystem = "oilfield_e3m3";
 
-const VALID_COLUMNS = new Set<string>(ALL_RATE_COLUMNS);
+const VALID_COLUMNS = new Set<string>(ALL_CHART_SERIES);
 const VALID_UNITS = new Set<string>(UNIT_SYSTEMS.map((u) => u.id));
 
 export function parseUrlState(search: string): AppUrlState {
@@ -34,7 +34,7 @@ export function parseUrlState(search: string): AppUrlState {
     const parsed = rawProducts
       .split(",")
       .map((s) => s.trim())
-      .filter((s): s is RateColumn => VALID_COLUMNS.has(s));
+      .filter((s): s is ChartSeriesKey => VALID_COLUMNS.has(s));
     if (parsed.length > 0) {
       products = parsed;
     }

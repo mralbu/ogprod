@@ -1,6 +1,15 @@
 import * as echarts from "echarts";
-import type { KnownGap, MonthlyPoint, RateColumn, UnitSystem } from "../types/data";
-import { convertRate, PRODUCT_SPECS, UNIT_SYSTEMS, unitLabelFor } from "./units";
+import type { ChartSeriesKey, KnownGap, MonthlyPoint, UnitSystem } from "../types/data";
+import { isDerivedSeries } from "../types/data";
+import {
+  type AxisGroup,
+  computeSeriesValue,
+  convertRate,
+  DERIVED_SPECS,
+  getSeriesSpec,
+  UNIT_SYSTEMS,
+  unitLabelFor,
+} from "./units";
 
 const SANS_FONT = 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 const MONO_FONT = "JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace";
@@ -9,10 +18,14 @@ export const LEGEND_TOP_PX = 2;
 export const Y_AXIS_NAME_GAP_PX = 14;
 /** Vertical clearance so the top legend row and y-axis unit labels never collide. */
 export const GRID_TOP_PX = 58;
+/** Horizontal spacing between additional offset right y-axes when 3+ unit groups are active. */
+export const RIGHT_AXIS_OFFSET_PX = 60;
+
+const AXIS_GROUP_ORDER: readonly AxisGroup[] = ["liquid", "gas", "gor", "water_cut"];
 
 export interface BuildTimeSeriesOptionParams {
   rows: readonly MonthlyPoint[];
-  activeProducts: readonly RateColumn[];
+  activeProducts: readonly ChartSeriesKey[];
   unitSystem: UnitSystem;
   oilCapacityBpd?: number | null;
   knownGaps?: readonly KnownGap[];
@@ -20,7 +33,10 @@ export interface BuildTimeSeriesOptionParams {
 
 function formatAxisTick(v: number): string {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
+  if (v >= 1_000) {
+    if (v % 1_000 === 0 || v >= 10_000) return `${(v / 1_000).toFixed(0)}k`;
+    return `${(v / 1_000).toFixed(1)}k`;
+  }
   return String(v);
 }
 
@@ -47,6 +63,89 @@ function buildGapMarkAreas(
   return areas;
 }
 
+function mapGapsToSeries(
+  activeProducts: readonly ChartSeriesKey[],
+  knownGaps: readonly KnownGap[],
+): Map<ChartSeriesKey, KnownGap[]> {
+  const activeSet = new Set<ChartSeriesKey>(activeProducts);
+  const bySeries = new Map<ChartSeriesKey, KnownGap[]>();
+  for (const gap of knownGaps) {
+    let target: ChartSeriesKey | undefined;
+    if (activeSet.has(gap.column)) {
+      target = gap.column;
+    } else {
+      target = activeProducts.find(
+        (key) => isDerivedSeries(key) && DERIVED_SPECS[key].dependsOn.includes(gap.column),
+      );
+    }
+    if (!target) continue;
+    const list = bySeries.get(target);
+    if (list) {
+      list.push(gap);
+    } else {
+      bySeries.set(target, [gap]);
+    }
+  }
+  return bySeries;
+}
+
+function buildYAxisOption(
+  group: AxisGroup,
+  axisIdx: number,
+  totalAxes: number,
+  unitMeta: (typeof UNIT_SYSTEMS)[number],
+): echarts.YAXisComponentOption {
+  const isRightAxis = axisIdx > 0;
+  const rightOffset = axisIdx > 1 ? (axisIdx - 1) * RIGHT_AXIS_OFFSET_PX : 0;
+
+  let name: string;
+  let color: string;
+  if (group === "liquid") {
+    name = unitMeta.liquidUnit;
+    color = "#64748b";
+  } else if (group === "gas") {
+    name = unitMeta.gasUnit;
+    color = "#0284c7";
+  } else if (group === "gor") {
+    name = unitMeta.gorUnit;
+    color = DERIVED_SPECS.gor.color;
+  } else {
+    name = "%";
+    color = DERIVED_SPECS.water_cut.color;
+  }
+
+  const align = !isRightAxis ? "left" : rightOffset === 0 ? "right" : "left";
+
+  const axis: echarts.YAXisComponentOption = {
+    type: "value",
+    position: isRightAxis ? "right" : "left",
+    ...(rightOffset > 0 ? { offset: rightOffset } : {}),
+    ...(group === "water_cut" ? { min: 0, max: 100 } : {}),
+    name,
+    nameLocation: "end",
+    nameGap: Y_AXIS_NAME_GAP_PX,
+    nameTextStyle: {
+      color,
+      fontSize: 11,
+      fontWeight: 500,
+      fontFamily: SANS_FONT,
+      align,
+      padding: [0, 0, 0, 0],
+    },
+    ...(totalAxes >= 3 && isRightAxis
+      ? { axisLine: { show: true, lineStyle: { color } } }
+      : {}),
+    axisLabel: {
+      color,
+      fontSize: 11,
+      fontFamily: MONO_FONT,
+      formatter: group === "water_cut" ? (v: number) => `${v}%` : formatAxisTick,
+    },
+    splitLine: { show: axisIdx === 0, lineStyle: { color: "#f1f5f9" } },
+  };
+  return axis;
+}
+
 export function buildTimeSeriesOption({
   rows,
   activeProducts,
@@ -57,21 +156,24 @@ export function buildTimeSeriesOption({
   const unitMeta = UNIT_SYSTEMS.find((u) => u.id === unitSystem) ?? UNIT_SYSTEMS[0];
   const periods = rows.map((r) => r.p.slice(0, 7));
 
-  const hasLiquids = activeProducts.some((c) => PRODUCT_SPECS[c].phase === "liquid");
-  const hasGases = activeProducts.some((c) => PRODUCT_SPECS[c].phase === "gas");
+  const presentGroups = new Set<AxisGroup>(activeProducts.map((c) => getSeriesSpec(c).axisGroup));
+  const activeGroups = AXIS_GROUP_ORDER.filter((g) => presentGroups.has(g));
+  const groupToAxisIndex = new Map<AxisGroup, number>(activeGroups.map((g, i) => [g, i]));
 
   const convertedCap =
     oilCapacityBpd && oilCapacityBpd > 0
       ? convertRate(oilCapacityBpd, "oil_prod", unitSystem)
       : null;
 
+  const gapsBySeries = mapGapsToSeries(activeProducts, knownGaps);
+
   const series: echarts.SeriesOption[] = activeProducts.map((col) => {
-    const spec = PRODUCT_SPECS[col];
-    const isGas = spec.phase === "gas";
-    const yAxisIndex = isGas && hasLiquids ? 1 : 0;
+    const spec = getSeriesSpec(col);
+    const yAxisIndex = groupToAxisIndex.get(spec.axisGroup) ?? 0;
+    const decimals = col === "water_cut" ? 1 : 2;
     const data = rows.map((r) => {
-      const val = convertRate(r[col], col, unitSystem);
-      return val === null ? null : Number(val.toFixed(2));
+      const val = computeSeriesValue(r, col, unitSystem);
+      return val === null ? null : Number(val.toFixed(decimals));
     });
 
     const baseSeries: echarts.LineSeriesOption = {
@@ -83,7 +185,12 @@ export function buildTimeSeriesOption({
       smooth: false,
       connectNulls: false,
       lineStyle: {
-        width: col === "oil_prod" || col === "gas_prod" ? 2 : 1.5,
+        width:
+          col === "oil_prod" || col === "gas_prod"
+            ? 2
+            : spec.category === "ratio"
+              ? 1.75
+              : 1.5,
         type: spec.category === "injection" ? "dashed" : "solid",
       },
       itemStyle: { color: spec.color },
@@ -114,8 +221,8 @@ export function buildTimeSeriesOption({
       };
     }
 
-    const colGaps = knownGaps.filter((g) => g.column === col);
-    if (colGaps.length > 0) {
+    const colGaps = gapsBySeries.get(col);
+    if (colGaps && colGaps.length > 0) {
       const gapAreas = buildGapMarkAreas(periods, colGaps);
       if (gapAreas.length > 0) {
         baseSeries.markArea = {
@@ -140,63 +247,21 @@ export function buildTimeSeriesOption({
     return baseSeries;
   });
 
-  const yAxis: echarts.YAXisComponentOption[] = [];
-  if (hasLiquids) {
-    yAxis.push({
-      type: "value",
-      name: unitMeta.liquidUnit,
-      nameLocation: "end",
-      nameGap: Y_AXIS_NAME_GAP_PX,
-      nameTextStyle: {
-        color: "#64748b",
-        fontSize: 11,
-        fontWeight: 500,
-        fontFamily: SANS_FONT,
-        align: "left",
-        padding: [0, 0, 0, 0],
-      },
-      axisLabel: {
-        color: "#64748b",
-        fontSize: 11,
-        fontFamily: MONO_FONT,
-        formatter: formatAxisTick,
-      },
-      splitLine: { lineStyle: { color: "#f1f5f9" } },
-    });
-  }
-  if (hasGases) {
-    const isRightAxis = hasLiquids;
-    yAxis.push({
-      type: "value",
-      name: unitMeta.gasUnit,
-      nameLocation: "end",
-      nameGap: Y_AXIS_NAME_GAP_PX,
-      nameTextStyle: {
-        color: "#0284c7",
-        fontSize: 11,
-        fontWeight: 500,
-        fontFamily: SANS_FONT,
-        align: isRightAxis ? "right" : "left",
-        padding: [0, 0, 0, 0],
-      },
-      axisLabel: {
-        color: "#0284c7",
-        fontSize: 11,
-        fontFamily: MONO_FONT,
-        formatter: formatAxisTick,
-      },
-      splitLine: { show: !hasLiquids, lineStyle: { color: "#f1f5f9" } },
-    });
-  }
+  const yAxis: echarts.YAXisComponentOption[] = activeGroups.map((group, idx) =>
+    buildYAxisOption(group, idx, activeGroups.length, unitMeta),
+  );
   if (yAxis.length === 0) {
     yAxis.push({ type: "value" });
   }
+
+  const rightAxisCount = Math.max(0, activeGroups.length - 1);
+  const gridRight = rightAxisCount === 0 ? 20 : 58 + (rightAxisCount - 1) * RIGHT_AXIS_OFFSET_PX;
 
   return {
     animationDuration: 260,
     grid: {
       left: 56,
-      right: hasLiquids && hasGases ? 58 : 20,
+      right: gridRight,
       top: GRID_TOP_PX,
       bottom: rows.length > 18 ? 58 : 30,
     },

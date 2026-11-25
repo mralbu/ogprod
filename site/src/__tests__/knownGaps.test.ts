@@ -119,4 +119,24 @@ describe("selectApplicableGaps", () => {
       }),
     ).toEqual([]);
   });
+
+  it("surfaces gaps affecting dependencies of derived ratios like GOR", () => {
+    const gorGaps = selectApplicableGaps({
+      sourcesMeta: [makeBrazilSource(true)],
+      selectionKind: "basin",
+      visibleProducts: ["oil_prod", "gor"],
+      series: OVERLAPPING_SERIES,
+    });
+    expect(gorGaps).toHaveLength(1);
+    expect(gorGaps[0].column).toBe("gas_prod");
+
+    expect(
+      selectApplicableGaps({
+        sourcesMeta: [makeBrazilSource(true)],
+        selectionKind: "basin",
+        visibleProducts: ["oil_prod", "water_cut"],
+        series: OVERLAPPING_SERIES,
+      }),
+    ).toEqual([]);
+  });
 });

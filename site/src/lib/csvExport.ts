@@ -1,5 +1,5 @@
-import type { MonthlyPoint, RateColumn, UnitSystem } from "../types/data";
-import { convertRate, PRODUCT_SPECS, unitLabelFor } from "./units";
+import type { ChartSeriesKey, MonthlyPoint, UnitSystem } from "../types/data";
+import { computeSeriesValue, getSeriesSpec, unitLabelFor } from "./units";
 
 function escapeCsvCell(value: string): string {
   if (value.includes(",") || value.includes('"') || value.includes("\n")) {
@@ -10,21 +10,21 @@ function escapeCsvCell(value: string): string {
 
 export function buildSeriesCsv(
   rows: readonly MonthlyPoint[],
-  columns: readonly RateColumn[],
+  columns: readonly ChartSeriesKey[],
   unitSystem: UnitSystem,
   options?: { includeUtilization?: boolean },
 ): string {
   const headers = [
     "period",
-    ...columns.map((c) => `${PRODUCT_SPECS[c].shortLabel} (${unitLabelFor(c, unitSystem)})`),
+    ...columns.map((c) => `${getSeriesSpec(c).shortLabel} (${unitLabelFor(c, unitSystem)})`),
     ...(options?.includeUtilization ? ["Oil Utilization (%)"] : []),
   ];
   const lines = [headers.map(escapeCsvCell).join(",")];
   for (const row of rows) {
     const cells: string[] = [row.p];
     for (const col of columns) {
-      const converted = convertRate(row[col], col, unitSystem);
-      cells.push(converted === null ? "" : converted.toFixed(2));
+      const value = computeSeriesValue(row, col, unitSystem);
+      cells.push(value === null ? "" : value.toFixed(2));
     }
     if (options?.includeUtilization) {
       cells.push(row.oil_util === undefined ? "" : (row.oil_util * 100).toFixed(2));

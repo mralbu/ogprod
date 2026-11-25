@@ -3,8 +3,15 @@ import { useMemo, useRef } from "react";
 import { buildSeriesCsv, downloadCsv } from "../lib/csvExport";
 import { llmsTxtUrl } from "../lib/dataClient";
 import { type ScopedKnownGap, selectApplicableGaps } from "../lib/knownGaps";
-import { formatPercent, PRODUCT_SPECS } from "../lib/units";
+import {
+  computeSeriesValue,
+  DERIVED_SPECS,
+  formatPercent,
+  getSeriesSpec,
+  unitLabelFor,
+} from "../lib/units";
 import type {
+  ChartSeriesKey,
   EntitySelection,
   FacilitySummary,
   FieldSummary,
@@ -15,7 +22,7 @@ import type {
   SourceMeta,
   UnitSystem,
 } from "../types/data";
-import { ALL_RATE_COLUMNS } from "../types/data";
+import { ALL_DERIVED_SERIES, ALL_RATE_COLUMNS } from "../types/data";
 import { DashboardHeader } from "./DashboardHeader";
 import { KpiStrip } from "./KpiStrip";
 import { OverviewLeaderboards } from "./OverviewLeaderboards";
@@ -30,8 +37,8 @@ interface DashboardPaneProps {
   loadingSeries: boolean;
   seriesError: string | null;
   wellPartitionsQueried: number | null;
-  activeProducts: RateColumn[];
-  onToggleProduct: (col: RateColumn) => void;
+  activeProducts: ChartSeriesKey[];
+  onToggleProduct: (col: ChartSeriesKey) => void;
   unitSystem: UnitSystem;
   fieldsSummary: FieldSummary[];
   facilitiesSummary: FacilitySummary[];
@@ -81,7 +88,7 @@ export function DashboardPane({
     );
   }, [selection, facilitiesSummary]);
 
-  const availableProducts = useMemo(() => {
+  const availableRateProducts = useMemo(() => {
     const present = new Set<RateColumn>();
     for (const row of series) {
       for (const col of ALL_RATE_COLUMNS) {
@@ -98,10 +105,26 @@ export function DashboardPane({
     return ALL_RATE_COLUMNS.filter((c) => present.has(c));
   }, [series, activeSourcesMeta]);
 
+  const availableDerivedSeries = useMemo(() => {
+    if (series.length === 0) {
+      return ALL_DERIVED_SERIES.filter((key) =>
+        DERIVED_SPECS[key].dependsOn.every((dep) => availableRateProducts.includes(dep)),
+      );
+    }
+    return ALL_DERIVED_SERIES.filter((key) =>
+      series.some((row) => computeSeriesValue(row, key, unitSystem) !== null),
+    );
+  }, [series, availableRateProducts, unitSystem]);
+
+  const availableProducts = useMemo<ChartSeriesKey[]>(
+    () => [...availableRateProducts, ...availableDerivedSeries],
+    [availableRateProducts, availableDerivedSeries],
+  );
+
   const visibleProducts = useMemo(() => {
     const filtered = activeProducts.filter((c) => availableProducts.includes(c));
-    return filtered.length > 0 ? filtered : availableProducts.slice(0, 2);
-  }, [activeProducts, availableProducts]);
+    return filtered.length > 0 ? filtered : availableRateProducts.slice(0, 2);
+  }, [activeProducts, availableProducts, availableRateProducts]);
 
   const latestRow = series.length > 0 ? series[series.length - 1] : null;
   const firstRow = series.length > 0 ? series[0] : null;
@@ -175,13 +198,40 @@ export function DashboardPane({
 
         <div className="rounded-lg border border-slate-200/90 bg-white p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <div className="mb-3 flex flex-wrap items-center gap-1.5">
-            {availableProducts.map((col) => {
-              const spec = PRODUCT_SPECS[col];
+            {availableRateProducts.map((col) => {
+              const spec = getSeriesSpec(col);
               const active = visibleProducts.includes(col);
               return (
                 <button
                   key={col}
                   type="button"
+                  title={`${spec.label} (${unitLabelFor(col, unitSystem)})`}
+                  onClick={() => onToggleProduct(col)}
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
+                    active
+                      ? "border-slate-800 bg-slate-900 text-white"
+                      : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: spec.color }}
+                  />
+                  {spec.shortLabel}
+                </button>
+              );
+            })}
+            {availableRateProducts.length > 0 && availableDerivedSeries.length > 0 && (
+              <span className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden="true" />
+            )}
+            {availableDerivedSeries.map((col) => {
+              const spec = getSeriesSpec(col);
+              const active = visibleProducts.includes(col);
+              return (
+                <button
+                  key={col}
+                  type="button"
+                  title={`${spec.label} (${unitLabelFor(col, unitSystem)})`}
                   onClick={() => onToggleProduct(col)}
                   className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
                     active

@@ -11,11 +11,11 @@ import {
 import { queryWellSeriesFromMirror } from "./lib/duckdbWell";
 import { parseUrlState, serializeUrlState } from "./lib/urlState";
 import type {
+  ChartSeriesKey,
   EntitySelection,
   FacilitySummary,
   FieldSummary,
   MonthlyPoint,
-  RateColumn,
   SearchEntry,
   SiteMeta,
   SourceFilter,
@@ -50,7 +50,7 @@ export function App() {
   const initial = useMemo(() => parseUrlState(window.location.search), []);
   const [activeSource, setActiveSource] = useState<SourceFilter>(initial.source);
   const [selection, setSelection] = useState<EntitySelection>(initial.selection);
-  const [activeProducts, setActiveProducts] = useState<RateColumn[]>(initial.products);
+  const [activeProducts, setActiveProducts] = useState<ChartSeriesKey[]>(initial.products);
   const [unitSystem, setUnitSystem] = useState<UnitSystem>(initial.units);
 
   const [meta, setMeta] = useState<SiteMeta | null>(null);
@@ -237,7 +237,7 @@ export function App() {
     [],
   );
 
-  const handleToggleProduct = useCallback((col: RateColumn) => {
+  const handleToggleProduct = useCallback((col: ChartSeriesKey) => {
     setActiveProducts((prev) => {
       if (prev.includes(col)) {
         return prev.length > 1 ? prev.filter((c) => c !== col) : prev;

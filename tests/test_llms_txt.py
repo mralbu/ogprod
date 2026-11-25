@@ -131,6 +131,7 @@ def test_render_llms_txt_structural_invariants(source_ids: list[str], site_url: 
         f"[rollups/country_monthly.json]({expected_base}data/rollups/country_monthly.json)" in text
     )
     assert f"{expected_base}?source=" in text
+    assert "gor,water_cut" in text
     for sid in source_ids:
         assert f"`{sid}`" in text
         assert f"rollups/field_monthly/{sid}.json" in text
