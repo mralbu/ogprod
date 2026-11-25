@@ -25,6 +25,9 @@ describe("mapStyle layer zoom thresholds and specs", () => {
 
     const byId = new Map(buildVectorLayers().map((layer) => [layer.id, layer]));
     expect(byId.get("fields-fill")?.minzoom).toBeUndefined();
+    expect(byId.get("fields-point")?.minzoom).toBeUndefined();
+    expect(byId.get("fields-point")?.type).toBe("circle");
+    expect(byId.get("fields-point-selected")?.type).toBe("circle");
     expect(byId.get("facilities-symbol")?.minzoom).toBe(MAP_LAYER_MIN_ZOOM.facilities);
     expect(byId.get("fields-label")?.minzoom).toBe(MAP_LAYER_MIN_ZOOM.fieldLabels);
     expect(byId.get("wells-circle")?.minzoom).toBe(MAP_LAYER_MIN_ZOOM.wells);

@@ -31,6 +31,7 @@ def test_sources_lists_all_connectors() -> None:
     out = invoke("sources")
     assert "argentina\tArgentina\tSecretaría de Energía\tfield\t" in out
     assert "brazil\tBrazil\tANP\twell\t" in out
+    assert "colombia\tColombia\tANH\tfield\t" in out
     assert "mexico\tMexico\tSENER / CNIH\tfield\t" in out
     assert "netherlands\tNetherlands\tNLOG (TNO)\twell\t" in out
     assert "norway\tNorway\tSodir\tfield\t" in out

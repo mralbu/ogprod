@@ -40,6 +40,7 @@ _TILE_MIN_ZOOM = 0
 _TILE_MAX_ZOOM = 12
 _TILE_LAYER_MIN_ZOOM: dict[str, int] = {
     "fields": 0,
+    "field_points": 0,
     "field_centroids": 6,
     "facilities": 7,
     "wells": 8,
@@ -670,8 +671,9 @@ def _write_geojsonl_layer(
 def _field_tile_features(
     fields_gdf: gpd.GeoDataFrame,
     field_stats: dict[tuple[str, str], dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     poly_feats: list[dict[str, Any]] = []
+    point_feats: list[dict[str, Any]] = []
     centroid_feats: list[dict[str, Any]] = []
     for _, row in fields_gdf.iterrows():
         geom = row.geometry
@@ -697,14 +699,27 @@ def _field_tile_features(
                 "latest_gas_e3m3d": _round_opt(st.get("latest_gas_e3m3d"), 1),
             }
         )
-        poly_feats.append(
-            {"type": "Feature", "geometry": shapely.geometry.mapping(geom), "properties": props}
-        )
-        pt = geom.representative_point()
-        centroid_feats.append(
-            {"type": "Feature", "geometry": shapely.geometry.mapping(pt), "properties": props}
-        )
-    return poly_feats, centroid_feats
+        if geom.geom_type == "Point":
+            feat = {
+                "type": "Feature",
+                "geometry": shapely.geometry.mapping(geom),
+                "properties": props,
+            }
+            point_feats.append(feat)
+            centroid_feats.append(feat)
+        else:
+            poly_feats.append(
+                {
+                    "type": "Feature",
+                    "geometry": shapely.geometry.mapping(geom),
+                    "properties": props,
+                }
+            )
+            pt = geom.representative_point()
+            centroid_feats.append(
+                {"type": "Feature", "geometry": shapely.geometry.mapping(pt), "properties": props}
+            )
+    return poly_feats, point_feats, centroid_feats
 
 
 def _facility_tile_features(
@@ -803,7 +818,7 @@ def _build_pmtiles(
     stats: dict[str, dict[tuple[str, str], dict[str, Any]]],
     tippecanoe_bin: str,
 ) -> bool:
-    poly_feats, centroid_feats = _field_tile_features(fields_gdf, stats["fields"])
+    poly_feats, point_feats, centroid_feats = _field_tile_features(fields_gdf, stats["fields"])
     fac_feats = _facility_tile_features(fac_gdf, stats["facilities"])
     well_feats = _well_tile_features(wells_gdf, stats["wells"])
 
@@ -811,6 +826,7 @@ def _build_pmtiles(
         tmp_dir = Path(tmp)
         layer_specs = [
             ("fields", poly_feats, tmp_dir / "fields.geojsonl"),
+            ("field_points", point_feats, tmp_dir / "field_points.geojsonl"),
             ("field_centroids", centroid_feats, tmp_dir / "field_centroids.geojsonl"),
             ("facilities", fac_feats, tmp_dir / "facilities.geojsonl"),
             ("wells", well_feats, tmp_dir / "wells.geojsonl"),

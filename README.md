@@ -18,7 +18,7 @@ All production and injection columns are stored as **calendar-day average rates*
 
 Geospatial tables are stored as Hilbert-sorted **GeoParquet 1.1** (`EPSG:4326`, with `bbox` covering column):
 
-- `store/geo/fields/<source>.parquet` (`Polygon` / `MultiPolygon`, e.g. `brazil.parquet`)
+- `store/geo/fields/<source>.parquet` (`Polygon` / `MultiPolygon`, or `Point` for point-only sources such as `colombia`)
 - `store/geo/facilities/<source>.parquet` (`Point` — platforms / FPSOs)
 - `store/geo/wells/<source>.parquet` (`Point`)
 
@@ -32,6 +32,7 @@ Geospatial tables are stored as Hilbert-sorted **GeoParquet 1.1** (`EPSG:4326`, 
 | `uk` | United Kingdom (`GB`) | NSTA (1975–present) | Field (oil, cond, gas, water + water/gas inj) | Fields (offshore + onshore), surface facilities, wellbores |
 | `argentina` | Argentina (`AR`) | Secretaría de Energía (2006–present) | Field rollup (default; oil, gas, water + water/gas/CO₂ inj) + local well parser | Fields (Yacimientos), wells (Capítulo IV) |
 | `netherlands` | Netherlands (`NL`) | NLOG / TNO (2003–present) | Well (oil, cond, gas, water + water/gas inj) | Fields, facilities/platforms, wells |
+| `colombia` | Colombia (`CO`) | ANH / `datos.gov.co` (2014–present) | Field (oil, gas) | Fields (points + ANH sedimentary basins) |
 
 ## Quickstart
 
@@ -45,6 +46,7 @@ uv run ogprod ingest mexico --data-dir ./data
 uv run ogprod ingest uk --data-dir ./data
 uv run ogprod ingest argentina --year 2025 --year 2026 --data-dir ./data
 uv run ogprod ingest netherlands --data-dir ./data
+uv run ogprod ingest colombia --data-dir ./data
 uv run ogprod coverage --data-dir ./data
 uv run ogprod sql "SELECT source, field_name, round(sum(oil_prod), 0) AS oil_bpd FROM production WHERE period = '2025-01-01' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 10" --data-dir ./data
 ```
@@ -61,9 +63,10 @@ db.ingest("mexico")
 db.ingest("uk")
 db.ingest("argentina", year=[2025, 2026])
 db.ingest("netherlands")
+db.ingest("colombia")
 
 df = db.production(source="brazil", start="2026-01")
-fields = db.fields()  # GeoParquet 1.1 polygons
+fields = db.fields()  # GeoParquet 1.1 polygons / points
 facilities = db.facilities()  # GeoParquet 1.1 FPSOs/platforms
 wells = db.wells()  # GeoParquet 1.1 well points
 ```
@@ -77,7 +80,7 @@ uv run ogprod export-web --sync-mirror --out-dir site/public/data --data-dir ./d
 npm --prefix site ci && npm --prefix site run dev
 ```
 
-See [docs/data-architecture.md](docs/data-architecture.md) for the full storage layout, built-in source plan (Brazil ANP, Norway Sodir, Mexico SENER/CNH, UK NSTA, Argentina Secretaría de Energía, Netherlands NLOG), and static web export contract, and [docs/data-sources.md](docs/data-sources.md) for the researched global survey of candidate countries and regulators.
+See [docs/data-architecture.md](docs/data-architecture.md) for the full storage layout, built-in source plan (Brazil ANP, Norway Sodir, Mexico SENER/CNH, UK NSTA, Argentina Secretaría de Energía, Netherlands NLOG, Colombia ANH), and static web export contract, and [docs/data-sources.md](docs/data-sources.md) for the researched global survey of candidate countries and regulators.
 
 ## Development
 

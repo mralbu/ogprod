@@ -1,0 +1,314 @@
+"""Tests for the Colombia ANH (datos.gov.co + Geovisor) connector."""
+
+from __future__ import annotations
+
+import io
+import json
+from datetime import date
+from pathlib import Path
+
+import httpx2
+import pandas as pd
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+from ogprod import schema, sources, units
+from ogprod.sources import colombia
+
+SAMPLE_JSON = Path(__file__).parent / "data" / "colombia_prod_sample.json"
+
+
+def _sample_basins_geojson() -> dict[str, object]:
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"NOMBRE": "LLANOS ORIENTALES", "TIPO": "MADURA"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[-73.0, 2.0], [-70.0, 2.0], [-70.0, 6.0], [-73.0, 6.0], [-73.0, 2.0]]
+                    ],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {"NOMBRE": "GUAJIRA OFFSHORE", "TIPO": "OFFSHORE"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[-74.0, 11.0], [-71.0, 11.0], [-71.0, 13.0], [-74.0, 13.0], [-74.0, 11.0]]
+                    ],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {"NOMBRE": "AREA NO PROSPECTIVA", "TIPO": "NO APLICA"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[-76.0, 1.0], [-74.0, 1.0], [-74.0, 2.0], [-76.0, 2.0], [-76.0, 1.0]]
+                    ],
+                },
+            },
+        ],
+    }
+
+
+def test_colombia_registered_and_metadata() -> None:
+    src = sources.get("colombia")
+    assert src.name == "colombia"
+    assert src.country == "Colombia"
+    assert src.country_code == "CO"
+    assert src.publisher == "ANH"
+    assert src.entity_type is schema.EntityType.FIELD
+    assert src.licence == "CC BY-SA 4.0"
+    assert src.web_wells is False
+    assert src.search_all_wells is False
+
+
+def test_discover_production_year_recent_and_full() -> None:
+    src = colombia.Colombia()
+    single = src.discover_production(year=2024)
+    assert len(single) == 1
+    assert single[0].key == "colombia_2024.json"
+    assert single[0].year_min == 2024
+    assert single[0].year_max == 2024
+
+    recent = src.discover_production(recent=True)
+    assert len(recent) == 2
+    assert recent[0].year_max is not None
+    assert recent[1].year_min is not None
+    assert recent[0].year_max == recent[1].year_min - 1
+
+    full = src.discover_production()
+    assert full[0].year_min == colombia.FIRST_YEAR
+    assert full[-1].year_max is not None
+    assert full[-1].year_max >= 2026
+
+    with pytest.raises(ValueError, match="environment"):
+        src.discover_production(environment="mars")
+
+
+def test_parse_production_bundle_aggregates_and_converts() -> None:
+    src = colombia.Colombia()
+    table = src.parse_production(SAMPLE_JSON)
+    df = table.to_pandas().set_index(["field_id", "period"])
+
+    # Blank campo row dropped -> 6 distinct (field_id, period) rows.
+    assert len(df) == 6
+
+    # Rubiales Jan 2024 (31 days) & Feb 2024 (29 days leap year).
+    rub_jan = df.loc[("RUBIALES", date(2024, 1, 1))]
+    assert rub_jan["oil_prod"] == pytest.approx(3_077_162.0 / 31.0, rel=1e-5)
+    assert rub_jan["region"] == "Meta"
+    assert rub_jan["operator"] == "ECOPETROL S.A."
+    assert rub_jan["gas_prod"] != rub_jan["gas_prod"]  # NaN / null
+
+    rub_feb = df.loc[("RUBIALES", date(2024, 2, 1))]
+    assert rub_feb["oil_prod"] == pytest.approx(2_693_773.0 / 29.0, rel=1e-5)
+
+    # Multi-municipality field sums both oil and gas; picks highest-volume municipality's region.
+    teca = df.loc[("AREA TECA-COCORNA", date(2024, 1, 1))]
+    assert teca["oil_prod"] == pytest.approx((10_000.0 + 5_500.0) / 31.0, rel=1e-5)
+    assert teca["gas_prod"] == pytest.approx(
+        units.monthly_volume_to_rate(6_209.0 + 6_275.0, 31, "mcf", "e3m3/d"),
+        rel=1e-5,
+    )
+    assert teca["region"] == "Antioquia"
+
+    # Accented field name normalized into field_id while preserving display field_name.
+    balcon = df.loc[("BALCON", date(2024, 1, 1))]
+    assert balcon["field_name"] == "BALCÓN"
+    assert balcon["region"] == "Huila"
+
+    # Gas-only offshore field & DEPARTAMENTO NN -> None.
+    chuchupa = df.loc[("CHUCHUPA", date(2024, 1, 1))]
+    assert chuchupa["gas_prod"] == pytest.approx(
+        units.monthly_volume_to_rate(2_590_271.0, 31, "mcf", "e3m3/d"),
+        rel=1e-5,
+    )
+    assert chuchupa["region"] == "Guajira"
+
+    unalloc = df.loc[("UNALLOCATED GAS", date(2024, 1, 1))]
+    assert pd.isna(unalloc["region"])
+
+
+def test_parse_standalone_socrata_csvs() -> None:
+    src = colombia.Colombia()
+    oil_csv = io.BytesIO(
+        b'"vigencia","mes","departamento","operadora","campo","produccion_bls"\n'
+        b'"2024","4","META","ECOPETROL S.A.","RUBIALES","3,000,000.00"\n'
+    )
+    oil_tbl = src.parse_production(oil_csv)
+    assert oil_tbl.num_rows == 1
+    assert oil_tbl.column("oil_prod")[0].as_py() == pytest.approx(100_000.0, rel=1e-5)
+
+    gas_csv = io.BytesIO(
+        b'"vigencia","mes","departamento","operadora","campo","produccionkpc"\n'
+        b'"2024","4","GUAJIRA","HOCOL S.A.","CHUCHUPA","300,000.00"\n'
+    )
+    gas_tbl = src.parse_production(gas_csv)
+    assert gas_tbl.num_rows == 1
+    assert gas_tbl.column("gas_prod")[0].as_py() == pytest.approx(
+        units.monthly_volume_to_rate(300_000.0, 30, "mcf", "e3m3/d"),
+        rel=1e-5,
+    )
+
+
+def test_fetch_production_paginates_and_bundles(tmp_path: Path) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        url = str(request.url)
+        if colombia._OIL_DATASET_ID in url:
+            return httpx2.Response(
+                200,
+                json=[
+                    {
+                        "vigencia": "2024",
+                        "mes": "1",
+                        "departamento": "META",
+                        "operadora": "ECOPETROL S.A.",
+                        "campo": "RUBIALES",
+                        "produccion_bls": "310,000.00",
+                    }
+                ],
+            )
+        if colombia._GAS_DATASET_ID in url:
+            return httpx2.Response(
+                200,
+                json=[
+                    {
+                        "vigencia": "2024",
+                        "mes": "1",
+                        "departamento": "GUAJIRA",
+                        "operadora": "HOCOL S.A.",
+                        "campo": "CHUCHUPA",
+                        "produccionkpc": "31,000.00",
+                    }
+                ],
+            )
+        return httpx2.Response(404)
+
+    src = colombia.Colombia()
+    remote = src.discover_production(year=2024)[0]
+    dest = tmp_path / remote.key
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
+        dl = src.fetch_production(remote, dest, client=client)
+
+    assert dl.path.exists()
+    assert dl.size_bytes > 0
+    table = src.parse_production(dl.path)
+    assert table.num_rows == 2
+
+
+def test_fetch_and_parse_geo_fields_with_basins(tmp_path: Path) -> None:
+    oil_csv = (
+        "campo,departamento,operadora,longitud,latitud,last_year\n"
+        "RUBIALES,META,ECOPETROL S.A.,-71.4656,3.7952,2026\n"
+        "NO COORD FIELD,META,ECOPETROL S.A.,0,0,2025\n"
+        "NON PROSPECTIVE,CAUCA,OP,-75.0,1.5,2024\n"
+    )
+    gas_csv = (
+        "campo,departamento,operadora,longitud,latitud,last_year\n"
+        "RUBIALES,META,ECOPETROL S.A.,-71.4656,3.7952,2026\n"
+        "CHUCHUPA,GUAJIRA,HOCOL S.A.,-72.8300,11.8111,2026\n"
+    )
+    basins_bytes = json.dumps(_sample_basins_geojson()).encode("utf-8")
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        url = str(request.url)
+        if colombia._OIL_DATASET_ID in url:
+            return httpx2.Response(200, text=oil_csv)
+        if colombia._GAS_DATASET_ID in url:
+            return httpx2.Response(200, text=gas_csv)
+        if "ANH_InsGDB/MapServer/4" in url:
+            return httpx2.Response(200, content=basins_bytes)
+        return httpx2.Response(404)
+
+    src = colombia.Colombia()
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
+        downloads = src.fetch_geo(schema.GeoKind.FIELDS, tmp_path, client=client)
+
+    gdf = src.parse_geo(schema.GeoKind.FIELDS, [d.path for d in downloads]).set_index("field_id")
+    assert len(gdf) == 4
+
+    rub = gdf.loc["RUBIALES"]
+    assert rub.geometry.geom_type == "Point"
+    assert rub["basin"] == "Llanos Orientales"
+    assert rub["environment"] == "onshore"
+    assert rub["region"] == "Meta"
+    assert rub["primary_fluid"] == "oil_and_gas"
+
+    chu = gdf.loc["CHUCHUPA"]
+    assert chu["basin"] == "Guajira Offshore"
+    assert chu["environment"] == "offshore"
+    assert chu["primary_fluid"] == "gas"
+
+    no_coord = gdf.loc["NO COORD FIELD"]
+    assert no_coord.geometry is None
+    assert no_coord["primary_fluid"] == "oil"
+
+    non_prosp = gdf.loc["NON PROSPECTIVE"]
+    assert non_prosp["basin"] is None or str(non_prosp["basin"]) == "<NA>"
+
+    with pytest.raises(NotImplementedError):
+        src.fetch_geo(schema.GeoKind.FACILITIES, tmp_path)
+    with pytest.raises(NotImplementedError):
+        src.fetch_geo(schema.GeoKind.WELLS, tmp_path)
+
+
+@given(
+    year=st.integers(min_value=2014, max_value=2030),
+    month=st.integers(min_value=1, max_value=12),
+    oil_parts=st.lists(
+        st.floats(min_value=0.0, max_value=1e6, allow_nan=False, allow_infinity=False),
+        min_size=1,
+        max_size=4,
+    ),
+    gas_parts=st.lists(
+        st.floats(min_value=0.0, max_value=1e6, allow_nan=False, allow_infinity=False),
+        min_size=1,
+        max_size=4,
+    ),
+)
+def test_municipality_aggregation_and_unit_conversion_invariant(
+    year: int,
+    month: int,
+    oil_parts: list[float],
+    gas_parts: list[float],
+) -> None:
+    bundle = {
+        "oil": [
+            {
+                "vigencia": str(year),
+                "mes": str(month),
+                "departamento": "META",
+                "operadora": "OP",
+                "campo": "CAMPO TEST",
+                "produccion_bls": f"{val:,.2f}",
+            }
+            for val in oil_parts
+        ],
+        "gas": [
+            {
+                "vigencia": str(year),
+                "mes": str(month),
+                "departamento": "META",
+                "operadora": "OP",
+                "campo": "CAMPO TEST",
+                "produccionkpc": f"{val:,.2f}",
+            }
+            for val in gas_parts
+        ],
+    }
+    tbl = colombia.Colombia().parse_production(io.BytesIO(json.dumps(bundle).encode("utf-8")))
+    assert tbl.num_rows == 1
+    days = units.days_in_month(year, month)
+    expected_oil = sum(round(v, 2) for v in oil_parts) / days
+    expected_gas = units.monthly_volume_to_rate(
+        sum(round(v, 2) for v in gas_parts), days, "mcf", "e3m3/d"
+    )
+    assert tbl.column("oil_prod")[0].as_py() == pytest.approx(expected_oil, rel=1e-4, abs=1e-3)
+    assert tbl.column("gas_prod")[0].as_py() == pytest.approx(expected_gas, rel=1e-4, abs=1e-3)

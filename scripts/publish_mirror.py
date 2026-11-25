@@ -107,6 +107,12 @@ complete terms.
   - Terms: [NLOG Disclaimer][nl-terms] (free reuse and redistribution with source attribution)
   - Attribution: Credit NLOG.NL (TNO - Geological Survey of the Netherlands / Ministry of
     Climate Policy and Green Growth).
+- **`colombia` — Agencia Nacional de Hidrocarburos (ANH):**
+  - Portal: [Crudo Consolidada (`fdvb-hsrf`)][co-oil], [Gas Consolidada (`5dux-bfvx`)][co-gas],
+    & [ANH Geovisor][co-geo]
+  - License: [Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)][cc-by-sa-4]
+  - Attribution: Credit Agencia Nacional de Hidrocarburos (ANH) / `datos.gov.co`, normalized
+    to calendar-day rates and enriched with ANH sedimentary basins by `ogprod`.
 
 [anp-portal]: https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/fase-de-desenvolvimento-e-producao
 [br-decree]: https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm
@@ -124,6 +130,10 @@ complete terms.
 [nl-prod]: https://www.nlog.nl/en/production-and-injection-data
 [nl-geo]: https://www.nlog.nl/en/files-interactive-map
 [nl-terms]: https://www.nlog.nl/en/disclaimer
+[co-oil]: https://www.datos.gov.co/Minas-y-Energ-a/Produccion-Fiscalizada-Crudo-Consolidada/fdvb-hsrf
+[co-gas]: https://www.datos.gov.co/Minas-y-Energ-a/Produccion-Fiscalizada-Gas-Consolidada/5dux-bfvx
+[co-geo]: https://geovisor.anh.gov.co/tierras/
+[cc-by-sa-4]: https://creativecommons.org/licenses/by-sa/4.0/
 
 ### Modifications Made by `ogprod`
 
@@ -141,7 +151,7 @@ Relative to the raw publisher files, `ogprod` has:
 
 All data is provided **"as is"** without warranty of accuracy or completeness. None of the
 upstream publishers (ANP, Sodir / Norwegian Offshore Directorate, SENER / CNIH, Pemex,
-NSTA, Secretaría de Energía de la Nación, or TNO / NLOG) endorse, sponsor, or are
+NSTA, Secretaría de Energía de la Nación, TNO / NLOG, or ANH) endorse, sponsor, or are
 affiliated with `ogprod`. Per Sodir's open-data disclaimer, Norwegian positional data
 accuracy is approximately +/- 0-300 m and shall not be used for navigational purposes.
 
@@ -154,6 +164,7 @@ ogprod ingest mexico
 ogprod ingest uk
 ogprod ingest argentina --year 2026
 ogprod ingest netherlands
+ogprod ingest colombia
 ```
 """
 
@@ -253,6 +264,20 @@ the upstream terms for each source partition they use:
                  non-hydrocarbon facilities/boreholes, deduplicated well geometries to
                  WELL_NAME, and reprojected ED50 / UTM 31N (EPSG:23031) geometries to
                  GeoParquet 1.1 (EPSG:4326).
+
+* source=colombia (production/source=colombia/**, geo/fields/colombia.parquet)
+  Publisher: Agencia Nacional de Hidrocarburos (ANH) via datos.gov.co
+  Source: https://www.datos.gov.co/Minas-y-Energ-a/Produccion-Fiscalizada-Crudo-Consolidada/fdvb-hsrf
+          https://www.datos.gov.co/Minas-y-Energ-a/Produccion-Fiscalizada-Gas-Consolidada/5dux-bfvx
+          https://geovisor.anh.gov.co/server/rest/services/GEOVISOR_v32/ANH_InsGDB/MapServer/4
+  License: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+           https://creativecommons.org/licenses/by-sa/4.0/
+  Attribution: Credit Agencia Nacional de Hidrocarburos (ANH) / datos.gov.co.
+  Modifications: ogprod summed multi-municipality rows to field-month grain, converted
+                 monthly barrels and thousand cubic feet (kpc) to calendar-day average
+                 rates (bbl/d, e3m3/d), replaced missing (0, 0) coordinates with NULL
+                 geometry, and enriched field points with ANH sedimentary basin and
+                 onshore/offshore attributes in GeoParquet 1.1 (EPSG:4326).
 
 3. Disclaimer
 -------------

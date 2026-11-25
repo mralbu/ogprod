@@ -126,7 +126,7 @@ GEO_SPECS: dict[GeoKind, GeoTableSpec] = {
         ),
         float32_columns=("water_depth_m", "area_km2"),
         int32_columns=(),
-        geometry_types=frozenset({"Polygon", "MultiPolygon"}),
+        geometry_types=frozenset({"Polygon", "MultiPolygon", "Point"}),
     ),
     GeoKind.FACILITIES: GeoTableSpec(
         kind=GeoKind.FACILITIES,

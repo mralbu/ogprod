@@ -19,7 +19,7 @@ from scripts import publish_mirror
 
 #: Default sources refreshed on GitHub Actions; Brazil (ADR 0002) and Argentina
 #: (datos.energia.gob.ar timeouts from cloud/non-AR IPs) are excluded.
-DEFAULT_CI_SOURCES: tuple[str, ...] = ("norway", "mexico", "uk", "netherlands")
+DEFAULT_CI_SOURCES: tuple[str, ...] = ("norway", "mexico", "uk", "netherlands", "colombia")
 
 
 @dataclass(frozen=True)
@@ -129,7 +129,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--sources",
         default=",".join(DEFAULT_CI_SOURCES),
-        help="Comma-separated source list or 'all' (default: norway,mexico,uk,netherlands).",
+        help=(f"Comma-separated source list or 'all' (default: {','.join(DEFAULT_CI_SOURCES)})."),
     )
     parser.add_argument("--data-dir", type=Path, default=Path("./data"))
     parser.add_argument("--repo", default=None, help="HF dataset repo override.")

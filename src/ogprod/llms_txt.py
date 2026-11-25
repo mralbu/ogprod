@@ -411,7 +411,7 @@ def _deep_links_section(
 ) -> list[str]:
     source_slugs = (
         ", ".join(f"`{s['id']}`" for s in sources_list)
-        or "`argentina`, `brazil`, `mexico`, `netherlands`, `norway`, `uk`"
+        or "`argentina`, `brazil`, `colombia`, `mexico`, `netherlands`, `norway`, `uk`"
     )
     sample_src, sample_fid = sample_field or ("brazil", "BUZIOS")
     encoded_src = quote(sample_src, safe="")

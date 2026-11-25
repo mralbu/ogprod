@@ -174,6 +174,16 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
   - `geo/facilities`: `nlog:GDW_NG_FACILITY_UTM` (hydrocarbon platforms, satellites, subsea structures, production locations; geothermal `GTI` installations excluded).
   - `geo/wells`: `nlog:gdw_ng_wll_all_utm` (hydrocarbon/storage/observation boreholes deduplicated to canonical `WELL_NAME` preferring main boreholes `BRH` over sidetracks).
 
+### 3.7 Priority 7 — Colombia (ANH / `datos.gov.co`)
+
+- **Production (`datos.gov.co` Socrata Open Data API, 2014–present, CC BY-SA 4.0):**
+  - Field-level monthly volumes (`entity_type = "field"`, `web_wells = False` per [ADR 0011](adr/0011-multi-country-scaling-and-overview.md)): crude oil (`fdvb-hsrf`, `produccion_bls` in barrels → `bbl/d`) and natural gas (`5dux-bfvx`, `produccionkpc` in thousand cubic feet / Mcf → `e3m3/d`).
+  - Rows spanning multiple municipalities for the same `(field_id, period)` (including `MunicipiosNN`) are summed; blank-`campo` placeholder rows are dropped; `departamento` is normalized into `region` (`DEPARTAMENTO NN` → `NULL`).
+  - Historical years are fetched in 5-year chunks (`2014–2018`, …) with individual yearly bundles for the last two years so incremental `--recent` refreshes only re-fetch recent data.
+- **Geo (`EPSG:4326`, point-only `geo/fields`):**
+  - `geo/fields`: deduplicated field `Point` coordinates from both Socrata tables (replacing missing `(0, 0)` with `NULL`), spatially joined against ANH Geovisor's `Cuenca Sedimentaria` polygons (`GEOVISOR_v32/ANH_InsGDB/MapServer/4`, `maxAllowableOffset=0.001`) to populate `basin` (e.g. `Llanos Orientales`, `Valle Medio del Magdalena`, `Guajira Offshore`) and `environment` (`offshore` for `TIPO = OFFSHORE`, else `onshore`).
+  - Layer-2 `export-web` routes `Point` field geometries into a dedicated `field_points` PMTiles layer (`minzoom: 0`) plus `field_centroids` labels (`minzoom: 6`), rendered as interactive rate-colored circles in the Web Explorer.
+
 ---
 
 ## 4. Web Viz Data Contract (Layer 2)

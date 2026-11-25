@@ -109,6 +109,18 @@ def test_validate_geo_rejects_wrong_geometry_crs_and_bounds() -> None:
             wrong_crs[list(schema.GEO_SPECS[schema.GeoKind.WELLS].columns)], schema.GeoKind.WELLS
         )
 
+    pt_field = schema.empty_geo(schema.GeoKind.FIELDS)
+    pt_field.loc[0, ["source", "field_id", "field_name"]] = ["colombia", "RUBIALES", "RUBIALES"]
+    pt_field.loc[0, "geometry"] = shapely.Point(-71.4656, 3.7952)
+    validated_pt = schema.validate_geo(pt_field, schema.GeoKind.FIELDS)
+    assert validated_pt.geometry.iloc[0].geom_type == "Point"
+
+    line_field = schema.empty_geo(schema.GeoKind.FIELDS)
+    line_field.loc[0, ["source", "field_id", "field_name"]] = ["colombia", "BAD", "BAD"]
+    line_field.loc[0, "geometry"] = shapely.LineString([(-71.4, 3.7), (-71.5, 3.8)])
+    with pytest.raises(schema.SchemaError, match="geometry must be"):
+        schema.validate_geo(line_field, schema.GeoKind.FIELDS)
+
 
 def test_validate_production_rejects_infinite_rates() -> None:
     import math

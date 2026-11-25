@@ -1,0 +1,97 @@
+{
+  "source": "colombia",
+  "year_min": 2024,
+  "year_max": 2024,
+  "oil": [
+    {
+      "vigencia": "2024",
+      "mes": "1",
+      "departamento": "META",
+      "operadora": "ECOPETROL S.A.",
+      "campo": "RUBIALES",
+      "produccion_bls": "3,077,162.00"
+    },
+    {
+      "vigencia": "2024",
+      "mes": "2",
+      "departamento": "META",
+      "operadora": "ECOPETROL S.A.",
+      "campo": "RUBIALES",
+      "produccion_bls": "2,693,773.00"
+    },
+    {
+      "vigencia": "2024",
+      "mes": "1",
+      "departamento": "ANTIOQUIA",
+      "operadora": "ECOPETROL S.A.",
+      "campo": "AREA TECA-COCORNA",
+      "produccion_bls": "10,000.00"
+    },
+    {
+      "vigencia": "2024",
+      "mes": "1",
+      "departamento": "BOYACA",
+      "operadora": "ECOPETROL S.A.",
+      "campo": "AREA TECA-COCORNA",
+      "produccion_bls": "5,500.00"
+    },
+    {
+      "vigencia": "2024",
+      "mes": "1",
+      "departamento": "HUILA",
+      "operadora": "ECOPETROL S.A.",
+      "campo": "BALCÓN",
+      "produccion_bls": "13,121.00"
+    }
+  ],
+  "gas": [
+    {
+      "vigencia": "2024",
+      "mes": "1",
+      "departamento": "ANTIOQUIA",
+      "operadora": "ECOPETROL S.A.",
+      "campo": "AREA TECA-COCORNA",
+      "produccionkpc": "6,209.00"
+    },
+    {
+      "vigencia": "2024",
+      "mes": "1",
+      "departamento": "ANTIOQUIA",
+      "operadora": "ECOPETROL S.A.",
+      "campo": "AREA TECA-COCORNA",
+      "produccionkpc": "6,275.00"
+    },
+    {
+      "vigencia": "2024",
+      "mes": "1",
+      "departamento": "GUAJIRA",
+      "operadora": "HOCOL S.A.",
+      "campo": "CHUCHUPA",
+      "produccionkpc": "2,590,271.00"
+    },
+    {
+      "vigencia": "2024",
+      "mes": "1",
+      "departamento": "GUAJIRA",
+      "operadora": "HOCOL S.A.",
+      "campo": "CHUCHUPA",
+      "produccionkpc": "0.00"
+    },
+    {
+      "vigencia": "2024",
+      "mes": "1",
+      "departamento": "DEPARTAMENTO NN",
+      "operadora": "ECOPETROL S.A.",
+      "campo": "UNALLOCATED GAS",
+      "produccionkpc": "31,000.00"
+    },
+    {
+      "vigencia": "2024",
+      "mes": "1",
+      "departamento": "CASANARE",
+      "operadora": "ECOPETROL S.A.",
+      "campo": null,
+      "produccionkpc": null
+    }
+  ]
+}
