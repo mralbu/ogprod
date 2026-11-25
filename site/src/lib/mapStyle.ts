@@ -1,4 +1,4 @@
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import type { EntitySelection, SourceFilter } from "../types/data";
 
 // Synced with src/ogprod/export_web.py (_TILE_LAYER_MIN_ZOOM).
@@ -10,7 +10,70 @@ export const MAP_LAYER_MIN_ZOOM = {
 } as const;
 
 export const INITIAL_MAP_ZOOM = 2.1;
+export const MOBILE_OVERVIEW_ZOOM = 1.0;
 export const FACILITY_ICON_ID = "facility-diamond";
+
+export interface BasemapSpec {
+  id: "openfreemap" | "versatiles";
+  styleUrl: string;
+  labelFont: string[];
+}
+
+export const PRIMARY_BASEMAP: BasemapSpec = {
+  id: "openfreemap",
+  styleUrl: "https://tiles.openfreemap.org/styles/positron",
+  labelFont: ["Noto Sans Regular"],
+};
+
+export const FALLBACK_BASEMAP: BasemapSpec = {
+  id: "versatiles",
+  styleUrl: "https://tiles.versatiles.org/assets/styles/gray/style.json",
+  labelFont: ["noto_sans_regular"],
+};
+
+const DATA_SOURCE_IDS = new Set(["ogprod", "fields-fallback", "facilities-fallback"]);
+const OPENFREEMAP_SOURCE_IDS = new Set(["openmaptiles", "ne2_shaded"]);
+
+export interface MapErrorLike {
+  sourceId?: string;
+  error?: { name?: string; message?: string };
+}
+
+/**
+ * Decide whether a MapLibre error indicates the primary OpenFreeMap basemap failed
+ * and should fall back to VersaTiles (ignoring aborts and our own data sources).
+ */
+export function shouldTriggerBasemapFallback(
+  event: MapErrorLike,
+  styleLoaded: boolean,
+): boolean {
+  const errName = event.error?.name ?? "";
+  const errMsg = event.error?.message ?? "";
+  if (errName === "AbortError" || /\babort(ed)?\b/i.test(errMsg)) {
+    return false;
+  }
+  if (event.sourceId && DATA_SOURCE_IDS.has(event.sourceId)) {
+    return false;
+  }
+  if (event.sourceId && OPENFREEMAP_SOURCE_IDS.has(event.sourceId)) {
+    return true;
+  }
+  if (!styleLoaded && !event.sourceId) {
+    return true;
+  }
+  return errMsg.toLowerCase().includes("openfreemap.org");
+}
+
+/** Pick overview center and zoom so all Atlantic/European/American sources fit on narrow phones. */
+export function getOverviewView(containerWidth: number): {
+  center: [number, number];
+  zoom: number;
+} {
+  if (containerWidth > 0 && containerWidth < 640) {
+    return { center: [-30, 18], zoom: MOBILE_OVERVIEW_ZOOM };
+  }
+  return { center: [-30, 14], zoom: INITIAL_MAP_ZOOM };
+}
 
 // MapLibre's symbol_sdf shader defines SDF_PX = 8 and edge alpha = 0.75 (cutoff = 0.25).
 const SDF_RADIUS_PX = 8;
@@ -136,7 +199,9 @@ const FACILITY_SELECTED_SIZE_EXPR: maplibregl.ExpressionSpecification = [
   1.4,
 ];
 
-export function buildVectorLayers(): maplibregl.LayerSpecification[] {
+export function buildVectorLayers(
+  labelFont: string[] = PRIMARY_BASEMAP.labelFont,
+): maplibregl.LayerSpecification[] {
   const facMin = MAP_LAYER_MIN_ZOOM.facilities;
   const lblMin = MAP_LAYER_MIN_ZOOM.fieldLabels;
   const wellMin = MAP_LAYER_MIN_ZOOM.wells;
@@ -256,7 +321,7 @@ export function buildVectorLayers(): maplibregl.LayerSpecification[] {
       minzoom: lblMin,
       layout: {
         "text-field": ["coalesce", ["get", "field_name"], ["get", "field_id"]],
-        "text-font": ["Noto Sans Regular"],
+        "text-font": labelFont,
         "text-size": ["interpolate", ["linear"], ["zoom"], lblMin, 10, 10, 12.5],
         "text-max-width": 10,
         "text-padding": 4,

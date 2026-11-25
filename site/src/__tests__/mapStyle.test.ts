@@ -5,8 +5,14 @@ import {
   buildVectorLayers,
   createDiamondSdfImage,
   FACILITY_ICON_ID,
+  FALLBACK_BASEMAP,
+  getOverviewView,
+  INITIAL_MAP_ZOOM,
   isLayerZoomHidden,
   MAP_LAYER_MIN_ZOOM,
+  MOBILE_OVERVIEW_ZOOM,
+  PRIMARY_BASEMAP,
+  shouldTriggerBasemapFallback,
 } from "../lib/mapStyle";
 
 describe("mapStyle layer zoom thresholds and specs", () => {
@@ -26,7 +32,7 @@ describe("mapStyle layer zoom thresholds and specs", () => {
     expect(fallbackById.get("facilities-symbol")?.minzoom).toBe(MAP_LAYER_MIN_ZOOM.facilities);
   });
 
-  it("renders facilities as an overlapping SDF diamond symbol and labels fields with Noto Sans Regular", () => {
+  it("renders facilities as an overlapping SDF diamond symbol and uses basemap label fonts", () => {
     const byId = new Map(buildVectorLayers().map((layer) => [layer.id, layer]));
     const fac = byId.get("facilities-symbol");
     expect(fac?.type).toBe("symbol");
@@ -40,7 +46,15 @@ describe("mapStyle layer zoom thresholds and specs", () => {
     expect(labels?.type).toBe("symbol");
     if (labels?.type === "symbol") {
       expect(labels["source-layer"]).toBe("field_centroids");
-      expect(labels.layout?.["text-font"]).toEqual(["Noto Sans Regular"]);
+      expect(labels.layout?.["text-font"]).toEqual(PRIMARY_BASEMAP.labelFont);
+    }
+
+    const versaLabels = new Map(
+      buildVectorLayers(FALLBACK_BASEMAP.labelFont).map((layer) => [layer.id, layer]),
+    ).get("fields-label");
+    expect(versaLabels?.type).toBe("symbol");
+    if (versaLabels?.type === "symbol") {
+      expect(versaLabels.layout?.["text-font"]).toEqual(FALLBACK_BASEMAP.labelFont);
     }
   });
 
@@ -49,6 +63,43 @@ describe("mapStyle layer zoom thresholds and specs", () => {
     expect(isLayerZoomHidden("facilities", 7)).toBe(false);
     expect(isLayerZoomHidden("wells", 7.99)).toBe(true);
     expect(isLayerZoomHidden("wells", 8)).toBe(false);
+  });
+});
+
+describe("basemap fallback and mobile overview framing", () => {
+  it("triggers fallback only for primary basemap failures, never aborts or ogprod sources", () => {
+    expect(shouldTriggerBasemapFallback({ sourceId: "openmaptiles" }, true)).toBe(true);
+    expect(shouldTriggerBasemapFallback({ sourceId: "ne2_shaded" }, true)).toBe(true);
+    expect(shouldTriggerBasemapFallback({ error: { message: "Failed to fetch" } }, false)).toBe(
+      true,
+    );
+    expect(
+      shouldTriggerBasemapFallback(
+        { error: { message: "HTTP 503 https://tiles.openfreemap.org/planet" } },
+        true,
+      ),
+    ).toBe(true);
+
+    expect(
+      shouldTriggerBasemapFallback({ sourceId: "openmaptiles", error: { name: "AbortError" } }, true),
+    ).toBe(false);
+    expect(
+      shouldTriggerBasemapFallback(
+        { sourceId: "openmaptiles", error: { message: "The user aborted a request." } },
+        true,
+      ),
+    ).toBe(false);
+    expect(shouldTriggerBasemapFallback({ sourceId: "ogprod" }, true)).toBe(false);
+    expect(shouldTriggerBasemapFallback({ sourceId: "fields-fallback" }, true)).toBe(false);
+    expect(shouldTriggerBasemapFallback({ error: { message: "Unrelated error" } }, true)).toBe(
+      false,
+    );
+  });
+
+  it("zooms out overview framing on narrow mobile screens while preserving desktop default", () => {
+    expect(getOverviewView(390)).toEqual({ center: [-30, 18], zoom: MOBILE_OVERVIEW_ZOOM });
+    expect(getOverviewView(800)).toEqual({ center: [-30, 14], zoom: INITIAL_MAP_ZOOM });
+    expect(getOverviewView(0)).toEqual({ center: [-30, 14], zoom: INITIAL_MAP_ZOOM });
   });
 });
 

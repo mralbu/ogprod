@@ -1,16 +1,22 @@
 import { Layers } from "lucide-react";
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import { Protocol } from "pmtiles";
 import { useEffect, useRef, useState } from "react";
 import { pmtilesUrl } from "../lib/dataClient";
 import {
+  type BasemapSpec,
   buildFallbackLayers,
   buildSelectionFilter,
   buildVectorLayers,
   createDiamondSdfImage,
   FACILITY_ICON_ID,
+  FALLBACK_BASEMAP,
+  getOverviewView,
   INITIAL_MAP_ZOOM,
   isLayerZoomHidden,
+  PRIMARY_BASEMAP,
+  shouldTriggerBasemapFallback,
 } from "../lib/mapStyle";
 import { formatCountryName } from "../lib/sourceLabels";
 import { formatCompactNumber, formatPercent } from "../lib/units";
@@ -31,13 +37,14 @@ interface MapPaneProps {
   onSelectEntity: (selection: EntitySelection) => void;
 }
 
-let protocolRegistered = false;
+let mapLibreConfigured = false;
 
-function ensurePmtilesProtocol(): void {
-  if (protocolRegistered) return;
+function ensureMapLibreConfigured(): void {
+  if (mapLibreConfigured) return;
+  maplibregl.setWorkerUrl(maplibreWorkerUrl);
   const protocol = new Protocol();
   maplibregl.addProtocol("pmtiles", protocol.tile);
-  protocolRegistered = true;
+  mapLibreConfigured = true;
 }
 
 function absolutePmtilesUrl(): string {
@@ -83,20 +90,32 @@ export function MapPane({
   const [showFacilities, setShowFacilities] = useState(true);
   const [showWells, setShowWells] = useState(true);
   const [mapReady, setMapReady] = useState(false);
+  const [styleRevision, setStyleRevision] = useState(0);
   const [currentZoom, setCurrentZoom] = useState(INITIAL_MAP_ZOOM);
 
   useEffect(() => {
     if (!containerRef.current) return;
-    ensurePmtilesProtocol();
+    ensureMapLibreConfigured();
+
+    const initialWidth = containerRef.current.clientWidth;
+    const overview = getOverviewView(initialWidth);
+    let activeBasemap: BasemapSpec = PRIMARY_BASEMAP;
+    let styleLoaded = false;
+    let fallbackTriggered = false;
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: "https://tiles.openfreemap.org/styles/positron",
-      center: [-30, 12],
-      zoom: INITIAL_MAP_ZOOM,
-      minZoom: 1.5,
+      style: activeBasemap.styleUrl,
+      center: overview.center,
+      zoom: overview.zoom,
+      minZoom: 0.6,
       maxZoom: 16,
+      attributionControl: false,
     });
+    map.addControl(
+      new maplibregl.AttributionControl({ compact: initialWidth < 768 }),
+      "bottom-right",
+    );
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     mapRef.current = map;
     popupRef.current = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 10 });
@@ -112,117 +131,149 @@ export function MapPane({
     };
     map.on("zoom", syncZoomBand);
 
-    map.on("load", () => {
+    const attachDataLayers = () => {
+      map.setProjection({ type: "mercator" });
       if (!map.hasImage(FACILITY_ICON_ID)) {
         map.addImage(FACILITY_ICON_ID, createDiamondSdfImage(), { pixelRatio: 2, sdf: true });
       }
 
       if (meta.has_tiles) {
-        map.addSource("ogprod", {
-          type: "vector",
-          url: `pmtiles://${absolutePmtilesUrl()}`,
-        });
-        for (const layer of buildVectorLayers()) {
-          map.addLayer(layer);
+        if (!map.getSource("ogprod")) {
+          map.addSource("ogprod", {
+            type: "vector",
+            url: `pmtiles://${absolutePmtilesUrl()}`,
+          });
+        }
+        for (const layer of buildVectorLayers(activeBasemap.labelFont)) {
+          if (!map.getLayer(layer.id)) {
+            map.addLayer(layer);
+          }
         }
       } else {
-        map.addSource("fields-fallback", {
-          type: "geojson",
-          data: buildFallbackGeoJson(fieldsSummary as unknown as { lon: number | null; lat: number | null }[]),
-        });
-        map.addSource("facilities-fallback", {
-          type: "geojson",
-          data: buildFallbackGeoJson(
-            facilitiesSummary as unknown as { lon: number | null; lat: number | null }[],
-          ),
-        });
+        if (!map.getSource("fields-fallback")) {
+          map.addSource("fields-fallback", {
+            type: "geojson",
+            data: buildFallbackGeoJson(
+              fieldsSummary as unknown as { lon: number | null; lat: number | null }[],
+            ),
+          });
+        }
+        if (!map.getSource("facilities-fallback")) {
+          map.addSource("facilities-fallback", {
+            type: "geojson",
+            data: buildFallbackGeoJson(
+              facilitiesSummary as unknown as { lon: number | null; lat: number | null }[],
+            ),
+          });
+        }
         for (const layer of buildFallbackLayers()) {
-          map.addLayer(layer);
+          if (!map.getLayer(layer.id)) {
+            map.addLayer(layer);
+          }
         }
       }
 
-      const interactiveLayers = ["facilities-symbol", "wells-circle", "fields-fill"].filter((id) =>
+      styleLoaded = true;
+      setCurrentZoom(map.getZoom());
+      setMapReady(true);
+      setStyleRevision((v) => v + 1);
+    };
+
+    map.on("style.load", attachDataLayers);
+
+    map.on("error", (ev) => {
+      if (fallbackTriggered) return;
+      const errEvent = ev as { sourceId?: string; error?: { name?: string; message?: string } };
+      if (!shouldTriggerBasemapFallback(errEvent, styleLoaded)) return;
+      fallbackTriggered = true;
+      activeBasemap = FALLBACK_BASEMAP;
+      styleLoaded = false;
+      map.setStyle(FALLBACK_BASEMAP.styleUrl);
+    });
+
+    const getInteractiveLayers = () =>
+      ["facilities-symbol", "wells-circle", "fields-fill"].filter((id) =>
         Boolean(map.getLayer(id)),
       );
 
-      map.on("mousemove", (e) => {
-        const feats = map.queryRenderedFeatures(e.point, { layers: interactiveLayers });
-        if (!feats.length) {
-          map.getCanvas().style.cursor = "";
-          popupRef.current?.remove();
-          return;
-        }
-        map.getCanvas().style.cursor = "pointer";
-        const top = feats[0];
-        const props = top.properties ?? {};
-        const layerId = top.layer.id;
-        const country = formatCountryName(String(props.source ?? ""), sourcesRef.current);
-        let html = "";
-        if (layerId === "wells-circle") {
-          html = `<div class="font-semibold text-slate-900">${props.well_name ?? props.well_id}</div>
-            <div class="text-[11px] text-slate-500">Well · ${country}${props.field_name ? ` · ${props.field_name}` : ""}</div>
-            ${props.latest_oil_bpd ? `<div class="font-tabular mt-1 text-[11px]">Latest Oil: ${formatCompactNumber(Number(props.latest_oil_bpd))} bbl/d</div>` : ""}`;
-        } else if (layerId === "facilities-symbol") {
-          html = `<div class="font-semibold text-slate-900">${props.facility_name ?? props.facility_id}</div>
-            <div class="text-[11px] text-slate-500">${props.facility_type ?? "Facility"} · ${country}</div>
-            ${props.oil_capacity_bpd ? `<div class="font-tabular mt-1 text-[11px]">Cap: ${formatCompactNumber(Number(props.oil_capacity_bpd))} bbl/d${props.oil_utilization ? ` · Util: ${formatPercent(Number(props.oil_utilization))}` : ""}</div>` : ""}`;
-        } else {
-          const area = props.basin ?? props.region;
-          html = `<div class="font-semibold text-slate-900">${props.field_name ?? props.field_id}</div>
-            <div class="text-[11px] text-slate-500">Field · ${country}${area ? ` · ${area}` : ""}</div>
-            ${props.latest_oil_bpd ? `<div class="font-tabular mt-1 text-[11px]">Latest Oil: ${formatCompactNumber(Number(props.latest_oil_bpd))} bbl/d</div>` : ""}`;
-        }
-        popupRef.current?.setLngLat(e.lngLat).setHTML(html).addTo(map);
-      });
+    map.on("mousemove", (e) => {
+      const interactiveLayers = getInteractiveLayers();
+      if (!interactiveLayers.length) return;
+      const feats = map.queryRenderedFeatures(e.point, { layers: interactiveLayers });
+      if (!feats.length) {
+        map.getCanvas().style.cursor = "";
+        popupRef.current?.remove();
+        return;
+      }
+      map.getCanvas().style.cursor = "pointer";
+      const top = feats[0];
+      const props = top.properties ?? {};
+      const layerId = top.layer.id;
+      const country = formatCountryName(String(props.source ?? ""), sourcesRef.current);
+      let html = "";
+      if (layerId === "wells-circle") {
+        html = `<div class="font-semibold text-slate-900">${props.well_name ?? props.well_id}</div>
+          <div class="text-[11px] text-slate-500">Well · ${country}${props.field_name ? ` · ${props.field_name}` : ""}</div>
+          ${props.latest_oil_bpd ? `<div class="font-tabular mt-1 text-[11px]">Latest Oil: ${formatCompactNumber(Number(props.latest_oil_bpd))} bbl/d</div>` : ""}`;
+      } else if (layerId === "facilities-symbol") {
+        html = `<div class="font-semibold text-slate-900">${props.facility_name ?? props.facility_id}</div>
+          <div class="text-[11px] text-slate-500">${props.facility_type ?? "Facility"} · ${country}</div>
+          ${props.oil_capacity_bpd ? `<div class="font-tabular mt-1 text-[11px]">Cap: ${formatCompactNumber(Number(props.oil_capacity_bpd))} bbl/d${props.oil_utilization ? ` · Util: ${formatPercent(Number(props.oil_utilization))}` : ""}</div>` : ""}`;
+      } else {
+        const area = props.basin ?? props.region;
+        html = `<div class="font-semibold text-slate-900">${props.field_name ?? props.field_id}</div>
+          <div class="text-[11px] text-slate-500">Field · ${country}${area ? ` · ${area}` : ""}</div>
+          ${props.latest_oil_bpd ? `<div class="font-tabular mt-1 text-[11px]">Latest Oil: ${formatCompactNumber(Number(props.latest_oil_bpd))} bbl/d</div>` : ""}`;
+      }
+      popupRef.current?.setLngLat(e.lngLat).setHTML(html).addTo(map);
+    });
 
-      map.on("click", (e) => {
-        const feats = map.queryRenderedFeatures(e.point, { layers: interactiveLayers });
-        if (!feats.length) return;
-        const top = feats[0];
-        const props = top.properties ?? {};
-        const src = String(props.source ?? "");
-        if (!src) return;
-        const lng = e.lngLat.lng;
-        const lat = e.lngLat.lat;
+    map.on("click", (e) => {
+      const interactiveLayers = getInteractiveLayers();
+      if (!interactiveLayers.length) return;
+      const feats = map.queryRenderedFeatures(e.point, { layers: interactiveLayers });
+      if (!feats.length) return;
+      const top = feats[0];
+      const props = top.properties ?? {};
+      const src = String(props.source ?? "");
+      if (!src) return;
+      const lng = e.lngLat.lng;
+      const lat = e.lngLat.lat;
 
-        if (top.layer.id === "wells-circle") {
-          onSelectRef.current({
-            kind: "well",
-            source: src,
-            id: String(props.well_id),
-            name: String(props.well_name ?? props.well_id),
-            fieldName: props.field_name ? String(props.field_name) : undefined,
-            basin: props.basin ? String(props.basin) : undefined,
-            status: props.status ? String(props.status) : undefined,
-            liftMethod: props.lift_method ? String(props.lift_method) : undefined,
-            firstYear: props.first_year ? Number(props.first_year) : undefined,
-            lastYear: props.last_year ? Number(props.last_year) : undefined,
-            lon: lng,
-            lat,
-          });
-        } else if (top.layer.id === "facilities-symbol") {
-          onSelectRef.current({
-            kind: "facility",
-            source: src,
-            id: String(props.facility_id),
-            name: String(props.facility_name ?? props.facility_id),
-            lon: lng,
-            lat,
-          });
-        } else {
-          onSelectRef.current({
-            kind: "field",
-            source: src,
-            id: String(props.field_id),
-            name: String(props.field_name ?? props.field_id),
-            lon: lng,
-            lat,
-          });
-        }
-      });
-
-      setCurrentZoom(map.getZoom());
-      setMapReady(true);
+      if (top.layer.id === "wells-circle") {
+        onSelectRef.current({
+          kind: "well",
+          source: src,
+          id: String(props.well_id),
+          name: String(props.well_name ?? props.well_id),
+          fieldName: props.field_name ? String(props.field_name) : undefined,
+          basin: props.basin ? String(props.basin) : undefined,
+          status: props.status ? String(props.status) : undefined,
+          liftMethod: props.lift_method ? String(props.lift_method) : undefined,
+          firstYear: props.first_year ? Number(props.first_year) : undefined,
+          lastYear: props.last_year ? Number(props.last_year) : undefined,
+          lon: lng,
+          lat,
+        });
+      } else if (top.layer.id === "facilities-symbol") {
+        onSelectRef.current({
+          kind: "facility",
+          source: src,
+          id: String(props.facility_id),
+          name: String(props.facility_name ?? props.facility_id),
+          lon: lng,
+          lat,
+        });
+      } else {
+        onSelectRef.current({
+          kind: "field",
+          source: src,
+          id: String(props.field_id),
+          name: String(props.field_name ?? props.field_id),
+          lon: lng,
+          lat,
+        });
+      }
     });
 
     return () => {
@@ -235,7 +286,7 @@ export function MapPane({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady) return;
+    if (!map || !mapReady || styleRevision === 0) return;
     const filter: maplibregl.FilterSpecification | null =
       activeSource === null ? null : ["==", ["get", "source"], activeSource];
 
@@ -262,13 +313,14 @@ export function MapPane({
       map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
       map.setFilter(id, buildSelectionFilter(kind, selection, activeSource));
     }
-  }, [activeSource, showFields, showFacilities, showWells, selection, mapReady]);
+  }, [activeSource, showFields, showFacilities, showWells, selection, mapReady, styleRevision]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || selection.kind !== "overview") return;
     if (activeSource === null) {
-      map.flyTo({ center: [-30, 14], zoom: INITIAL_MAP_ZOOM, duration: 700 });
+      const overview = getOverviewView(containerRef.current?.clientWidth ?? 0);
+      map.flyTo({ center: overview.center, zoom: overview.zoom, duration: 700 });
       return;
     }
     const metaSrc = meta.sources.find((s) => s.id === activeSource);
@@ -346,13 +398,13 @@ function LayerTogglePanel({
   onToggleWells,
 }: LayerTogglePanelProps) {
   return (
-    <div className="absolute left-3 top-3 z-10 rounded-lg border border-slate-200/90 bg-white/95 px-3 py-2 shadow-sm backdrop-blur-xs">
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-        <Layers className="h-3.5 w-3.5" />
+    <div className="absolute left-2.5 top-2.5 z-10 rounded-lg border border-slate-200/90 bg-white/95 px-2.5 py-1.5 shadow-sm backdrop-blur-xs sm:left-3 sm:top-3 sm:px-3 sm:py-2">
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:mb-1.5 sm:text-[11px]">
+        <Layers className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
         Layers
       </div>
-      <div className="flex flex-col gap-1 text-xs text-slate-700">
-        <label className="flex cursor-pointer items-center gap-2">
+      <div className="flex flex-col gap-0.5 text-[11px] text-slate-700 sm:gap-1 sm:text-xs">
+        <label className="flex cursor-pointer items-center gap-1.5 sm:gap-2">
           <input
             type="checkbox"
             checked={showFields}
@@ -362,7 +414,7 @@ function LayerTogglePanel({
           <span className="h-2.5 w-2.5 rounded-xs bg-amber-600/80" />
           <span>Fields</span>
         </label>
-        <label className="flex cursor-pointer items-center gap-2">
+        <label className="flex cursor-pointer items-center gap-1.5 sm:gap-2">
           <input
             type="checkbox"
             checked={showFacilities}
@@ -374,7 +426,7 @@ function LayerTogglePanel({
             FPSOs / Platforms{showFacilities && facilitiesZoomHidden ? " (zoom in)" : ""}
           </span>
         </label>
-        <label className="flex cursor-pointer items-center gap-2">
+        <label className="flex cursor-pointer items-center gap-1.5 sm:gap-2">
           <input
             type="checkbox"
             checked={showWells}
@@ -393,7 +445,7 @@ function LayerTogglePanel({
 
 function MapLegend() {
   return (
-    <div className="absolute bottom-3 left-3 z-10 rounded-lg border border-slate-200/90 bg-white/92 px-3 py-1.5 text-[11px] text-slate-600 shadow-xs backdrop-blur-xs">
+    <div className="absolute bottom-10 left-2.5 z-10 rounded-lg border border-slate-200/90 bg-white/92 px-2.5 py-1 text-[10px] text-slate-600 shadow-xs backdrop-blur-xs sm:bottom-3 sm:left-3 sm:px-3 sm:py-1.5 sm:text-[11px]">
       <div className="flex items-center gap-3">
         <span className="flex items-center gap-1">
           <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[#fbbf24]" />
