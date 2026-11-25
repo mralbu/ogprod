@@ -7,6 +7,7 @@ Priority order of built-in sources:
 2. **Norway — Sodir** (field-level production 1971–present, field polygons, facilities, wellbores)
 3. **Mexico — SENER / ex-CNH SIH** (well- and field-level production + spatial layers)
 4. **United Kingdom — NSTA** (1975–present field-level offshore + onshore production & water/gas injection, fields, surface facilities, wellbores)
+5. **Argentina — Secretaría de Energía (*Capítulo IV*)** (2006–present field-level rollup default + optional local well parser for oil, gas, water, and water/gas/CO₂ injection; field polygons and well points)
 
 For the broader global survey of candidate countries, regulators, spatial layers, and expansion trade-offs, see [data-sources.md](data-sources.md).
 
@@ -150,6 +151,17 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
   - `geo/fields`: `Offshore_hydrocarbon_fields_(WGS84)` + `Onshore_hydrocarbon_fields_(WGS84)` dissolved by `resolve_field_key` (collapsing `(oil)`/`(gas)`/`(cond)` splits and merging cross-shoreline fields such as Wytch Farm).
   - `geo/facilities`: `UKCS offshore infrastructure surface points WGS84` (platforms, FPSOs, terminals, export pipeline system, start year; active layer ID discovered dynamically from service metadata).
   - `geo/wells`: `UKCS_offshore_wellbore_top_holes_(WGS84)` + `UKCS onshore petroleum wells top holes WGS84` (spud/completion dates, operator, status, `field_id`, onshore county).
+
+### 3.5 Priority 5 — Argentina (Secretaría de Energía — Capítulo IV)
+
+- **Production & injection (`datos.gob.ar` CKAN catalog `produccion-de-petroleo-y-gas-por-pozo`, per-year CSVs 2006–present, CC BY 4.0):**
+  - Oil (`prod_pet`), produced water (`prod_agua`), and water injection (`iny_agua`, `m³` → `bbl/d`); gas (`prod_gas`), gas injection (`iny_gas`), and CO₂ injection (`iny_co2`, `10³ m³` → `e3m3/d`), covering both conventional basins and Vaca Muerta unconventional wells.
+  - Per [ADR 0011](adr/0011-multi-country-scaling-and-overview.md), default ingestion aggregates ~85k wells to **field (*yacimiento*) grain** (`entity_type = "field"`, `field_id = normalize_key(areayacimiento)` with concession fallback) so the mirror and Web Explorer stay compact, while local well-level parsing remains available in Python via `parse_production(..., granularity="well")` or `parse_well_production(...)`.
+  - Basin (`cuenca`) and province (`provincia`) names are normalized and kept distinct ([ADR 0010](adr/0010-basin-and-region-enrichment.md)); `Estado Nacional` / marine basins classify as `"offshore"`.
+- **Geo (`EPSG:4326`, `web_wells = False` per ADR 0011):**
+  - `geo/fields`: `produccion-hidrocarburos-yacimientos` (SHP / GeoJSON CSV) dissolved by normalized `field_id`.
+  - `geo/wells`: `Capítulo IV - Pozos` (GeoJSON/WKB CSV or SHP, fallback to `Listado de pozos cargados por empresas operadoras`) stored in Layer 1 for local DuckDB/Python use and excluded from Layer-2 web tiles/search.
+  - `geo/facilities`: not published in Capítulo IV.
 
 ---
 

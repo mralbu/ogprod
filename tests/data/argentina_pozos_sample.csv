@@ -1,0 +1,4 @@
+sigla,idpozo,area,cod_area,empresa,yacimiento,cod_yacimiento,formacion,cuenca,provincia,clasificacion,tipoextraccion,tipoestado,adjiv_fecha_inicio_perf,adjiv_fecha_fin_term,geojson
+YPF.Nq.LACh-15(h),130589,LOMA CAMPANA,LCA,YPF S.A.,LOMA CAMPANA,LCA,vaca muerta,NEUQUINA,Neuquén,EXPLOTACION,Surgencia Natural,Extracción Efectiva,2021-04-10,2021-07-22,"{""type"":""Point"",""coordinates"":[-68.918,-38.665]}"
+PAE.Ch.CG-101,104321,CERRO DRAGON,CGO,PAN AMERICAN ENERGY,CERRO DRAGON,CGO,comodoro rivadavia,GOLFO SAN JORGE,Chubut,EXPLOTACION,Bombeo Mecánico,Extracción Efectiva,2010-02-01,2010-03-15,
+TA.CMA.VP-1,200100,CUENCA MARINA AUSTRAL 1,CMA1,TOTAL AUSTRAL S.A.,VEGA PLEYADE,VPL,springhill,AUSTRAL,Estado Nacional,EXPLOTACION,Surgencia Natural,Extracción Efectiva,2015-11-05,2016-01-18,"{""type"":""Point"",""coordinates"":[-67.95,-53.35]}"

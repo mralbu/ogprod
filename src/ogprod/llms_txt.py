@@ -410,7 +410,8 @@ def _deep_links_section(
     sample_field: tuple[str, str] | None,
 ) -> list[str]:
     source_slugs = (
-        ", ".join(f"`{s['id']}`" for s in sources_list) or "`brazil`, `norway`, `mexico`, `uk`"
+        ", ".join(f"`{s['id']}`" for s in sources_list)
+        or "`argentina`, `brazil`, `norway`, `mexico`, `uk`"
     )
     sample_src, sample_fid = sample_field or ("brazil", "BUZIOS")
     encoded_src = quote(sample_src, safe="")

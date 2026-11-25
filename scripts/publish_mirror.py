@@ -97,6 +97,11 @@ complete terms.
   - License: [NSTA User Agreement][uk-terms] (non-commercial reuse and redistribution)
   - Attribution: *"Contains information provided by the North Sea Transition Authority
     and/or other third parties."*
+- **`argentina` — Secretaría de Energía (Capítulo IV):**
+  - Portal: [Capítulo IV (`datos.gob.ar`)][ar-prod] & [Yacimientos][ar-fields]
+  - License: [Creative Commons Attribution 4.0 International (CC BY 4.0)][cc-by-4]
+  - Attribution: Credit Secretaría de Energía de la Nación (Argentina) / `datos.gob.ar`,
+    normalized and aggregated to field level by `ogprod`.
 
 [anp-portal]: https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/fase-de-desenvolvimento-e-producao
 [br-decree]: https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm
@@ -108,6 +113,9 @@ complete terms.
 [uk-prod]: https://www.nstauthority.co.uk/data-and-insights/data/themes/production/
 [uk-hub]: https://open-data-ukcs-transition.hub.arcgis.com/
 [uk-terms]: https://www.nstauthority.co.uk/site-tools/access-to-information/
+[ar-prod]: https://datos.gob.ar/dataset/energia-produccion-petroleo-gas-por-pozo-capitulo-iv
+[ar-fields]: https://datos.gob.ar/dataset/energia-produccion-hidrocarburos---yacimientos
+[cc-by-4]: https://creativecommons.org/licenses/by/4.0/
 
 ### Modifications Made by `ogprod`
 
@@ -124,10 +132,10 @@ Relative to the raw publisher files, `ogprod` has:
 ### Disclaimer & No Endorsement
 
 All data is provided **"as is"** without warranty of accuracy or completeness. None of the
-upstream publishers (ANP, Sodir / Norwegian Offshore Directorate, SENER / CNIH, Pemex, or
-NSTA) endorse, sponsor, or are affiliated with `ogprod`. Per Sodir's open-data disclaimer,
-Norwegian positional data accuracy is approximately +/- 0-300 m and shall not be used for
-navigational purposes.
+upstream publishers (ANP, Sodir / Norwegian Offshore Directorate, SENER / CNIH, Pemex,
+NSTA, or Secretaría de Energía de la Nación) endorse, sponsor, or are affiliated with
+`ogprod`. Per Sodir's open-data disclaimer, Norwegian positional data accuracy is
+approximately +/- 0-300 m and shall not be used for navigational purposes.
 
 ## Usage
 
@@ -136,6 +144,7 @@ ogprod ingest brazil --year 2026
 ogprod ingest norway
 ogprod ingest mexico
 ogprod ingest uk
+ogprod ingest argentina --year 2026
 ```
 """
 
@@ -209,6 +218,18 @@ the upstream terms for each source partition they use:
   Notice: Under the NSTA User Agreement, the information may be copied, published,
           distributed, adapted, and exploited non-commercially, provided the attribution
           statement above is preserved and no official status or endorsement is implied.
+
+* source=argentina (production/source=argentina/**, geo/*/argentina.parquet)
+  Publisher: Secretaría de Energía de la Nación (Argentina)
+  Source: https://datos.gob.ar/dataset/energia-produccion-petroleo-gas-por-pozo-capitulo-iv
+          https://datos.gob.ar/dataset/energia-produccion-hidrocarburos---yacimientos
+  License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+           https://creativecommons.org/licenses/by/4.0/
+  Attribution: Credit Secretaría de Energía de la Nación (Argentina) / datos.gob.ar.
+  Modifications: ogprod converted monthly volumes to calendar-day average rates (bbl/d,
+                 e3m3/d), aggregated well declarations to field (yacimiento) grain per
+                 ADR 0011, normalized basin/province names, and repackaged geometries as
+                 GeoParquet 1.1 (EPSG:4326).
 
 3. Disclaimer
 -------------

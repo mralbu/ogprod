@@ -20,7 +20,7 @@ Last reviewed: November 2026.
 | **Built (v2)** | Norway | `norway` | Sodir | Field | Monthly, 1971–present | O, C, NGL, G, W | F, Fac, W | Single CSV + ArcGIS REST; CI-friendly |
 | **Built (v2)** | Mexico | `mexico` | SENER / CNIH SIH | Field (+ well CSV) | Monthly, 1960–present (wells 1930+) | O, C, G, W | F, Fac, W | Bulk CSV/ZIP + Shapefile API; CI-friendly |
 | **Built (v2)** | United Kingdom | `uk` | NSTA (*PPRS*) | Field (reporting unit) | Monthly, 1975–present | O, C, G, W, WI, GI | F (off+on), Fac, W (off+on) | Hosted ArcGIS FeatureServer (WGS84); CI-friendly |
-| **Tier 1 (v1 built)** | Argentina | `argentina` | Secretaría de Energía (*Cap. IV*) | Well | Monthly, 2006–present (+ Vaca Muerta) | O, G, W | F (conc/yac), W | CKAN API + per-year CSV; CI-friendly |
+| **Built (v2)** | Argentina | `argentina` | Secretaría de Energía (*Cap. IV*) | Field rollup (default) + well opt-in | Monthly, 2006–present (+ Vaca Muerta) | O, G, W, WI, GI, CO₂ | F (yacimientos), W (omitted from web per ADR 0011) | `datos.gob.ar` CKAN API + per-year CSV (CC BY 4.0) |
 | **Tier 1 (v1 spec'd)** | USA — Federal Offshore | `us-gom` / `us-ocs` | BSEE / BOEM (*OGOR-A*) | Well | Monthly, 1996–present (1947+ hist) | O, G, W | Leases/Units, Fac, W | Direct HTTPS ZIPs + BOEM SHP (NAD 27); CI-friendly |
 | **Tier 1** | Netherlands | `netherlands` | NLOG (TNO) | Field / Well / Facility | Monthly, 2003–present | O, C, G, W, Inj | F, Fac, W | Datacenter exports + OGC WFS / SHP (ED50); CI-friendly |
 | **Tier 1** | USA — Alaska | `us-ak` | AOGCC | Well | Monthly, all history (pre/post-2000) | O, NGL, G, W, Inj | Fac, W | Single ~30 MB `DataMinerAll.zip`, updated daily (NAD 27) |
@@ -69,28 +69,27 @@ Already implemented in `src/ogprod/sources/` and documented in [data-architectur
 - **`norway` (Sodir):** 1971–present field-level oil, condensate, NGL, gas, water production (single ~2 MB CSV); field polygons, facilities, and wellbores via FactMaps ArcGIS REST. Refreshed weekly in CI.
 - **`mexico` (SENER / ex-CNH SIH):** 1960–present field-level production (default, ~18 MB CSV) plus optional well-level parser (`PRODUCCION_POZOS.zip`, 1930–present); field polygons, installations, and regional well shapefiles via `mapa-hidrocarburos.energia.gob.mx`. Refreshed weekly in CI.
 - **`uk` (NSTA):** 1975–present field/reporting-unit monthly oil, condensate, associated + dry gas, produced water, and water/gas injection via NSTA's hosted PPRS ArcGIS FeatureServer (offshore + onshore); offshore & onshore field polygons, offshore surface facilities, and offshore & onshore wellbore top holes (WGS84). Refreshed weekly in CI under the NSTA User Agreement (non-commercial reuse with attribution).
+- **`argentina` (Secretaría de Energía — *Capítulo IV*):** 2006–present monthly oil, gas, water production + water/gas/CO₂ injection from yearly Res. 319/93 Capítulo IV CSVs (covering conventional + Vaca Muerta unconventional), aggregated to field (*yacimiento*) grain by default per [ADR 0011](adr/0011-multi-country-scaling-and-overview.md) (`web_wells = False`) with local Python well-level opt-in (`granularity="well"` / `parse_well_production`); field polygons (*Yacimientos*) and well points (*Capítulo IV - Pozos*). Published under **CC BY 4.0** (`datos.gob.ar` CKAN catalog).
 
 ---
 
 ## Tier 1 — Highest Value-for-Effort Candidates
 
-### 1. Argentina — Secretaría de Energía (*Capítulo IV*)
+### 1. Argentina — Secretaría de Energía (*Capítulo IV*) *(Built in v2)*
 
-- **Suggested slug:** `argentina` (`AR`)
-- **Status:** Working connector existed in v1 (`395cf68:src/ogprod/sources/argentina.py`); needs porting to v2 wide `float32` schema, `httpx2`, and geospatial layers.
-- **Production:**
-  - Monthly well-level production under *Resolución 319/93 Capítulo IV* (oil in `m³`, gas in `10³ m³`, water in `m³`), published as per-year CSVs on the CKAN portal (`datos.energia.gob.ar` / `datos.gob.ar`), refreshed frequently (~daily/monthly).
-  - Includes a parallel **unconventional wells dataset** (*Producción de Pozos de Gas y Petróleo No Convencional*) covering **Vaca Muerta** shale, plus conventional history back to 2006.
-  - **Known quirks (empirically verified in v1):**
-    - CKAN lists lookalike `(DDJJ abiertas y cerradas)` resources alongside standard year CSVs, and since 2025 some years appear twice; match the exact year resource pattern and pick the newest `created` timestamp.
-    - `idpozo` arrives float-typed when blank rows exist; normalize through integer strings.
-    - Real yearly CSVs exceed 100 MB (use `low_memory=False` or PyArrow CSV reader).
+- **Slug:** `argentina` (`AR`) — **implemented in `src/ogprod/sources/argentina.py`** (see [data-architecture.md](data-architecture.md#35-priority-5--argentina-secretaría-de-energía--capítulo-iv)).
+- **Production & injection:**
+  - Monthly well-level declarations under *Resolución 319/93 Capítulo IV* (oil, water, water injection in `m³`; gas, gas injection, CO₂ injection in `10³ m³`), published as per-year CSVs on the CKAN portal (`datos.gob.ar` / `datos.energia.gob.ar`), covering both conventional basins and **Vaca Muerta** unconventional shale/tight back to 2006.
+  - Per [ADR 0011](adr/0011-multi-country-scaling-and-overview.md), ~85k wells (~17.6M well-months) are aggregated to **field (*yacimiento*) grain** during default ingestion (`entity_type = "field"`, `web_wells = False`), while local Python opt-in remains available via `parse_production(..., granularity="well")` or `parse_well_production(...)`.
+  - **Known quirks handled in `argentina.py`:**
+    - CKAN lists lookalike `(DDJJ abiertas y cerradas)` resources alongside standard year CSVs, and 2024/2025 each appear twice; `discover_production` matches the exact year pattern and picks the newest `(created, last_modified)` resource.
+    - `idpozo` arrives float-typed when blank rows exist; normalized cleanly to integer strings.
+    - Real yearly CSVs are 235–330 MB (UTF-8 BOM); column projection (`usecols`) loads only needed columns.
 - **Geospatial layers:**
-  - `geo/wells`: `Listado de pozos cargados por empresas operadoras` CSV resource inside the same CKAN package (`coordenadax`/`coordenaday` decimal degrees, `idempresa`, `clasificacion`).
-  - `geo/fields`: Secretaría de Energía publishes `Producción de hidrocarburos - Yacimientos` (field polygons) and `Concesiones de Explotación` (exploitation concession polygons, updated monthly through May 2026) on `datos.gob.ar` / `datos.energia.gob.ar`.
-  - `geo/facilities`: Not part of the core Capítulo IV package (onshore-dominated; offshore Tierra del Fuego / Austral platforms would need separate verification).
-- **Scale & CI:** Medium-large (tens of thousands of wells; yearly partitioning fits v2 cleanly). Plain HTTP/HTTPS CKAN API — check whether `datos.energia.gob.ar` supports HTTPS cleanly or needs the `datos.gob.ar` HTTPS mirror in CI.
-- **Licence:** Argentine public open data (`datos.gob.ar` / Secretaría de Energía; dataset metadata often leaves the licence field unspecified — verify portal terms before mirroring).
+  - `geo/fields`: `Producción de hidrocarburos - Yacimientos` (SHP / GeoJSON CSV, `EPSG:4326`) dissolved by normalized `field_id`.
+  - `geo/wells`: `Capítulo IV - Pozos` (CSV with `geojson`/`geom`, ~85k wells, 99.96% join coverage, plus fallback to `Listado de pozos cargados por empresas operadoras`). Stored in Layer 1 for local DuckDB/Python use and excluded from Layer-2 web tiles/search (`web_wells = False`).
+  - `geo/facilities`: Not part of Capítulo IV.
+- **Licence:** **Creative Commons Attribution 4.0 International (CC BY 4.0)** (confirmed in `datos.gob.ar` CKAN `license_id: "CC-BY-4.0"`).
 - **Links:**
   - [Capítulo IV dataset (`datos.gob.ar`)](https://datos.gob.ar/dataset/energia-produccion-petroleo-gas-por-pozo-capitulo-iv)
   - [Yacimientos polygons (`datos.gob.ar`)](https://datos.gob.ar/dataset/energia-produccion-hidrocarburos---yacimientos)

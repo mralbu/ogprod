@@ -1,0 +1,5 @@
+idempresa,anio,mes,idpozo,prod_pet,prod_gas,prod_agua,iny_agua,iny_gas,iny_co2,tef,vida_util,tipoextraccion,tipoestado,tipopozo,empresa,sigla,idareapermisoconcesion,areapermisoconcesion,idareayacimiento,areayacimiento,cuenca,provincia,tipo_de_recurso,proyecto
+YPF,2024,3,130589,2500.5,180.2,320.7,0.0,,,744,10,Surgencia Natural,Extracción Efectiva,Petrolífero,YPF S.A.,YPF.Nq.LACh-15(h),LCA,LOMA CAMPANA,LCA,LOMA CAMPANA,NEUQUINA,Neuquén,NO CONVENCIONAL,Loma Campana
+YPF,2024,3,130590,1500.0,120.0,100.0,500.0,,,744,10,Surgencia Natural,Extracción Efectiva,Petrolífero,YPF S.A.,YPF.Nq.LACh-16(h),LCA,LOMA CAMPANA,LCA,LOMA CAMPANA,NEUQUINA,Neuquén,NO CONVENCIONAL,Loma Campana
+PAE,2024,3,104321,880.0,12.5,1500.3,2000.0,5.0,1.2,744,25,Bombeo Mecánico,Extracción Efectiva,Petrolífero,PAN AMERICAN ENERGY,PAE.Ch.CG-101,CGO,CERRO DRAGON,CGO,CERRO DRAGON,GOLFO SAN JORGE,Chubut,CONVENCIONAL,Sin Proyecto
+TOT,2024,3,200100,120.0,950.0,10.0,,,,744,15,Surgencia Natural,Extracción Efectiva,Gasífero,TOTAL AUSTRAL S.A.,TA.CMA.VP-1,CMA1,CUENCA MARINA AUSTRAL 1,VPL,VEGA PLEYADE,AUSTRAL,Estado Nacional,CONVENCIONAL,Sin Proyecto
