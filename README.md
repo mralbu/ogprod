@@ -31,6 +31,7 @@ Geospatial tables are stored as Hilbert-sorted **GeoParquet 1.1** (`EPSG:4326`, 
 | `mexico` | Mexico (`MX`) | SENER / CNIH SIH (1960–present) | Field (default) + well CSV/ZIP parser | Fields, installations/platforms, wells |
 | `uk` | United Kingdom (`GB`) | NSTA (1975–present) | Field (oil, cond, gas, water + water/gas inj) | Fields (offshore + onshore), surface facilities, wellbores |
 | `argentina` | Argentina (`AR`) | Secretaría de Energía (2006–present) | Field rollup (default; oil, gas, water + water/gas/CO₂ inj) + local well parser | Fields (Yacimientos), wells (Capítulo IV) |
+| `netherlands` | Netherlands (`NL`) | NLOG / TNO (2003–present) | Well (oil, cond, gas, water + water/gas inj) | Fields, facilities/platforms, wells |
 
 ## Quickstart
 
@@ -43,6 +44,7 @@ uv run ogprod ingest norway --data-dir ./data
 uv run ogprod ingest mexico --data-dir ./data
 uv run ogprod ingest uk --data-dir ./data
 uv run ogprod ingest argentina --year 2025 --year 2026 --data-dir ./data
+uv run ogprod ingest netherlands --data-dir ./data
 uv run ogprod coverage --data-dir ./data
 uv run ogprod sql "SELECT source, field_name, round(sum(oil_prod), 0) AS oil_bpd FROM production WHERE period = '2025-01-01' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 10" --data-dir ./data
 ```
@@ -58,6 +60,7 @@ db.ingest("norway", origin="publisher")  # live fetch from Sodir
 db.ingest("mexico")
 db.ingest("uk")
 db.ingest("argentina", year=[2025, 2026])
+db.ingest("netherlands")
 
 df = db.production(source="brazil", start="2026-01")
 fields = db.fields()  # GeoParquet 1.1 polygons
@@ -74,7 +77,7 @@ uv run ogprod export-web --sync-mirror --out-dir site/public/data --data-dir ./d
 npm --prefix site ci && npm --prefix site run dev
 ```
 
-See [docs/data-architecture.md](docs/data-architecture.md) for the full storage layout, built-in source plan (Brazil ANP, Norway Sodir, Mexico SENER/CNH, UK NSTA, Argentina Secretaría de Energía), and static web export contract, and [docs/data-sources.md](docs/data-sources.md) for the researched global survey of candidate countries and regulators.
+See [docs/data-architecture.md](docs/data-architecture.md) for the full storage layout, built-in source plan (Brazil ANP, Norway Sodir, Mexico SENER/CNH, UK NSTA, Argentina Secretaría de Energía, Netherlands NLOG), and static web export contract, and [docs/data-sources.md](docs/data-sources.md) for the researched global survey of candidate countries and regulators.
 
 ## Development
 
@@ -95,4 +98,5 @@ just complexity  # radon
   - **Mexico (`mexico`) — SENER / CNIH (ex-CNH):** Mexican Federal Open Data Policy (*Datos Abiertos* / *Términos de Libre Uso MX*). Source: [SENER / CNIH SIH](https://sih-hidrocarburos.energia.gob.mx/) and [Mapa de Hidrocarburos](https://mapa-hidrocarburos.energia.gob.mx/) (incorporating data from CNIH/SENER and Petróleos Mexicanos).
   - **United Kingdom (`uk`) — NSTA:** [NSTA User Agreement](https://www.nstauthority.co.uk/site-tools/access-to-information/) (non-commercial reuse). Contains information provided by the North Sea Transition Authority and/or other third parties ([NSTA Production Data](https://www.nstauthority.co.uk/data-and-insights/data/themes/production/) & [NSTA Open Data Hub](https://open-data-ukcs-transition.hub.arcgis.com/)).
   - **Argentina (`argentina`) — Secretaría de Energía:** [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/). Source: [Producción de petróleo y gas por pozo — Capítulo IV](https://datos.gob.ar/dataset/energia-produccion-petroleo-gas-por-pozo-capitulo-iv) and [Yacimientos](https://datos.gob.ar/dataset/energia-produccion-hidrocarburos---yacimientos) (`datos.gob.ar` / Secretaría de Energía de la Nación), normalized and aggregated to field level by `ogprod`.
+  - **Netherlands (`netherlands`) — NLOG (TNO):** [NLOG Disclaimer](https://www.nlog.nl/en/disclaimer) (free reuse and redistribution with attribution). Source: [NLOG Production & Injection Data](https://www.nlog.nl/en/production-and-injection-data) and [GDN GeoServices OGC WFS](https://www.nlog.nl/en/files-interactive-map) (TNO – Geological Survey of the Netherlands / Ministry of Climate Policy and Green Growth).
 

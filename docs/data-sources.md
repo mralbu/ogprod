@@ -22,7 +22,7 @@ Last reviewed: November 2026.
 | **Built (v2)** | United Kingdom | `uk` | NSTA (*PPRS*) | Field (reporting unit) | Monthly, 1975–present | O, C, G, W, WI, GI | F (off+on), Fac, W (off+on) | Hosted ArcGIS FeatureServer (WGS84); CI-friendly |
 | **Built (v2)** | Argentina | `argentina` | Secretaría de Energía (*Cap. IV*) | Field rollup (default) + well opt-in | Monthly, 2006–present (+ Vaca Muerta) | O, G, W, WI, GI, CO₂ | F (yacimientos), W (omitted from web per ADR 0011) | `datos.gob.ar` CKAN + `datos.energia.gob.ar` downloads (CC BY 4.0); excluded from default CI due to download timeouts |
 | **Tier 1 (v1 spec'd)** | USA — Federal Offshore | `us-gom` / `us-ocs` | BSEE / BOEM (*OGOR-A*) | Well | Monthly, 1996–present (1947+ hist) | O, G, W | Leases/Units, Fac, W | Direct HTTPS ZIPs + BOEM SHP (NAD 27); CI-friendly |
-| **Tier 1** | Netherlands | `netherlands` | NLOG (TNO) | Field / Well / Facility | Monthly, 2003–present | O, C, G, W, Inj | F, Fac, W | Datacenter exports + OGC WFS / SHP (ED50); CI-friendly |
+| **Built (v2)** | Netherlands | `netherlands` | NLOG (TNO) | Well | Monthly, 2003–present | O, C, G, W, WI, GI | F, Fac, W | Datacenter REST API + OGC WFS (ED50/UTM31N); CI-friendly |
 | **Tier 1** | USA — Alaska | `us-ak` | AOGCC | Well | Monthly, all history (pre/post-2000) | O, NGL, G, W, Inj | Fac, W | Single ~30 MB `DataMinerAll.zip`, updated daily (NAD 27) |
 | **Tier 1** | Colombia | `colombia` | ANH (`datos.gov.co`) | Field | Monthly, 2014–present | O, G | Field pts (+ ANH Geovisor) | Socrata API / CSV (CC BY-SA 4.0); quarterly updates |
 | **Tier 2** | Denmark | `denmark` | Danish Energy Agency (ENS) | Field | Monthly 2018+ (yearly 1972+) | O, G, W, WI, GI | F, Fac, W | Excel spreadsheets + SHP/WFS (ED50/UTM32N) |
@@ -70,6 +70,7 @@ Already implemented in `src/ogprod/sources/` and documented in [data-architectur
 - **`mexico` (SENER / ex-CNH SIH):** 1960–present field-level production (default, ~18 MB CSV) plus optional well-level parser (`PRODUCCION_POZOS.zip`, 1930–present); field polygons, installations, and regional well shapefiles via `mapa-hidrocarburos.energia.gob.mx`. Refreshed weekly in CI.
 - **`uk` (NSTA):** 1975–present field/reporting-unit monthly oil, condensate, associated + dry gas, produced water, and water/gas injection via NSTA's hosted PPRS ArcGIS FeatureServer (offshore + onshore); offshore & onshore field polygons, offshore surface facilities, and offshore & onshore wellbore top holes (WGS84). Refreshed weekly in CI under the NSTA User Agreement (non-commercial reuse with attribution).
 - **`argentina` (Secretaría de Energía — *Capítulo IV*):** 2006–present monthly oil, gas, water production + water/gas/CO₂ injection from yearly Res. 319/93 Capítulo IV CSVs (covering conventional + Vaca Muerta unconventional), aggregated to field (*yacimiento*) grain by default per [ADR 0011](adr/0011-multi-country-scaling-and-overview.md) (`web_wells = False`) with local Python well-level opt-in (`granularity="well"` / `parse_well_production`); field polygons (*Yacimientos*) and well points (*Capítulo IV - Pozos*). Published under **CC BY 4.0** (`datos.gob.ar` CKAN catalog).
+- **`netherlands` (NLOG / TNO):** 2003–present well-level onshore + Dutch North Sea oil, condensate, gas, produced water, and water/gas injection via the NLOG Datacenter REST API (`nlog-mapviewer-api/rest/prodfigures/well`); field polygons, hydrocarbon mining facilities, and hydrocarbon/storage wells via GDN GeoServices OGC WFS (reprojected from ED50 / UTM 31N `EPSG:23031` to `EPSG:4326`). Refreshed weekly in CI; free reuse and redistribution with attribution to NLOG.NL.
 
 ---
 
@@ -144,24 +145,20 @@ Already implemented in `src/ogprod/sources/` and documented in [data-architectur
 
 ---
 
-### 4. Netherlands — NLOG (TNO / Geological Survey of the Netherlands)
+### 4. Netherlands — NLOG (TNO / Geological Survey of the Netherlands) *(Built in v2)*
 
-- **Suggested slug:** `netherlands` (`NL`)
+- **Slug:** `netherlands` (`NL`) — **implemented in `src/ogprod/sources/netherlands.py`** (see [data-architecture.md](data-architecture.md#36-priority-6--netherlands-nlog--tno)).
 - **Why high priority:** Adds both **onshore** (including historic Groningen) and **Dutch North Sea** production *and* injection, with **all three v2 geospatial layers** available via a standard OGC WFS and direct GeoJSON/Shapefile downloads.
 - **Production & injection:**
-  - Monthly figures reported under Mining Decree (*Mbb* art. 111.1/112.1) since **January 1, 2003** (pre-2003 not in public domain), published within ~8 weeks of month-end via the NLOG Datacenter (`nlog.nl/en/data`).
-  - Covers gas (`Nm³` at 0 °C, 101.325 kPa — note the ~5.5% reference-temperature difference vs `Sm³` at 15 °C!), crude oil (`Sm³`), condensate (`Sm³`), produced water, and **reservoir injection** (per borehole, field, facility, or licence).
-  - *Needs live probe before coding:* verify exact bulk download URL/schema on NLOG's datacenter download interface (CSV/XLSX/API) vs interactive query tool.
-- **Geospatial layers (all three verified live at `nlog.nl/en/files-interactive-map`):**
-  - OGC WFS endpoint: `https://www.gdngeoservices.nl/geoserver/nlog/ows` (plus direct ZIP Shapefile & GeoJSON downloads!).
-  - `geo/fields`: `gdw_ng_field_utm` / `NLOG_Fields_ED50UTM31N.zip` (filter to hydrocarbon fields; layer also includes geothermal & storage).
-  - `geo/facilities`: `GDW_NG_FACILITY_UTM` / `NLOG_Facility_ED50UTM31N.zip` (all mining installations/platforms; filter to hydrocarbons).
-  - `geo/wells`: `gdw_ng_wll_all_utm` / `NLOG_Boreholes_ED50UTM31N.zip` (all boreholes).
-- **CRS & geometry quirks:**
-  - Original CRS is **ED50** (`EPSG:4230`) on WFS and **ED50 / UTM 31N** (`EPSG:23031`) on Shapefile/GeoJSON downloads — must reproject to `EPSG:4326`.
-  - NLOG explicitly documents invalid geometries on the fields WFS layer requiring geometry repair (`make_valid()`, already standard in `ogprod`).
-- **Scale & CI:** Small-to-medium (hundreds of fields, ~6k boreholes). Very CI-friendly.
-- **Licence:** Dutch public subsurface register (TNO / Ministry of Climate Policy and Green Growth; attribution required — verify datacenter terms).
+  - Monthly figures reported under Mining Decree (*Mbb* art. 111.1/112.1) since **January 1, 2003** (pre-2003 not in public domain), published within ~8 weeks of month-end via the NLOG Datacenter REST API (`https://www.nlog.nl/nlog-mapviewer-api/rest/prodfigures/well`).
+  - Covers gas produced & injected (`1000 Nm³` at 0 °C, 101.325 kPa — preserved without synthetic temperature rescaling vs 15 °C `Sm³` to match official NLOG totals), crude oil (`Sm³`), condensate (`Sm³`), produced water (`m³`), and injected water (`m³`), at **well grain** (~1,550 producing wells across all history; well below ADR 0011's 30k threshold, so `web_wells = True` and `search_all_wells = False`).
+- **Geospatial layers (all three via GDN GeoServices OGC WFS):**
+  - OGC WFS endpoint: `https://www.gdngeoservices.nl/geoserver/nlog/ows` (`EPSG:23031` ED50 / UTM 31N, reprojected to `EPSG:4326` with geometry repair).
+  - `geo/fields`: `nlog:gdw_ng_field_utm` (567 hydrocarbon fields; `area_km2` computed in `EPSG:23031` before reprojection).
+  - `geo/facilities`: `nlog:GDW_NG_FACILITY_UTM` (hydrocarbon mining installations; geothermal `GTI` installations excluded).
+  - `geo/wells`: `nlog:gdw_ng_wll_all_utm` (hydrocarbon/storage/observation boreholes deduplicated to canonical `WELL_NAME`).
+- **Scale & CI:** Compact (567 fields, 614 facilities, ~4.9k hydrocarbon wells, ~1,550 producing wells). Refreshed weekly in GitHub Actions.
+- **Licence:** Dutch public subsurface register (TNO / Ministry of Climate Policy and Green Growth; [NLOG Disclaimer](https://www.nlog.nl/en/disclaimer) grants free reuse and redistribution with attribution to NLOG.NL).
 - **Links:**
   - [NLOG Production and Injection Data](https://www.nlog.nl/en/production-and-injection-data)
   - [NLOG Interactive Map Files (WFS / SHP / GeoJSON)](https://www.nlog.nl/en/files-interactive-map)

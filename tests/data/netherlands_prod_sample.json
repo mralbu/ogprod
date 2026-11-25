@@ -1,0 +1,146 @@
+{
+  "source": "netherlands",
+  "year_start": 2024,
+  "year_end": 2024,
+  "environment": "offshore",
+  "streams": {
+    "gas_prod": [
+      {
+        "operatorNm": "Petrogas E&P Netherlands B.V.",
+        "wellNm": "A12-FA-01",
+        "fieldNm": "A12-FA",
+        "year": "2024",
+        "jan": 3100.0,
+        "feb": 2900.0,
+        "mar": 0.0,
+        "apr": null,
+        "may": null,
+        "jun": null,
+        "jul": null,
+        "aug": null,
+        "sep": null,
+        "oct": null,
+        "nov": null,
+        "dec": null
+      },
+      {
+        "operatorNm": "Nederlandse Aardolie Maatschappij B.V.",
+        "wellNm": "INACTIVE-01",
+        "fieldNm": "A12-FA",
+        "year": "2024",
+        "jan": 0.0,
+        "feb": 0.0,
+        "mar": 0.0,
+        "apr": 0.0,
+        "may": 0.0,
+        "jun": 0.0,
+        "jul": 0.0,
+        "aug": 0.0,
+        "sep": 0.0,
+        "oct": 0.0,
+        "nov": 0.0,
+        "dec": 0.0
+      }
+    ],
+    "oil_prod": [
+      {
+        "operatorNm": "Petrogas E&P Netherlands B.V.",
+        "wellNm": "A12-FA-01",
+        "fieldNm": "A12-FA",
+        "year": "2024",
+        "jan": 158.987294928,
+        "feb": 0.0,
+        "mar": null,
+        "apr": null,
+        "may": null,
+        "jun": null,
+        "jul": null,
+        "aug": null,
+        "sep": null,
+        "oct": null,
+        "nov": null,
+        "dec": null
+      }
+    ],
+    "condensate_prod": [
+      {
+        "operatorNm": "Petrogas E&P Netherlands B.V.",
+        "wellNm": "A12-FA-01",
+        "fieldNm": "A12-FA",
+        "year": "2024",
+        "jan": 31.7974589856,
+        "feb": 29.0,
+        "mar": null,
+        "apr": null,
+        "may": null,
+        "jun": null,
+        "jul": null,
+        "aug": null,
+        "sep": null,
+        "oct": null,
+        "nov": null,
+        "dec": null
+      }
+    ],
+    "water_prod": [
+      {
+        "operatorNm": "Petrogas E&P Netherlands B.V.",
+        "wellNm": "A12-FA-01",
+        "fieldNm": "A12-FA",
+        "year": "2024",
+        "jan": 310.0,
+        "feb": 290.0,
+        "mar": null,
+        "apr": null,
+        "may": null,
+        "jun": null,
+        "jul": null,
+        "aug": null,
+        "sep": null,
+        "oct": null,
+        "nov": null,
+        "dec": null
+      }
+    ],
+    "water_inj": [
+      {
+        "operatorNm": "Petrogas E&P Netherlands B.V.",
+        "wellNm": "A12-FA-02",
+        "fieldNm": "A12-FA",
+        "year": "2024",
+        "jan": 317.974589856,
+        "feb": null,
+        "mar": null,
+        "apr": null,
+        "may": null,
+        "jun": null,
+        "jul": null,
+        "aug": null,
+        "sep": null,
+        "oct": null,
+        "nov": null,
+        "dec": null
+      }
+    ],
+    "gas_inj": [
+      {
+        "operatorNm": "Petrogas E&P Netherlands B.V.",
+        "wellNm": "A12-FA-02",
+        "fieldNm": "A12-FA",
+        "year": "2024",
+        "jan": 620.0,
+        "feb": null,
+        "mar": null,
+        "apr": null,
+        "may": null,
+        "jun": null,
+        "jul": null,
+        "aug": null,
+        "sep": null,
+        "oct": null,
+        "nov": null,
+        "dec": null
+      }
+    ]
+  }
+}

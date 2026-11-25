@@ -41,6 +41,7 @@ ogprod ingest norway --data-dir ./data
 ogprod ingest mexico --origin publisher --data-dir ./data
 ogprod ingest uk --year 2025 --year 2026 --origin publisher --data-dir ./data
 ogprod ingest argentina --year 2025 --year 2026 --origin publisher --data-dir ./data
+ogprod ingest netherlands --year 2025 --year 2026 --origin publisher --data-dir ./data
 ogprod coverage --data-dir ./data
 ogprod audit --data-dir ./data
 ogprod export-web --data-dir ./data --out-dir ./site/public/data

@@ -8,6 +8,7 @@ Priority order of built-in sources:
 3. **Mexico — SENER / ex-CNH SIH** (well- and field-level production + spatial layers)
 4. **United Kingdom — NSTA** (1975–present field-level offshore + onshore production & water/gas injection, fields, surface facilities, wellbores)
 5. **Argentina — Secretaría de Energía (*Capítulo IV*)** (2006–present field-level rollup default + optional local well parser for oil, gas, water, and water/gas/CO₂ injection; field polygons and well points)
+6. **Netherlands — NLOG (TNO)** (2003–present well-level onshore + Dutch North Sea oil, condensate, gas, water production and water/gas injection; field polygons, mining facilities, and hydrocarbon wells via OGC WFS)
 
 For the broader global survey of candidate countries, regulators, spatial layers, and expansion trade-offs, see [data-sources.md](data-sources.md).
 
@@ -162,6 +163,16 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
   - `geo/fields`: `produccion-hidrocarburos-yacimientos` (SHP / GeoJSON CSV) dissolved by normalized `field_id`.
   - `geo/wells`: `Capítulo IV - Pozos` (GeoJSON/WKB CSV or SHP, fallback to `Listado de pozos cargados por empresas operadoras`) stored in Layer 1 for local DuckDB/Python use and excluded from Layer-2 web tiles/search.
   - `geo/facilities`: not published in Capítulo IV.
+
+### 3.6 Priority 6 — Netherlands (NLOG / TNO)
+
+- **Production & injection (`nlog.nl/nlog-mapviewer-api/rest/prodfigures/well`, 2003–present, onshore + Dutch North Sea):**
+  - Well-level monthly volumes (`entity_type = "well"`, `web_wells = True` per [ADR 0011](adr/0011-multi-country-scaling-and-overview.md) — ~1,550 producing wells across all history, well below the 30k threshold): crude oil (`Sm³` → `bbl/d`), condensate (`Sm³` → `bbl/d`), produced water (`m³` → `bbl/d`), injected water (`m³` → `bbl/d`), and natural gas produced & injected (`1000 Nm³` at 0 °C → `e3m3/d`, preserved without synthetic temperature rescaling to match official NLOG reports).
+  - Historical years are fetched in 5-year chunks (`2003–2007`, …) per onshore (`location="L"`) / offshore (`location="S"`), with individual yearly bundles for the last two years so incremental `--recent` refreshes only re-fetch recent data.
+- **Geo (`gdngeoservices.nl/geoserver/nlog/ows` OGC WFS, `EPSG:23031` ED50 / UTM 31N → `EPSG:4326`):**
+  - `geo/fields`: `nlog:gdw_ng_field_utm` (567 hydrocarbon fields; `area_km2` computed in `EPSG:23031`, invalid polygons repaired with `make_valid()`, 100% join to `production.field_id`).
+  - `geo/facilities`: `nlog:GDW_NG_FACILITY_UTM` (hydrocarbon platforms, satellites, subsea structures, production locations; geothermal `GTI` installations excluded).
+  - `geo/wells`: `nlog:gdw_ng_wll_all_utm` (hydrocarbon/storage/observation boreholes deduplicated to canonical `WELL_NAME` preferring main boreholes `BRH` over sidetracks).
 
 ---
 

@@ -32,6 +32,7 @@ def test_sources_lists_all_connectors() -> None:
     assert "argentina\tArgentina\tSecretaría de Energía\tfield\t" in out
     assert "brazil\tBrazil\tANP\twell\t" in out
     assert "mexico\tMexico\tSENER / CNIH\tfield\t" in out
+    assert "netherlands\tNetherlands\tNLOG (TNO)\twell\t" in out
     assert "norway\tNorway\tSodir\tfield\t" in out
     assert "uk\tUnited Kingdom\tNSTA\tfield\t" in out
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 from ogprod.sources import argentina as argentina
 from ogprod.sources import brazil as brazil
 from ogprod.sources import mexico as mexico
+from ogprod.sources import netherlands as netherlands
 from ogprod.sources import norway as norway
 from ogprod.sources import uk as uk
 from ogprod.sources.base import (
@@ -28,6 +29,7 @@ __all__ = [
     "brazil",
     "get",
     "mexico",
+    "netherlands",
     "norway",
     "register",
     "uk",
