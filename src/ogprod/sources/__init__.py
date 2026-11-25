@@ -6,6 +6,7 @@ from __future__ import annotations
 from ogprod.sources import brazil as brazil
 from ogprod.sources import mexico as mexico
 from ogprod.sources import norway as norway
+from ogprod.sources import uk as uk
 from ogprod.sources.base import DownloadResult, RemoteFile, Source, available, get, register
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "mexico",
     "norway",
     "register",
+    "uk",
 ]

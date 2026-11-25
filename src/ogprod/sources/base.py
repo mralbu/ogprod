@@ -339,6 +339,16 @@ class Source(ABC):
     ) -> list[RemoteFile]:
         """List upstream production files matching the requested filters."""
 
+    def fetch_production(
+        self,
+        remote: RemoteFile,
+        dest: Path,
+        *,
+        client: httpx2.Client,
+    ) -> DownloadResult:
+        """Download one upstream production file into ``dest``."""
+        return download_file(client, remote.url, dest)
+
     @abstractmethod
     def parse_production(self, raw: RawFile) -> pa.Table:
         """Pure, offline parser returning a validated canonical production Arrow table."""

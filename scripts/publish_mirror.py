@@ -92,6 +92,11 @@ complete terms.
   - Terms: Mexican Federal Open Data Policy (*Datos Abiertos* / *Términos de Libre Uso MX*)
   - Attribution: Credit SENER / CNIH (ex-CNH) and Petróleos Mexicanos (Pemex) per source
     file banners.
+- **`uk` — NSTA (North Sea Transition Authority):**
+  - Portal: [NSTA Production Data][uk-prod] & [NSTA Open Data Hub][uk-hub]
+  - License: [NSTA User Agreement][uk-terms] (non-commercial reuse and redistribution)
+  - Attribution: *"Contains information provided by the North Sea Transition Authority
+    and/or other third parties."*
 
 [anp-portal]: https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/fase-de-desenvolvimento-e-producao
 [br-decree]: https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm
@@ -100,6 +105,9 @@ complete terms.
 [nlod-2]: https://data.norge.no/nlod/en/2.0
 [mx-sih]: https://sih-hidrocarburos.energia.gob.mx/
 [mx-mapa]: https://mapa-hidrocarburos.energia.gob.mx/
+[uk-prod]: https://www.nstauthority.co.uk/data-and-insights/data/themes/production/
+[uk-hub]: https://open-data-ukcs-transition.hub.arcgis.com/
+[uk-terms]: https://www.nstauthority.co.uk/site-tools/access-to-information/
 
 ### Modifications Made by `ogprod`
 
@@ -116,8 +124,8 @@ Relative to the raw publisher files, `ogprod` has:
 ### Disclaimer & No Endorsement
 
 All data is provided **"as is"** without warranty of accuracy or completeness. None of the
-upstream publishers (ANP, Sodir / Norwegian Offshore Directorate, SENER / CNIH, or Pemex)
-endorse, sponsor, or are affiliated with `ogprod`. Per Sodir's open-data disclaimer,
+upstream publishers (ANP, Sodir / Norwegian Offshore Directorate, SENER / CNIH, Pemex, or
+NSTA) endorse, sponsor, or are affiliated with `ogprod`. Per Sodir's open-data disclaimer,
 Norwegian positional data accuracy is approximately +/- 0-300 m and shall not be used for
 navigational purposes.
 
@@ -127,6 +135,7 @@ navigational purposes.
 ogprod ingest brazil --year 2026
 ogprod ingest norway
 ogprod ingest mexico
+ogprod ingest uk
 ```
 """
 
@@ -188,6 +197,18 @@ the upstream terms for each source partition they use:
   Attribution: Credit SENER / CNIH (ex-CNH) and Petróleos Mexicanos (Pemex) per source
                file attribution banners ("Fuente: Comisión Nacional de Hidrocarburos con
                información propia y de Petróleos Mexicanos.").
+
+* source=uk (production/source=uk/**, geo/*/uk.parquet)
+  Publisher: NSTA — North Sea Transition Authority (Oil and Gas Authority, United Kingdom)
+  Source: https://www.nstauthority.co.uk/data-and-insights/data/themes/production/
+          https://open-data-ukcs-transition.hub.arcgis.com/
+  License: North Sea Transition Authority User Agreement (non-commercial reuse)
+           https://www.nstauthority.co.uk/site-tools/access-to-information/
+  Attribution: "Contains information provided by the North Sea Transition Authority and/or
+               other third parties."
+  Notice: Under the NSTA User Agreement, the information may be copied, published,
+          distributed, adapted, and exploited non-commercially, provided the attribution
+          statement above is preserved and no official status or endorsement is implied.
 
 3. Disclaimer
 -------------

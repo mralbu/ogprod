@@ -6,6 +6,7 @@ Priority order of built-in sources:
 1. **Brazil — ANP** (first priority: 1941–2026 well-level production & injection, fields, wells, platforms/FPSOs)
 2. **Norway — Sodir** (field-level production 1971–present, field polygons, facilities, wellbores)
 3. **Mexico — SENER / ex-CNH SIH** (well- and field-level production + spatial layers)
+4. **United Kingdom — NSTA** (1975–present field-level offshore + onshore production & water/gas injection, fields, surface facilities, wellbores)
 
 For the broader global survey of candidate countries, regulators, spatial layers, and expansion trade-offs, see [data-sources.md](data-sources.md).
 
@@ -140,6 +141,15 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
   - `geo/fields`: `cmp_cmp_rsv` (477 field polygons, `EPSG:4326`; drops 1P/2P/3P reserve columns), enriched with `basin` via area-weighted overlay against `geo_petro_prov` (Provincias Petroleras, `EPSG:6372`; see [ADR 0010](adr/0010-basin-and-region-enrichment.md)).
   - `geo/facilities`: `v_iftep_instalaciones` (1,363 platforms/installations, `EPSG:4326`).
   - `geo/wells`: 6 regional well layers (`v_zon_pozos_{burgos,tampico,ver,cuenca_sur,agu_som,agu_pro}`).
+
+### 3.4 Priority 4 — United Kingdom (NSTA)
+
+- **Production & injection (NSTA Open Data Hub hosted ArcGIS FeatureServer, paginated per `PERIODYR`):**
+  - `UKCS_hydrocarbon_field_production_reports_PPRS_points_(WGS84)` (1975–present, offshore + onshore): oil (`OILPRODM3`), condensate (`GCONDVOL`), produced water (`WATPRODVOL`), injected water (`INJWATVOL`, `m³` → `bbl/d`), associated + dry gas (`AGASPROKSM` + `DGASPROKSM`), and injected gas (`GASINJVOL`, `kSm³` → `e3m3/d`). Grain: `entity_type = "field"`, `entity_id = normalize_key(UNITNAME)`, `field_id = resolve_field_key(FIELDNAME)` (reconciling `[Part of X]` / operator brackets to determined fields), `region` expanded from `FIELDAREA` (`Northern/Central/Southern North Sea`, `West of Shetland`, `Irish Sea`, `Onshore`).
+- **Geo (NSTA Open Data Hub ArcGIS FeatureServers, WGS84):**
+  - `geo/fields`: `Offshore_hydrocarbon_fields_(WGS84)` + `Onshore_hydrocarbon_fields_(WGS84)` dissolved by `resolve_field_key` (collapsing `(oil)`/`(gas)`/`(cond)` splits and merging cross-shoreline fields such as Wytch Farm).
+  - `geo/facilities`: `UKCS offshore infrastructure surface points WGS84` (platforms, FPSOs, terminals, export pipeline system, start year; active layer ID discovered dynamically from service metadata).
+  - `geo/wells`: `UKCS_offshore_wellbore_top_holes_(WGS84)` + `UKCS onshore petroleum wells top holes WGS84` (spud/completion dates, operator, status, `field_id`, onshore county).
 
 ---
 

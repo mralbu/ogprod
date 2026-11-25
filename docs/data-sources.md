@@ -19,8 +19,8 @@ Last reviewed: November 2026.
 | **Built (v2)** | Brazil | `brazil` | ANP | Well | Monthly, 1941–present | O, C, G, W, WI, GI, CO₂ | F, Fac (cap), W | Plain CSV + WFS; `gov.br` blocks Azure/GHA (ADR 0002) |
 | **Built (v2)** | Norway | `norway` | Sodir | Field | Monthly, 1971–present | O, C, NGL, G, W | F, Fac, W | Single CSV + ArcGIS REST; CI-friendly |
 | **Built (v2)** | Mexico | `mexico` | SENER / CNIH SIH | Field (+ well CSV) | Monthly, 1960–present (wells 1930+) | O, C, G, W | F, Fac, W | Bulk CSV/ZIP + Shapefile API; CI-friendly |
+| **Built (v2)** | United Kingdom | `uk` | NSTA (*PPRS*) | Field (reporting unit) | Monthly, 1975–present | O, C, G, W, WI, GI | F (off+on), Fac, W (off+on) | Hosted ArcGIS FeatureServer (WGS84); CI-friendly |
 | **Tier 1 (v1 built)** | Argentina | `argentina` | Secretaría de Energía (*Cap. IV*) | Well | Monthly, 2006–present (+ Vaca Muerta) | O, G, W | F (conc/yac), W | CKAN API + per-year CSV; CI-friendly |
-| **Tier 1** | United Kingdom | `uk` | NSTA (*PPRS*) | Field (+ wellbore daily) | Monthly, 1975–present | O, C, NGL, G, W, WI, GI | F, Fac, W | ArcGIS Hub FeatureServer / CSV; CI-friendly |
 | **Tier 1 (v1 spec'd)** | USA — Federal Offshore | `us-gom` / `us-ocs` | BSEE / BOEM (*OGOR-A*) | Well | Monthly, 1996–present (1947+ hist) | O, G, W | Leases/Units, Fac, W | Direct HTTPS ZIPs + BOEM SHP (NAD 27); CI-friendly |
 | **Tier 1** | Netherlands | `netherlands` | NLOG (TNO) | Field / Well / Facility | Monthly, 2003–present | O, C, G, W, Inj | F, Fac, W | Datacenter exports + OGC WFS / SHP (ED50); CI-friendly |
 | **Tier 1** | USA — Alaska | `us-ak` | AOGCC | Well | Monthly, all history (pre/post-2000) | O, NGL, G, W, Inj | Fac, W | Single ~30 MB `DataMinerAll.zip`, updated daily (NAD 27) |
@@ -68,6 +68,7 @@ Already implemented in `src/ogprod/sources/` and documented in [data-architectur
 - **`brazil` (ANP):** 1941–present well-level oil, condensate, gas, water production + water/gas/CO₂ injection; field polygons (WFS + relinquished CSVs), platforms/FPSOs with oil & gas capacities (`lpo`), well points (`situacao-pocos`). Refreshed locally (not in GitHub Actions) due to `gov.br` blocking Azure IP ranges.
 - **`norway` (Sodir):** 1971–present field-level oil, condensate, NGL, gas, water production (single ~2 MB CSV); field polygons, facilities, and wellbores via FactMaps ArcGIS REST. Refreshed weekly in CI.
 - **`mexico` (SENER / ex-CNH SIH):** 1960–present field-level production (default, ~18 MB CSV) plus optional well-level parser (`PRODUCCION_POZOS.zip`, 1930–present); field polygons, installations, and regional well shapefiles via `mapa-hidrocarburos.energia.gob.mx`. Refreshed weekly in CI.
+- **`uk` (NSTA):** 1975–present field/reporting-unit monthly oil, condensate, associated + dry gas, produced water, and water/gas injection via NSTA's hosted PPRS ArcGIS FeatureServer (offshore + onshore); offshore & onshore field polygons, offshore surface facilities, and offshore & onshore wellbore top holes (WGS84). Refreshed weekly in CI under the NSTA User Agreement (non-commercial reuse with attribution).
 
 ---
 
@@ -97,10 +98,10 @@ Already implemented in `src/ogprod/sources/` and documented in [data-architectur
 
 ---
 
-### 2. United Kingdom — NSTA (North Sea Transition Authority)
+### 2. United Kingdom — NSTA (North Sea Transition Authority) *(Built in v2)*
 
-- **Suggested slug:** `uk` (`GB`)
-- **Why high priority:** Completes the North Sea alongside Norway (`norway`) with an equally rich offshore dataset and a clean ArcGIS Open Data Hub.
+- **Slug:** `uk` (`GB`) — **implemented in `src/ogprod/sources/uk.py`** (see [data-architecture.md](data-architecture.md#34-priority-4--united-kingdom-nsta)).
+- **Why high priority:** Completes the UK North Sea + UK onshore alongside Norway (`norway`) with an equally rich offshore/onshore dataset and a clean ArcGIS Open Data Hub.
 - **Production:**
   - Monthly field-level production & injection via **PPRS** (*Petroleum Production Reporting System*, PON 7), published on the NSTA Open Data Hub as `UKCS hydrocarbon field production reports PPRS points (WGS84)` — upgraded in late 2025/2026 to a hosted ArcGIS Feature Service with direct CSV download and REST query pagination.
   - Covers offshore oil, dry gas, condensate/NGL, produced water, and water/gas injection (unit types include *Oil Field Exporting to Pipeline*, *Oil Tanker to Loader*, *Dry Gas Fields*, and *Onshore Oil Field*), 1975–present (~3-month lag).

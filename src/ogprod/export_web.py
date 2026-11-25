@@ -47,6 +47,11 @@ _LICENCES: dict[str, tuple[str, str]] = {
         "Datos Abiertos (Libre Uso MX) — SENER / CNIH (with Pemex data)",
         "https://sih-hidrocarburos.energia.gob.mx/",
     ),
+    "uk": (
+        "NSTA User Agreement (non-commercial) — Contains information provided by"
+        " the North Sea Transition Authority and/or other third parties.",
+        "https://www.nstauthority.co.uk/site-tools/access-to-information/",
+    ),
 }
 
 # Synced with site/src/lib/mapStyle.ts (MAP_LAYER_MIN_ZOOM).

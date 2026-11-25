@@ -639,7 +639,7 @@ class Store:
                 skipped += 1
                 continue
             dest = work_dir / remote.key
-            dl = base.download_file(http, remote.url, dest)
+            dl = connector.fetch_production(remote, dest, client=http)
             table = connector.parse_production(dl.path)
             batch.append(table)
             recorded[remote.key] = {
