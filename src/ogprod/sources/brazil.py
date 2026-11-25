@@ -1100,6 +1100,7 @@ class Brazil(base.Source):
     licence_url = "https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm"
     known_gaps = KNOWN_GAPS
     web_wells = True
+    search_all_wells = True
 
     def discover_production(
         self,

@@ -345,6 +345,8 @@ class Source(ABC):
     known_gaps: tuple[KnownGap, ...] = ()
     #: Include geo/wells in Layer-2 tiles (False for high-well-count onshore sources).
     web_wells: bool = True
+    #: Include non-producing wellbores in Layer-2 search/index.json (default: producing only).
+    search_all_wells: bool = False
 
     @abstractmethod
     def discover_production(

@@ -622,18 +622,29 @@ def test_search_index_excludes_non_producing_wells_and_tiles_respect_web_wells(
     export_web.export_web(data_dir=data_dir, out_dir=out_dir, skip_tiles=True)
 
     search = json.loads((out_dir / "search" / "index.json").read_text("utf-8"))
-    indexed_wells = [(e["s"], e["id"]) for e in search if e["t"] == "well"]
-    assert indexed_wells == [("brazil", "7-BUZ-1-RJS")]
+    well_entries = [e for e in search if e["t"] == "well"]
+    indexed_wells = [(e["s"], e["id"]) for e in well_entries]
+    # Brazil indexes all wells (producing ranked ahead of non-producing); other sources exclude
+    # non-producing wellbores from search/index.json.
+    assert indexed_wells == [("brazil", "7-BUZ-1-RJS"), ("brazil", "1-DRY-EXPL-RJS")]
+    by_well = {e["id"]: e for e in well_entries}
+    assert by_well["7-BUZ-1-RJS"]["fy"] == 2025
+    assert "fy" not in by_well["1-DRY-EXPL-RJS"]
+    assert "ly" not in by_well["1-DRY-EXPL-RJS"]
 
     tile_feats = export_web._well_tile_features(wells, {})
     tile_sources = {f["properties"]["source"] for f in tile_feats}
     assert tile_sources == {"brazil", "norway"}
     assert "mexico" not in tile_sources
 
-    # Verify every registered connector carries its own licence metadata.
+    # Verify every registered connector carries its own licence and well-policy metadata.
     for name in sources.available():
         conn = sources.get(name)
         assert conn.licence.strip()
         assert conn.licence_url.startswith("https://")
     assert sources.get("mexico").web_wells is False
     assert sources.get("brazil").web_wells is True
+    assert sources.get("brazil").search_all_wells is True
+    assert sources.get("norway").search_all_wells is False
+    assert sources.get("mexico").search_all_wells is False
+    assert sources.get("uk").search_all_wells is False

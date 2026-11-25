@@ -43,13 +43,18 @@ mirror) and Layer 2 (the static Web Explorer hosted on GitHub Pages) very differ
      opt-in flag, following `mexico.py`) without pushing millions of well rows to the public
      mirror or static site.
 
-2. **Index and query only producing well series in the Web Explorer:**
-   - `export_web` includes a well in `search/index.json` only when it has well-level
-     production history (avoiding dead-end search hits for exploration/dry wellbores and
-     field-level-only sources).
-   - The frontend skips DuckDB-WASM Parquet queries when a clicked wellbore belongs to a
-     field-level source (`entity_type !== "well"`) or has no recorded production years,
-     displaying static wellbore metadata instead.
+2. **Index and query only producing well series in the Web Explorer (with Brazil exception):**
+   - By default, `export_web` includes a well in `search/index.json` only when it has
+     well-level production history (avoiding dead-end search hits for field-level-only sources
+     and non-producing wellbores).
+   - **Exception (`Brazil.search_all_wells = True`):** because Brazil is the primary audience
+     and exploratory/non-producing ANP wells are frequently looked up by name, all Brazilian
+     wells remain indexed in `search/index.json` (producing wells still rank first by latest
+     oil rate).
+   - The frontend skips DuckDB-WASM Parquet queries when a clicked or searched wellbore
+     belongs to a field-level source (`entity_type !== "well"`) or has no recorded production
+     years (`fy`/`ly`), flying to its coordinates and displaying wellbore metadata without
+     scanning remote Parquet files.
 
 3. **Split-line `"All Sources"` overview instead of a summed total:**
    - On the `"All Sources"` overview (`activeSource === null`, `selection.kind === "overview"`),

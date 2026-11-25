@@ -285,6 +285,11 @@ def _source_exports_web_wells(source_name: str) -> bool:
     return conn.web_wells if conn is not None else True
 
 
+def _source_searches_all_wells(source_name: str) -> bool:
+    conn = _connector_for_source(source_name)
+    return conn.search_all_wells if conn is not None else False
+
+
 def _known_gaps_for_source(source_name: str) -> list[dict[str, Any]]:
     conn = _connector_for_source(source_name)
     if conn is None:
@@ -619,25 +624,27 @@ def _build_search_index(
             )
         )
     for _, row in wells_gdf.iterrows():
-        key = (str(row["source"]), str(row["well_id"]))
+        src = str(row["source"])
+        key = (src, str(row["well_id"]))
         st = well_stats.get(key)
-        if st is None:
+        if st is None and not _source_searches_all_wells(src):
             continue
+        st_rec = st or {}
         lon, lat = _geom_lon_lat(row.geometry)
         entries.append(
             _compact_entry(
                 {
                     "t": "well",
-                    "s": key[0],
+                    "s": src,
                     "id": key[1],
                     "n": _str_opt(row.get("well_name")) or key[1],
                     "f": _str_opt(row.get("field_name")),
                     "b": _str_opt(row.get("basin")) or _str_opt(row.get("region")),
                     "lon": lon,
                     "lat": lat,
-                    "fy": _int_opt(st.get("first_year")),
-                    "ly": _int_opt(st.get("last_year")),
-                    "lo": _round_opt(st.get("latest_oil_bpd"), 1),
+                    "fy": _int_opt(st_rec.get("first_year")),
+                    "ly": _int_opt(st_rec.get("last_year")),
+                    "lo": _round_opt(st_rec.get("latest_oil_bpd"), 1),
                 }
             )
         )
