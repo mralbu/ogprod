@@ -10,6 +10,7 @@ from ogprod.sources import mexico as mexico
 from ogprod.sources import netherlands as netherlands
 from ogprod.sources import norway as norway
 from ogprod.sources import uk as uk
+from ogprod.sources import us_gom as us_gom
 from ogprod.sources.base import (
     DownloadResult,
     KnownGap,
@@ -35,4 +36,5 @@ __all__ = [
     "norway",
     "register",
     "uk",
+    "us_gom",
 ]

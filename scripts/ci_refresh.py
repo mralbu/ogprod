@@ -19,7 +19,14 @@ from scripts import publish_mirror
 
 #: Default sources refreshed on GitHub Actions; Brazil (ADR 0002) and Argentina
 #: (datos.energia.gob.ar timeouts from cloud/non-AR IPs) are excluded.
-DEFAULT_CI_SOURCES: tuple[str, ...] = ("norway", "mexico", "uk", "netherlands", "colombia")
+DEFAULT_CI_SOURCES: tuple[str, ...] = (
+    "norway",
+    "mexico",
+    "uk",
+    "netherlands",
+    "colombia",
+    "us-gom",
+)
 
 
 @dataclass(frozen=True)

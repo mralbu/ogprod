@@ -183,6 +183,17 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
 - **Geo (`EPSG:4326`, polygon-only `geo/fields`):**
   - `geo/fields`: official ANH RUTY reservoir ring-fence polygons (`Yacimientos:Yacimientos` OGC WFS, 892 reservoirs dissolved by `field_id`, with `area_km2` computed in `EPSG:9377`), reconciled against Socrata field names via exact, loose normalized key (`UNIFICADO`/articles/plurals/abbreviations), unambiguous point-in-polygon, and unique `UNIFICADO` token matching (~99.2% of 2024 oil and ~97.8% of 2024 gas). Unreconciled fields keep `geometry = NULL` metadata rows (retaining `basin`, `region`, `operator`, and searchability without rendering point circles on the map). All geolocated fields are enriched with `basin` and `environment` from ANH Geovisor's `Cuenca Sedimentaria` polygons (`GEOVISOR_v32/ANH_InsGDB/MapServer/4`, `maxAllowableOffset=0.001`).
 
+### 3.8 Priority 8 — USA Federal Offshore Gulf of Mexico (BSEE / BOEM *OGOR-A*)
+
+- **Production (`data.bsee.gov/Main/OGOR-A.aspx`, 1996–present, US federal public domain):**
+  - Well-level monthly volumes (`entity_type = "well"`, `web_wells = True`, `search_all_wells = False` per [ADR 0011](adr/0011-multi-country-scaling-and-overview.md)) from fixed 19-column headerless comma-delimited ASCII ZIPs (`ogora{YYYY}delimit.zip` plus rolling `ogoradelimit.zip`): crude oil (`MON_O_PROD_VOL`, bbl → `bbl/d`), gas (`MON_G_PROD_VOL`, Mcf → `e3m3/d`), and produced water (`MON_WTR_PROD_VOL`, bbl → `bbl/d`).
+  - Multiple completions/intervals per well are summed to `(API_WELL_NUMBER, field_id, period)` and ~40% all-zero status rows are dropped. `INJECTION_VOLUME` is ignored because OGOR-A does not distinguish injected fluid type.
+  - `basin` is left `NULL` and `region` carries the expanded BOEM OCS protraction area name (e.g. `Mississippi Canyon`, `Green Canyon`, `Walker Ridge`, `Keathley Canyon`) per [ADR 0010](adr/0010-basin-and-region-enrichment.md).
+- **Geo (`EPSG:4267` NAD 27 → `EPSG:4326`, all three layers):**
+  - `geo/fields`: BOEM clipped OCS block polygons (`blk_clip.zip`) joined to BOEM's Field-to-Block master list (`mastdatadelimit.zip`) and dissolved by `FIELD_NAME_CODE` (~1,485 block-dissolved field ring-fence polygons, `area_km2` in `EPSG:5070`), enriched with official field nicknames (`appendcdelimit.zip`, e.g. `Mars-Ursa (MC807)`, `Thunder Horse (MC778)`, `Atlantis (GC743)`). Unmatched fields stay as `geometry = NULL` metadata rows.
+  - `geo/facilities`: BSEE Platform Structures (`PlatStrucRawData.zip` → `mv_platstruc_structures.txt`, ~7,091 structures with water depth ft → m, structure type, operator, install/removal dates).
+  - `geo/wells`: BSEE Boreholes (`BoreholeRawData.zip` → `mv_boreholes_all.txt`, filtered to `REGION_CODE == "G"`, ~55.6k Gulf boreholes with 12-digit `API_WELL_NUMBER`, status, operator, and spud/TD dates).
+
 ---
 
 ## 4. Web Viz Data Contract (Layer 2)
