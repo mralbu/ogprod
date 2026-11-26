@@ -254,6 +254,50 @@ def _sample_yacimientos_geojson() -> dict[str, object]:
             {
                 "type": "Feature",
                 "properties": {
+                    "CAMPO_ID": "202",
+                    "CAMPO": "CASTILLA UNIFICADO",
+                    "FORMACION": "GUADALUPE",
+                    "ESTADO_YACIMIENTO": "ACTIVO",
+                    "TIPO_HIDROCARBURO": "PETROLEO",
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [-72.80, 3.80],
+                            [-72.70, 3.80],
+                            [-72.70, 3.90],
+                            [-72.80, 3.90],
+                            [-72.80, 3.80],
+                        ]
+                    ],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {
+                    "CAMPO_ID": "303",
+                    "CAMPO": "UNIFICADO COSTAYACO - VONU",
+                    "FORMACION": "CABALLOS",
+                    "ESTADO_YACIMIENTO": "ACTIVO",
+                    "TIPO_HIDROCARBURO": "PETROLEO",
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [-72.30, 3.50],
+                            [-72.20, 3.50],
+                            [-72.20, 3.60],
+                            [-72.30, 3.60],
+                            [-72.30, 3.50],
+                        ]
+                    ],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {
                     "CAMPO_ID": "999",
                     "CAMPO": "RUTY ONLY FIELD",
                     "FORMACION": "MIRADOR",
@@ -281,6 +325,9 @@ def test_fetch_and_parse_geo_fields_with_basins(tmp_path: Path) -> None:
     oil_csv = (
         "campo,departamento,operadora,longitud,latitud,last_year\n"
         "RUBIALES,META,ECOPETROL S.A.,-71.4656,3.7952,2026\n"
+        "CASTILLA,META,ECOPETROL S.A.,-72.75,3.85,2026\n"
+        "CASTILLA NORTE,META,ECOPETROL S.A.,-72.72,3.88,2026\n"
+        "COSTAYACO,PUTUMAYO,GRAN TIERRA,-72.90,3.10,2026\n"
         "NO COORD FIELD,META,ECOPETROL S.A.,0,0,2025\n"
         "NON PROSPECTIVE,CAUCA,OP,-75.0,1.5,2024\n"
     )
@@ -309,9 +356,13 @@ def test_fetch_and_parse_geo_fields_with_basins(tmp_path: Path) -> None:
         downloads = src.fetch_geo(schema.GeoKind.FIELDS, tmp_path, client=client)
 
     gdf = src.parse_geo(schema.GeoKind.FIELDS, [d.path for d in downloads]).set_index("field_id")
-    assert len(gdf) == 5
+    # 7 Socrata fields + 1 unclaimed RUTY-only field (claimed aliases CASTILLA UNIFICADO &
+    # UNIFICADO COSTAYACO - VONU are dropped so 0-rate aliases never cover active fields).
+    assert len(gdf) == 8
+    assert "CASTILLA UNIFICADO" not in gdf.index
+    assert "UNIFICADO COSTAYACO - VONU" not in gdf.index
 
-    # Rubiales gets dissolved RUTY polygon + area_km2 + field_code + status.
+    # Exact match: Rubiales gets dissolved RUTY polygon + area_km2 + field_code + status.
     rub = gdf.loc["RUBIALES"]
     assert rub.geometry.geom_type in {"Polygon", "MultiPolygon"}
     assert rub["field_code"] == "101"
@@ -322,14 +373,24 @@ def test_fetch_and_parse_geo_fields_with_basins(tmp_path: Path) -> None:
     assert rub["region"] == "Meta"
     assert rub["primary_fluid"] == "oil_and_gas"
 
-    # Non-RUTY field falls back to Socrata Point.
+    # Loose UNIFICADO match (CASTILLA) and spatial point-in-polygon match (CASTILLA NORTE).
+    assert gdf.loc["CASTILLA"].geometry.geom_type in {"Polygon", "MultiPolygon"}
+    assert gdf.loc["CASTILLA"]["field_code"] == "202"
+    assert gdf.loc["CASTILLA NORTE"].geometry.geom_type in {"Polygon", "MultiPolygon"}
+    assert gdf.loc["CASTILLA NORTE"]["field_code"] == "202"
+
+    # Unique UNIFICADO token match (COSTAYACO -> UNIFICADO COSTAYACO - VONU).
+    assert gdf.loc["COSTAYACO"].geometry.geom_type in {"Polygon", "MultiPolygon"}
+    assert gdf.loc["COSTAYACO"]["field_code"] == "303"
+
+    # Unreconciled field keeps geometry=None while preserving basin & environment from its point.
     chu = gdf.loc["CHUCHUPA"]
-    assert chu.geometry.geom_type == "Point"
+    assert chu.geometry is None
     assert chu["basin"] == "Guajira Offshore"
     assert chu["environment"] == "offshore"
     assert chu["primary_fluid"] == "gas"
 
-    # RUTY-only field retains its polygon, basin, and primary_fluid.
+    # Unclaimed RUTY-only field retains its polygon, basin, and primary_fluid.
     ruty_only = gdf.loc["RUTY ONLY FIELD"]
     assert ruty_only.geometry.geom_type in {"Polygon", "MultiPolygon"}
     assert ruty_only["basin"] == "Llanos Orientales"
@@ -340,6 +401,7 @@ def test_fetch_and_parse_geo_fields_with_basins(tmp_path: Path) -> None:
     assert no_coord["primary_fluid"] == "oil"
 
     non_prosp = gdf.loc["NON PROSPECTIVE"]
+    assert non_prosp.geometry is None
     assert non_prosp["basin"] is None or str(non_prosp["basin"]) == "<NA>"
 
     with pytest.raises(NotImplementedError):

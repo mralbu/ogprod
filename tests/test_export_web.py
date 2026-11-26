@@ -270,7 +270,7 @@ def test_tile_features_build_geojson_dicts_matching_to_geojson(
         crs="EPSG:4326",
     )
 
-    poly_feats, _, centroid_feats = export_web._field_tile_features(fields, {})
+    poly_feats, centroid_feats = export_web._field_tile_features(fields, {})
     fac_feats = export_web._facility_tile_features(facs, {})
     well_feats = export_web._well_tile_features(wells, {})
 
@@ -465,7 +465,7 @@ def test_export_web_basin_rollup_falls_back_to_field_basin_and_region(tmp_path: 
     assert by_id[("mexico", "MALOOB")]["b"] == "CUENCAS DEL SURESTE"
     assert by_id[("norway", "26376286")]["b"] == "North Sea"
 
-    poly_feats, _, _ = export_web._field_tile_features(fields, {})
+    poly_feats, _ = export_web._field_tile_features(fields, {})
     by_tile_id = {(f["properties"]["source"], f["properties"]["field_id"]): f for f in poly_feats}
     assert by_tile_id[("mexico", "MALOOB")]["properties"]["basin"] == "CUENCAS DEL SURESTE"
     assert by_tile_id[("norway", "26376286")]["properties"]["region"] == "North Sea"
@@ -525,7 +525,7 @@ def test_export_web_fields_summary_and_tiles_fallback_to_production_region(tmp_p
     with duckdb.connect() as con:
         store._register_store_views(con, data_dir)
         stats = export_web._load_entity_stats(con)
-    poly_feats, _, _ = export_web._field_tile_features(uk_fields, stats["fields"])
+    poly_feats, _ = export_web._field_tile_features(uk_fields, stats["fields"])
     assert poly_feats[0]["properties"]["region"] == "West of Shetland"
 
 
@@ -648,27 +648,3 @@ def test_search_index_excludes_non_producing_wells_and_tiles_respect_web_wells(
     assert sources.get("norway").search_all_wells is False
     assert sources.get("mexico").search_all_wells is False
     assert sources.get("uk").search_all_wells is False
-
-
-def test_field_tile_features_routes_point_and_polygon_fields() -> None:
-    fields = gpd.GeoDataFrame(
-        {
-            "source": ["brazil", "colombia"],
-            "field_id": ["BUZIOS", "RUBIALES"],
-            "field_name": ["Búzios", "Rubiales"],
-            "basin": ["Santos", "Llanos Orientales"],
-            "region": ["Rio de Janeiro", "Meta"],
-            "operator": ["Petrobras", "Ecopetrol"],
-            "environment": ["offshore", "onshore"],
-            "status": ["Produção", None],
-        },
-        geometry=[
-            shapely.box(-42.6, -24.6, -42.4, -24.4),
-            shapely.Point(-71.4656, 3.7952),
-        ],
-        crs="EPSG:4326",
-    )
-    poly_feats, point_feats, centroid_feats = export_web._field_tile_features(fields, {})
-    assert [f["properties"]["field_id"] for f in poly_feats] == ["BUZIOS"]
-    assert [f["properties"]["field_id"] for f in point_feats] == ["RUBIALES"]
-    assert {f["properties"]["field_id"] for f in centroid_feats} == {"BUZIOS", "RUBIALES"}

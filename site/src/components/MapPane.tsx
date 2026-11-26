@@ -193,7 +193,7 @@ export function MapPane({
     });
 
     const getInteractiveLayers = () =>
-      ["facilities-symbol", "wells-circle", "fields-point", "fields-fill"].filter((id) =>
+      ["facilities-symbol", "wells-circle", "fields-fill"].filter((id) =>
         Boolean(map.getLayer(id)),
       );
 
@@ -294,7 +294,6 @@ export function MapPane({
     const toggles: [string, boolean][] = [
       ["fields-fill", showFields],
       ["fields-outline", showFields],
-      ["fields-point", showFields],
       ["fields-label", showFields],
       ["facilities-symbol", showFacilities],
       ["wells-circle", showWells],
@@ -307,7 +306,6 @@ export function MapPane({
 
     const selectionToggles: [string, "field" | "facility" | "well", boolean][] = [
       ["fields-selected", "field", showFields],
-      ["fields-point-selected", "field", showFields],
       ["facilities-selected", "facility", showFacilities],
       ["wells-selected", "well", showWells],
     ];

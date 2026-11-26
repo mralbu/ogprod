@@ -276,10 +276,10 @@ the upstream terms for each source partition they use:
   Attribution: Credit Agencia Nacional de Hidrocarburos (ANH) / datos.gov.co.
   Modifications: ogprod summed multi-municipality rows to field-month grain, converted
                  monthly barrels and thousand cubic feet (kpc) to calendar-day average
-                 rates (bbl/d, e3m3/d), dissolved ANH RUTY reservoir polygons to field
-                 grain with Socrata point fallback (replacing (0, 0) with NULL), and
-                 enriched fields with ANH sedimentary basin and onshore/offshore
-                 attributes in GeoParquet 1.1 (EPSG:4326).
+                 rates (bbl/d, e3m3/d), dissolved and reconciled ANH RUTY reservoir
+                 polygons to Socrata field IDs (retaining geometry=NULL metadata rows
+                 for unreconciled fields), and enriched fields with ANH sedimentary
+                 basin and onshore/offshore attributes in GeoParquet 1.1 (EPSG:4326).
 
 3. Disclaimer
 -------------

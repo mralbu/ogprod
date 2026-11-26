@@ -9,11 +9,13 @@ covering January 2014 to present:
   Mcf) -> ``e3m3/d`` via exact ISO ``0.028316846592 e3m3/Mcf``.
 - Fields (`geo/fields`): official ANH RUTY reservoir ring-fence polygons from the
   public ``Yacimientos:Yacimientos`` OGC WFS dissolved to field grain (with
-  ``area_km2`` computed in ``EPSG:9377``), falling back to Socrata field ``Point``
-  coordinates (with ``(0, 0)`` mapped to ``NULL``) for fields not yet in RUTY,
-  all enriched with sedimentary basin polygons and onshore/offshore classification
-  from ANH Geovisor's ``Cuenca Sedimentaria`` layer
-  (``GEOVISOR_v32/ANH_InsGDB/MapServer/4``).
+  ``area_km2`` computed in ``EPSG:9377``), reconciled against Socrata field names
+  (exact, normalized loose key, unambiguous point-in-polygon, and unique
+  ``UNIFICADO`` resolution matching) and enriched with sedimentary basin polygons
+  and onshore/offshore classification from ANH Geovisor's ``Cuenca Sedimentaria``
+  layer (``GEOVISOR_v32/ANH_InsGDB/MapServer/4``). Unreconciled fields retain
+  ``geometry = NULL`` metadata rows (preserving basin, region, operator, and
+  searchability without rendering point circles on the map).
 
 Production is field-level (``entity_type = "field"``, ``web_wells = False`` per
 ADR 0011). Rows spanning multiple municipalities for the same field and month
@@ -26,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -637,41 +640,152 @@ def _build_socrata_points(frames: list[pd.DataFrame]) -> gpd.GeoDataFrame:
     )
 
 
+_DIR_ABBREV: dict[str, str] = {
+    "SW": "SOUTHWEST",
+    "SE": "SOUTHEAST",
+    "NW": "NORTHWEST",
+    "NE": "NORTHEAST",
+}
+_RECONCILE_STOP_WORDS = frozenset(
+    {"UNIFICADO", "EXPLORATORIO", "AREA", "CAMPO", "LA", "LAS", "EL", "LOS", "Y", "DE", "DEL"}
+)
+_NON_ALNUM_RE = re.compile(r"[^A-Z0-9]+")
+
+
+def _loose_field_key(field_id: str) -> str:
+    tokens = [t for t in _NON_ALNUM_RE.split(field_id) if t and t not in _RECONCILE_STOP_WORDS]
+    norm = [
+        _DIR_ABBREV.get(t, t).rstrip("S") if len(t) > 3 else _DIR_ABBREV.get(t, t) for t in tokens
+    ]
+    return "".join(norm)
+
+
+def _spatial_ruty_matches(
+    points_gdf: gpd.GeoDataFrame,
+    polys_gdf: gpd.GeoDataFrame,
+) -> dict[str, str]:
+    """Match Socrata field points that fall inside a unique (or token-matching) RUTY polygon."""
+    has_pt = points_gdf.geometry.notna() & ~points_gdf.geometry.is_empty
+    if not has_pt.any() or polys_gdf.empty:
+        return {}
+    joined = gpd.sjoin(
+        points_gdf.loc[has_pt, ["field_id", "geometry"]],
+        polys_gdf[["field_id", "geometry"]],
+        how="left",
+        predicate="intersects",
+    )
+    matches: dict[str, str] = {}
+    for fid, grp in joined.dropna(subset=["field_id_right"]).groupby("field_id_left"):
+        cands = sorted(grp["field_id_right"].astype(str).unique())
+        if len(cands) == 1:
+            matches[str(fid)] = cands[0]
+            continue
+        toks = {t for t in _NON_ALNUM_RE.split(str(fid)) if len(t) >= 3}
+        hits = [c for c in cands if toks & {t for t in _NON_ALNUM_RE.split(c) if len(t) >= 3}]
+        if len(hits) == 1:
+            matches[str(fid)] = hits[0]
+    return matches
+
+
+def _unificado_match(field_id: str, unif_ids: list[str]) -> str | None:
+    toks = [
+        t for t in _NON_ALNUM_RE.split(field_id) if len(t) >= 4 and t not in _RECONCILE_STOP_WORDS
+    ]
+    if not toks:
+        return None
+    hits = [u for u in unif_ids if all(re.search(rf"\b{re.escape(t)}\b", u) for t in toks)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _build_ruty_reconciliation(
+    points_gdf: gpd.GeoDataFrame,
+    polys_gdf: gpd.GeoDataFrame,
+) -> dict[str, str]:
+    """Map Socrata ``field_id`` -> matching RUTY ``field_id`` using name + spatial rules."""
+    yac_set = set(polys_gdf["field_id"].astype(str))
+    lkey_counts = polys_gdf["field_id"].astype(str).map(_loose_field_key)
+    lkey_map = {
+        lk: str(grp.iloc[0])
+        for lk, grp in polys_gdf["field_id"].groupby(lkey_counts)
+        if lk and len(grp) == 1
+    }
+    spatial_map = _spatial_ruty_matches(points_gdf, polys_gdf)
+    unif_ids = sorted(fid for fid in yac_set if "UNIFICADO" in fid)
+
+    mapping: dict[str, str] = {}
+    for fid in points_gdf["field_id"].astype(str):
+        if fid in yac_set:
+            mapping[fid] = fid
+        elif (lk := _loose_field_key(fid)) in lkey_map:
+            mapping[fid] = lkey_map[lk]
+        elif fid in spatial_map:
+            mapping[fid] = spatial_map[fid]
+        elif (unif := _unificado_match(fid, unif_ids)) is not None:
+            mapping[fid] = unif
+    return mapping
+
+
 def _merge_points_and_polygons(
     points_gdf: gpd.GeoDataFrame,
     polys_gdf: gpd.GeoDataFrame | None,
 ) -> gpd.GeoDataFrame:
+    """Attach reconciled RUTY polygons to Socrata fields; keep ``None`` for unmatched fields."""
     if polys_gdf is None or polys_gdf.empty:
         out = points_gdf.copy()
         out["source"] = "colombia"
+        out["geometry"] = gpd.GeoSeries([None] * len(out), index=out.index, crs=schema.GEO_CRS)
         return out
     if points_gdf.empty:
         out = polys_gdf.copy()
         out["source"] = "colombia"
         return out
 
-    pts = pd.DataFrame(points_gdf).rename(columns={"geometry": "pt_geom"})
-    ply = pd.DataFrame(polys_gdf).rename(columns={"geometry": "poly_geom"})
-    merged = pts.merge(ply, on="field_id", how="outer", suffixes=("_pt", "_ply"))
-    geoms = [
-        pg if pg is not None and not pd.isna(pg) else ptg
-        for pg, ptg in zip(merged["poly_geom"], merged["pt_geom"], strict=True)
-    ]
-    return gpd.GeoDataFrame(
-        {
-            "source": "colombia",
-            "field_id": merged["field_id"],
-            "field_code": merged["field_code"],
-            "field_name": merged["field_name_pt"].combine_first(merged["field_name_ply"]),
-            "region": merged["region"],
-            "operator": merged["operator"],
-            "status": merged["status"],
-            "primary_fluid": merged["primary_fluid_pt"].combine_first(merged["primary_fluid_ply"]),
-            "area_km2": merged["area_km2"],
-        },
-        geometry=gpd.GeoSeries(geoms, crs=schema.GEO_CRS),
+    mapping = _build_ruty_reconciliation(points_gdf, polys_gdf)
+    pts = pd.DataFrame(points_gdf).drop(columns=["geometry"])
+    pts["ruty_id"] = pts["field_id"].map(mapping)
+
+    ply_lookup = polys_gdf.set_index("field_id")
+    matched = pts.merge(
+        ply_lookup[["field_code", "status", "primary_fluid", "area_km2", "geometry"]],
+        left_on="ruty_id",
+        right_index=True,
+        how="left",
+        suffixes=("_pt", "_ply"),
+    )
+    matched["source"] = "colombia"
+    matched["primary_fluid"] = matched["primary_fluid_pt"].combine_first(
+        matched["primary_fluid_ply"]
+    )
+    matched_geoms = [g if g is not None and not pd.isna(g) else None for g in matched["geometry"]]
+    socrata_gdf = gpd.GeoDataFrame(
+        matched[
+            [
+                "source",
+                "field_id",
+                "field_code",
+                "field_name",
+                "region",
+                "operator",
+                "status",
+                "primary_fluid",
+                "area_km2",
+            ]
+        ],
+        geometry=gpd.GeoSeries(matched_geoms, index=matched.index, crs=schema.GEO_CRS),
         crs=schema.GEO_CRS,
     )
+
+    # Keep unclaimed RUTY-only polygons (e.g. non-producing discoveries); drop RUTY aliases
+    # already claimed by one or more Socrata fields so 0-rate aliases never cover active fields.
+    claimed = set(mapping.values())
+    unclaimed = polys_gdf.loc[~polys_gdf["field_id"].isin(claimed)].copy()
+    if unclaimed.empty:
+        return socrata_gdf
+    unclaimed["source"] = "colombia"
+    unclaimed["region"] = pd.NA
+    unclaimed["operator"] = pd.NA
+    combined = pd.concat([socrata_gdf, unclaimed], ignore_index=True)
+    return gpd.GeoDataFrame(combined, geometry="geometry", crs=schema.GEO_CRS)
 
 
 def _parse_fields_geo(paths: list[Path]) -> gpd.GeoDataFrame:
@@ -695,8 +809,20 @@ def _parse_fields_geo(paths: list[Path]) -> gpd.GeoDataFrame:
     if points_gdf.empty and (polys_gdf is None or polys_gdf.empty):
         return schema.empty_geo(schema.GeoKind.FIELDS)
 
+    # Enrich Socrata points with basins BEFORE dropping unmatched Point geometries so
+    # geometry=NULL fields (e.g. Velásquez, Cupiagua Liria) still roll up into their basin.
+    pt_basins = (
+        _enrich_fields_with_basins(points_gdf, basins_path) if not points_gdf.empty else None
+    )
     combined = _merge_points_and_polygons(points_gdf, polys_gdf)
     enriched = _enrich_fields_with_basins(combined, basins_path)
+    if pt_basins is not None and not pt_basins.empty:
+        b_map = dict(zip(pt_basins["field_id"], pt_basins["basin"], strict=True))
+        e_map = dict(zip(pt_basins["field_id"], pt_basins["environment"], strict=True))
+        enriched["basin"] = enriched["basin"].combine_first(enriched["field_id"].map(b_map))
+        enriched["environment"] = enriched["environment"].combine_first(
+            enriched["field_id"].map(e_map)
+        )
     return geo.prepare_geo(enriched, schema.GeoKind.FIELDS)
 
 

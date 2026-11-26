@@ -18,7 +18,7 @@ All production and injection columns are stored as **calendar-day average rates*
 
 Geospatial tables are stored as Hilbert-sorted **GeoParquet 1.1** (`EPSG:4326`, with `bbox` covering column):
 
-- `store/geo/fields/<source>.parquet` (`Polygon` / `MultiPolygon`, or `Point` for point-only sources such as `colombia`)
+- `store/geo/fields/<source>.parquet` (`Polygon` / `MultiPolygon`, e.g. `brazil.parquet`)
 - `store/geo/facilities/<source>.parquet` (`Point` — platforms / FPSOs)
 - `store/geo/wells/<source>.parquet` (`Point`)
 
@@ -32,7 +32,7 @@ Geospatial tables are stored as Hilbert-sorted **GeoParquet 1.1** (`EPSG:4326`, 
 | `uk` | United Kingdom (`GB`) | NSTA (1975–present) | Field (oil, cond, gas, water + water/gas inj) | Fields (offshore + onshore), surface facilities, wellbores |
 | `argentina` | Argentina (`AR`) | Secretaría de Energía (2006–present) | Field rollup (default; oil, gas, water + water/gas/CO₂ inj) + local well parser | Fields (Yacimientos), wells (Capítulo IV) |
 | `netherlands` | Netherlands (`NL`) | NLOG / TNO (2003–present) | Well (oil, cond, gas, water + water/gas inj) | Fields, facilities/platforms, wells |
-| `colombia` | Colombia (`CO`) | ANH / `datos.gov.co` (2014–present) | Field (oil, gas) | Fields (RUTY polygons + point fallback, ANH basins) |
+| `colombia` | Colombia (`CO`) | ANH / `datos.gov.co` (2014–present) | Field (oil, gas) | Fields (RUTY polygons + ANH sedimentary basins) |
 
 ## Quickstart
 
