@@ -2,16 +2,16 @@ name: Update Mirror Data
 
 on:
   schedule:
-    # Weekly Monday 06:00 UTC rolling refresh for CI-reachable regulators (Norway, Mexico, UK, Netherlands, Colombia).
+    # Weekly Monday 06:00 UTC rolling refresh for CI-reachable regulators (Norway, Mexico, UK, Netherlands, Colombia, US GOM).
     # Brazil (www.gov.br) and Argentina (datos.energia.gob.ar) time out from cloud/non-AR IPs
     # and are updated locally via scripts/publish_mirror.py (or manually via workflow_dispatch).
     - cron: "0 6 * * 1"
   workflow_dispatch:
     inputs:
       sources:
-        description: "Comma-separated sources or 'all' (default: norway,mexico,uk,netherlands,colombia)"
+        description: "Comma-separated sources or 'all' (default: norway,mexico,uk,netherlands,colombia,us-gom)"
         required: false
-        default: "norway,mexico,uk,netherlands,colombia"
+        default: "norway,mexico,uk,netherlands,colombia,us-gom"
         type: string
       full_history:
         description: "Fetch full history instead of recent years for multi-file sources"
@@ -75,7 +75,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           args=(
-            --sources "${{ inputs.sources || 'norway,mexico,uk,netherlands,colombia' }}"
+            --sources "${{ inputs.sources || 'norway,mexico,uk,netherlands,colombia,us-gom' }}"
             --data-dir ./data
           )
           if [[ "${{ inputs.full_history }}" == "true" ]]; then args+=(--full-history); fi
