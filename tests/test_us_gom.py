@@ -121,7 +121,7 @@ def test_connector_registered() -> None:
     assert "us-gom" in sources.available()
     conn = sources.get("us-gom")
     assert conn.name == "us-gom"
-    assert conn.country == "United States"
+    assert conn.country == "US (GoM)"
     assert conn.country_code == "US"
     assert conn.entity_type is schema.EntityType.WELL
     assert conn.web_wells is True

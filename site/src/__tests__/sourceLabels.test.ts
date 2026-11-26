@@ -10,15 +10,18 @@ const SOURCES = [
   { id: "brazil", country: "Brazil" },
   { id: "norway", country: "Norway" },
   { id: "mexico", country: "Mexico" },
-  { id: "us-gom", country: "United States (GoM)" },
+  { id: "us-gom", country: "United States" },
 ] as unknown as SourceMeta[];
 
 describe("formatCountryName", () => {
-  it("resolves known source slugs from SiteMeta", () => {
+  it("resolves known source slugs from SiteMeta and qualifies sub-national sources", () => {
     expect(formatCountryName("brazil", SOURCES)).toBe("Brazil");
     expect(formatCountryName("norway", SOURCES)).toBe("Norway");
     expect(formatCountryName("mexico", SOURCES)).toBe("Mexico");
-    expect(formatCountryName("us-gom", SOURCES)).toBe("United States (GoM)");
+    expect(formatCountryName("us-gom", SOURCES)).toBe("US (GoM)");
+    expect(
+      formatCountryName("us-gom", [{ id: "us-gom", country: "US (GoM)" } as SourceMeta]),
+    ).toBe("US (GoM)");
   });
 
   it("falls back to Title Case for unknown slugs and handles blanks", () => {
@@ -31,15 +34,23 @@ describe("formatCountryName", () => {
 });
 
 describe("formatSourceDisplayName", () => {
-  it("keeps unique country names concise and disambiguates duplicate sub-national slugs", () => {
-    const multi = [
+  it("always qualifies sub-national slugs even when only one region is present", () => {
+    const singleUs = [
       { id: "brazil", country: "Brazil" },
       { id: "us-gom", country: "United States" },
-      { id: "us-ak", country: "United States" },
     ];
-    expect(formatSourceDisplayName(multi[0], multi)).toBe("Brazil");
-    expect(formatSourceDisplayName(multi[1], multi)).toBe("United States (GOM)");
-    expect(formatSourceDisplayName(multi[2], multi)).toBe("United States (AK)");
+    expect(formatSourceDisplayName(singleUs[0], singleUs)).toBe("Brazil");
+    expect(formatSourceDisplayName(singleUs[1], singleUs)).toBe("US (GoM)");
+
+    const multi = [
+      { id: "brazil", country: "Brazil" },
+      { id: "us-gom", country: "US (GoM)" },
+      { id: "us-ak", country: "United States" },
+      { id: "canada-nl", country: "Canada" },
+    ];
+    expect(formatSourceDisplayName(multi[1], multi)).toBe("US (GoM)");
+    expect(formatSourceDisplayName(multi[2], multi)).toBe("US (AK)");
+    expect(formatSourceDisplayName(multi[3], multi)).toBe("Canada (NL)");
   });
 });
 

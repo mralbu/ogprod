@@ -704,7 +704,7 @@ class UsGom(base.Source):
     """US Federal Offshore Gulf of Mexico connector (BSEE / BOEM OGOR-A)."""
 
     name = "us-gom"
-    country = "United States"
+    country = "US (GoM)"
     country_code = "US"
     publisher = "BSEE / BOEM (OGOR-A)"
     entity_type = schema.EntityType.WELL
