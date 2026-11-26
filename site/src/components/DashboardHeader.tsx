@@ -1,5 +1,5 @@
 import { ArrowLeft, Database, Download, ImageDown } from "lucide-react";
-import { formatCountryName } from "../lib/sourceLabels";
+import { formatCountryName, formatOverviewSubtitle } from "../lib/sourceLabels";
 import type {
   EntitySelection,
   FacilitySummary,
@@ -87,9 +87,7 @@ export function DashboardHeader({
               {selection.liftMethod ? ` · ${selection.liftMethod}` : ""}
             </>
           )}
-          {selection.kind === "overview" && (
-            <>{activeSourcesMeta.map((s) => `${s.country} (${s.publisher})`).join(" · ")}</>
-          )}
+          {selection.kind === "overview" && <>{formatOverviewSubtitle(activeSourcesMeta)}</>}
         </p>
       </div>
 

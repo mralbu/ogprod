@@ -110,7 +110,7 @@ export function TopBar({
               }
               className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-cyan-700 focus:bg-white focus:outline-none"
             >
-              <option value="__all__">All Sources ({sources.length})</option>
+              <option value="__all__">All</option>
               {sources.map((src) => (
                 <option key={src.id} value={src.id}>
                   {formatSourceDisplayName(src, sources)} ({src.country_code})

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatCountryName, formatSourceDisplayName } from "../lib/sourceLabels";
+import {
+  formatCountryName,
+  formatOverviewSubtitle,
+  formatSourceDisplayName,
+} from "../lib/sourceLabels";
 import type { SourceMeta } from "../types/data";
 
 const SOURCES = [
@@ -36,5 +40,32 @@ describe("formatSourceDisplayName", () => {
     expect(formatSourceDisplayName(multi[0], multi)).toBe("Brazil");
     expect(formatSourceDisplayName(multi[1], multi)).toBe("United States (GOM)");
     expect(formatSourceDisplayName(multi[2], multi)).toBe("United States (AK)");
+  });
+});
+
+describe("formatOverviewSubtitle", () => {
+  it("shows regulator count and year span for multi-source overview", () => {
+    expect(
+      formatOverviewSubtitle([
+        { publisher: "ANP", first_period: "1941-01-01", last_period: "2026-02-01" },
+        { publisher: "Sodir", first_period: "1971-06-01", last_period: "2026-09-01" },
+        { publisher: "BSEE / BOEM (OGOR-A)", first_period: "1996-01-01", last_period: "2026-09-01" },
+      ]),
+    ).toBe("3 public regulators · 1941–2026");
+  });
+
+  it("shows publisher and year span for a single source", () => {
+    expect(
+      formatOverviewSubtitle([
+        { publisher: "BSEE / BOEM (OGOR-A)", first_period: "1996-01-01", last_period: "2026-09-01" },
+      ]),
+    ).toBe("BSEE / BOEM (OGOR-A) · 1996–2026");
+  });
+
+  it("handles empty input and missing dates", () => {
+    expect(formatOverviewSubtitle([])).toBe("");
+    expect(
+      formatOverviewSubtitle([{ publisher: "ANH", first_period: null, last_period: null }]),
+    ).toBe("ANH");
   });
 });

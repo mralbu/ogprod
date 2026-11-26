@@ -38,3 +38,34 @@ export function formatSourceDisplayName(
   const qualifier = parts.length > 1 ? parts.slice(1).join(" ").toUpperCase() : source.id.toUpperCase();
   return `${base} (${qualifier})`;
 }
+
+function extractYear(period: string | null | undefined): number | null {
+  if (!period) return null;
+  const year = Number.parseInt(period.slice(0, 4), 10);
+  return Number.isFinite(year) ? year : null;
+}
+
+/**
+ * Format a compact overview subtitle:
+ * - Multiple sources: "7 public regulators · 1941–2026"
+ * - Single source: "BSEE / BOEM (OGOR-A) · 1996–2026"
+ */
+export function formatOverviewSubtitle(
+  sources: readonly Pick<SourceMeta, "publisher" | "first_period" | "last_period">[],
+): string {
+  if (sources.length === 0) return "";
+  const years = sources
+    .flatMap((s) => [extractYear(s.first_period), extractYear(s.last_period)])
+    .filter((y): y is number => y !== null);
+  const span =
+    years.length > 0
+      ? (() => {
+          const minY = Math.min(...years);
+          const maxY = Math.max(...years);
+          return minY === maxY ? `${minY}` : `${minY}–${maxY}`;
+        })()
+      : "";
+  const lead =
+    sources.length === 1 ? sources[0].publisher : `${sources.length} public regulators`;
+  return span ? `${lead} · ${span}` : lead;
+}
