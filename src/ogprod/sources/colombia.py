@@ -72,6 +72,11 @@ _SGC_WELLS_OUT_FIELDS = (
     "OPERATOR_W,COMPANY_CO,WELL_STA_1,WELL_SPUD_,WELL_COMPL,VISIBLE"
 )
 _SGC_WELLS_CHUNK_SIZE = 5_000
+_ANH_WELLS_QUERY_URL = (
+    "https://geovisor.anh.gov.co/server/rest/services/GEOVISOR_v32/ANH_InsGDB/MapServer/1/query"
+)
+_ANH_WELLS_OUT_FIELDS = "UWI,WELL_NAME,GEOLOGIC_P,VISIBLE"
+_ANH_WELLS_PAGE_SIZE = 2_000
 _COLOMBIA_METRIC_CRS = "EPSG:9377"
 
 FIRST_YEAR = 2014
@@ -914,6 +919,8 @@ def _well_record_from_feature(feat: dict[str, Any]) -> dict[str, Any] | None:
     country = schema.normalize_key(_clean_text(props.get("WELL_COUNT")))
     if country and country != "COLOMBIA":
         return None
+    if schema.normalize_key(_clean_text(props.get("GEOLOGIC_P"))) == "EXTRANJERO":
+        return None
 
     uwi = _clean_text(props.get("UWI"))
     well_name = _clean_text(props.get("WELL_NAME"))
@@ -941,6 +948,25 @@ def _well_record_from_feature(feat: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _write_wells_geojson(
+    features: list[dict[str, Any]],
+    dest: Path,
+    source_url: str,
+) -> base.DownloadResult:
+    merged = {"type": "FeatureCollection", "features": features}
+    payload = json.dumps(merged, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(f"{dest.name}.part")
+    part.write_bytes(payload)
+    part.replace(dest)
+    return base.DownloadResult(
+        path=dest,
+        url=source_url,
+        sha256=hashlib.sha256(payload).hexdigest(),
+        size_bytes=len(payload),
+    )
+
+
 def _fetch_sgc_wells_geojson(http: httpx2.Client, dest: Path) -> base.DownloadResult:
     """Download all SGC BIP wells via OBJECTID-range chunking into one GeoJSON file."""
     ids_params = urlencode({"where": "1=1", "returnIdsOnly": "true", "f": "json"})
@@ -965,18 +991,46 @@ def _fetch_sgc_wells_geojson(http: httpx2.Client, dest: Path) -> base.DownloadRe
         if isinstance(page_feats, list):
             features.extend(page_feats)
 
-    merged = {"type": "FeatureCollection", "features": features}
-    payload = json.dumps(merged, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    part = dest.with_name(f"{dest.name}.part")
-    part.write_bytes(payload)
-    part.replace(dest)
-    return base.DownloadResult(
-        path=dest,
-        url=ids_url,
-        sha256=hashlib.sha256(payload).hexdigest(),
-        size_bytes=len(payload),
-    )
+    return _write_wells_geojson(features, dest, ids_url)
+
+
+def _fetch_anh_wells_geojson(http: httpx2.Client, dest: Path) -> base.DownloadResult:
+    """Fallback: paginate ANH Geovisor's ``Pozos`` layer when SGC BIP is unreachable."""
+    features: list[dict[str, Any]] = []
+    offset = 0
+    first_url = ""
+    while True:
+        params = urlencode(
+            {
+                "where": "1=1",
+                "outFields": _ANH_WELLS_OUT_FIELDS,
+                "outSR": "4326",
+                "resultOffset": offset,
+                "resultRecordCount": _ANH_WELLS_PAGE_SIZE,
+                "orderByFields": "OBJECTID ASC",
+                "f": "geojson",
+            }
+        )
+        url = f"{_ANH_WELLS_QUERY_URL}?{params}"
+        if not first_url:
+            first_url = url
+        page = base.get_with_retry(http, url).json()
+        page_feats = page.get("features") or []
+        if not isinstance(page_feats, list) or not page_feats:
+            break
+        features.extend(page_feats)
+        if len(page_feats) < _ANH_WELLS_PAGE_SIZE:
+            break
+        offset += len(page_feats)
+    return _write_wells_geojson(features, dest, first_url or _ANH_WELLS_QUERY_URL)
+
+
+def _fetch_wells_geojson(http: httpx2.Client, dest: Path) -> base.DownloadResult:
+    """Prefer rich SGC BIP wellbores; fall back to ANH Geovisor when SGC returns 5xx/blocks CI."""
+    try:
+        return _fetch_sgc_wells_geojson(http, dest)
+    except httpx2.HTTPError:
+        return _fetch_anh_wells_geojson(http, dest)
 
 
 def _parse_wells_geo(paths: list[Path]) -> gpd.GeoDataFrame:
@@ -1097,7 +1151,7 @@ class Colombia(base.Source):
         """Download ANH RUTY field polygons/basins or SGC BIP wellbores."""
         if kind is schema.GeoKind.WELLS:
             with base.open_client(client) as http:
-                return [_fetch_sgc_wells_geojson(http, dest_dir / "colombia_wells.geojson")]
+                return [_fetch_wells_geojson(http, dest_dir / "colombia_wells.geojson")]
         if kind is not schema.GeoKind.FIELDS:
             return super().fetch_geo(kind, dest_dir, client=client)
 

@@ -542,6 +542,85 @@ def test_fetch_and_parse_wells_geo(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert chu["spud_date"] == "2008-03-15"
 
 
+def test_fetch_wells_falls_back_to_anh_geovisor_on_sgc_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(colombia, "_ANH_WELLS_PAGE_SIZE", 2)
+    monkeypatch.setattr(colombia.base, "get_with_retry", _no_backoff_get)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        url = str(request.url)
+        if "srvags.sgc.gov.co" in url:
+            return httpx2.Response(503)
+        if "ANH_InsGDB/MapServer/1/query" in url and "resultOffset=0" in url:
+            return httpx2.Response(
+                200,
+                json={
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [-72.665, 4.505]},
+                            "properties": {
+                                "UWI": "AZOG0006HZST1",
+                                "WELL_NAME": "AZOGUE-6HZ-ST1",
+                                "GEOLOGIC_P": "LLANOS ORIENTALES",
+                                "VISIBLE": "SI",
+                            },
+                        },
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [-71.0, 9.0]},
+                            "properties": {
+                                "UWI": "FORG0001",
+                                "WELL_NAME": "FOREIGN-1",
+                                "GEOLOGIC_P": "EXTRANJERO",
+                                "VISIBLE": "SI",
+                            },
+                        },
+                    ],
+                },
+            )
+        if "ANH_InsGDB/MapServer/1/query" in url and "resultOffset=2" in url:
+            return httpx2.Response(
+                200,
+                json={
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [-75.5, 10.2]},
+                            "properties": {
+                                "UWI": "SINU0001",
+                                "WELL_NAME": "SINU-OFF-1",
+                                "GEOLOGIC_P": "SINU-OFFSHORE",
+                                "VISIBLE": "SI",
+                            },
+                        }
+                    ],
+                },
+            )
+        return httpx2.Response(404)
+
+    src = colombia.Colombia()
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
+        downloads = src.fetch_geo(schema.GeoKind.WELLS, tmp_path, client=client)
+
+    assert "geovisor.anh.gov.co" in downloads[0].url
+    gdf = src.parse_geo(schema.GeoKind.WELLS, [d.path for d in downloads]).set_index("well_id")
+    assert set(gdf.index) == {"AZOG0006HZST1", "SINU0001"}
+    assert gdf.loc["AZOG0006HZST1"]["basin"] == "Llanos Orientales"
+    assert gdf.loc["AZOG0006HZST1"]["environment"] == "onshore"
+    assert gdf.loc["SINU0001"]["basin"] == "Sinú Offshore"
+    assert gdf.loc["SINU0001"]["environment"] == "offshore"
+
+
+def _no_backoff_get(client: httpx2.Client, url: str) -> httpx2.Response:
+    resp = client.get(url)
+    resp.raise_for_status()
+    return resp
+
+
 @given(
     year=st.integers(min_value=2014, max_value=2030),
     month=st.integers(min_value=1, max_value=12),
