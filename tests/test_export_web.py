@@ -597,22 +597,24 @@ def test_search_index_excludes_non_producing_wells_and_tiles_respect_web_wells(
     _seed_multi_source_store(data_dir)
 
     # Add a dry Brazil wellbore (no production), a Norway wellbore (field-level source,
-    # web_wells=True), and a Mexico wellbore (field-level onshore source, web_wells=False).
+    # web_wells=True), a Colombia wellbore (field-level source, web_wells=True), and a
+    # Mexico wellbore (field-level onshore source, web_wells=False).
     wells = gpd.GeoDataFrame(
         {
-            "source": ["brazil", "brazil", "norway", "mexico"],
-            "well_id": ["7-BUZ-1-RJS", "1-DRY-EXPL-RJS", "NO-WB-1", "MX-WELL-1"],
-            "well_name": ["7-BUZ-1-RJS", "1-DRY-EXPL-RJS", "16/2-6", "CANTARELL-1"],
-            "field_id": ["BUZIOS", "BUZIOS", "26376286", "MALOOB"],
-            "field_name": ["BÚZIOS", "BÚZIOS", "JOHAN SVERDRUP", "Maloob"],
-            "basin": ["Santos", "Santos", pd.NA, "CUENCAS DEL SURESTE"],
-            "environment": ["offshore", "offshore", "offshore", "onshore"],
-            "status": ["Produzindo", "Abandonado", "CLOSED", "ACTIVO"],
+            "source": ["brazil", "brazil", "norway", "colombia", "mexico"],
+            "well_id": ["7-BUZ-1-RJS", "1-DRY-EXPL-RJS", "NO-WB-1", "RUBI0087H", "MX-WELL-1"],
+            "well_name": ["7-BUZ-1-RJS", "1-DRY-EXPL-RJS", "16/2-6", "RUBIALES-87H", "CANTARELL-1"],
+            "field_id": ["BUZIOS", "BUZIOS", "26376286", "RUBIALES", "MALOOB"],
+            "field_name": ["BÚZIOS", "BÚZIOS", "JOHAN SVERDRUP", "RUBIALES", "Maloob"],
+            "basin": ["Santos", "Santos", pd.NA, "Llanos Orientales", "CUENCAS DEL SURESTE"],
+            "environment": ["offshore", "offshore", "offshore", "onshore", "onshore"],
+            "status": ["Produzindo", "Abandonado", "CLOSED", "Productor Activo", "ACTIVO"],
         },
         geometry=[
             shapely.Point(-42.52, -24.58),
             shapely.Point(-42.50, -24.55),
             shapely.Point(2.55, 58.80),
+            shapely.Point(-71.48, 3.87),
             shapely.Point(-92.20, 19.60),
         ],
         crs="EPSG:4326",
@@ -634,7 +636,7 @@ def test_search_index_excludes_non_producing_wells_and_tiles_respect_web_wells(
 
     tile_feats = export_web._well_tile_features(wells, {})
     tile_sources = {f["properties"]["source"] for f in tile_feats}
-    assert tile_sources == {"brazil", "norway"}
+    assert tile_sources == {"brazil", "norway", "colombia"}
     assert "mexico" not in tile_sources
 
     # Verify every registered connector carries its own licence and well-policy metadata.
@@ -644,7 +646,9 @@ def test_search_index_excludes_non_producing_wells_and_tiles_respect_web_wells(
         assert conn.licence_url.startswith("https://")
     assert sources.get("mexico").web_wells is False
     assert sources.get("brazil").web_wells is True
+    assert sources.get("colombia").web_wells is True
     assert sources.get("brazil").search_all_wells is True
+    assert sources.get("colombia").search_all_wells is False
     assert sources.get("norway").search_all_wells is False
     assert sources.get("mexico").search_all_wells is False
     assert sources.get("uk").search_all_wells is False

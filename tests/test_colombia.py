@@ -65,7 +65,7 @@ def test_colombia_registered_and_metadata() -> None:
     assert src.publisher == "ANH"
     assert src.entity_type is schema.EntityType.FIELD
     assert src.licence == "CC BY-SA 4.0"
-    assert src.web_wells is False
+    assert src.web_wells is True
     assert src.search_all_wells is False
 
 
@@ -406,8 +406,140 @@ def test_fetch_and_parse_geo_fields_with_basins(tmp_path: Path) -> None:
 
     with pytest.raises(NotImplementedError):
         src.fetch_geo(schema.GeoKind.FACILITIES, tmp_path)
-    with pytest.raises(NotImplementedError):
-        src.fetch_geo(schema.GeoKind.WELLS, tmp_path)
+
+
+def test_fetch_and_parse_wells_geo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(colombia, "_SGC_WELLS_CHUNK_SIZE", 2)
+    features_by_range = {
+        (10, 20): [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [-71.4817, 3.8654, 0, None]},
+                "properties": {
+                    "UWI": "RUBI0087H",
+                    "WELL_NAME": "RUBIALES-87H",
+                    "WELL_COUNT": "COLOMBIA",
+                    "DEPARTAMEN": "META",
+                    "FIELD_ABRE": "RUBIALES",
+                    "GEOLOGIC_P": "LLANOS ORIENTALES",
+                    "OPERATOR_W": "PENDIENTE",
+                    "COMPANY_CO": "ECOPETROL S.A.",
+                    "WELL_STA_1": "PRODUCTOR ACTIVO",
+                    "WELL_SPUD_": -2208970800000,  # 1900-01-01 sentinel -> null
+                    "WELL_COMPL": 1206403200000,  # 2008-03-25
+                    "VISIBLE": "SI",
+                },
+            },
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [-72.5, 11.8, 120, None]},
+                "properties": {
+                    "UWI": "CHUC0001",
+                    "WELL_NAME": "CHUCHUPA-1",
+                    "WELL_COUNT": "COLOMBIA",
+                    "DEPARTAMEN": "LA GUAJIRA",
+                    "FIELD_ABRE": "CHUCHUPA",
+                    "GEOLOGIC_P": "GUAJIRA-OFFSHORE",
+                    "OPERATOR_W": "CHEVRON",
+                    "COMPANY_CO": "ECOPETROL S.A.",
+                    "WELL_STA_1": "SIN ESTADO",
+                    "WELL_SPUD_": 1205557200000,  # 2008-03-15
+                    "WELL_COMPL": None,
+                    "VISIBLE": "SI",
+                },
+            },
+        ],
+        (30, 50): [
+            # Duplicate UWI with missing geometry should lose to the geolocated row above.
+            {
+                "type": "Feature",
+                "geometry": None,
+                "properties": {
+                    "UWI": "RUBI0087H",
+                    "WELL_NAME": "RUBIALES-87H",
+                    "WELL_COUNT": "COLOMBIA",
+                    "DEPARTAMEN": "META",
+                    "FIELD_ABRE": None,
+                    "GEOLOGIC_P": "LLANOS ORIENTALES",
+                    "OPERATOR_W": None,
+                    "COMPANY_CO": None,
+                    "WELL_STA_1": None,
+                    "WELL_SPUD_": None,
+                    "WELL_COMPL": None,
+                    "VISIBLE": "SI",
+                },
+            },
+            # Foreign border well -> filtered out.
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [-70.0, 8.0]},
+                "properties": {
+                    "UWI": "VENZ0001",
+                    "WELL_NAME": "VENEZUELA-1",
+                    "WELL_COUNT": "VENEZUELA",
+                    "VISIBLE": "SI",
+                },
+            },
+            # Hidden well -> filtered out.
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [-72.0, 4.0]},
+                "properties": {
+                    "UWI": "HIDN0001",
+                    "WELL_NAME": "HIDDEN-1",
+                    "WELL_COUNT": "COLOMBIA",
+                    "VISIBLE": "NO",
+                },
+            },
+        ],
+    }
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        url = str(request.url)
+        if "returnIdsOnly=true" in url:
+            return httpx2.Response(
+                200, json={"objectIdFieldName": "OBJECTID", "objectIds": [50, 10, 30, 20]}
+            )
+        if "OBJECTID%3E%3D10" in url and "OBJECTID%3C%3D20" in url:
+            return httpx2.Response(
+                200, json={"type": "FeatureCollection", "features": features_by_range[(10, 20)]}
+            )
+        if "OBJECTID%3E%3D30" in url and "OBJECTID%3C%3D50" in url:
+            return httpx2.Response(
+                200, json={"type": "FeatureCollection", "features": features_by_range[(30, 50)]}
+            )
+        return httpx2.Response(404)
+
+    src = colombia.Colombia()
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
+        downloads = src.fetch_geo(schema.GeoKind.WELLS, tmp_path, client=client)
+
+    assert len(downloads) == 1
+    assert downloads[0].path.name == "colombia_wells.geojson"
+
+    gdf = src.parse_geo(schema.GeoKind.WELLS, [d.path for d in downloads]).set_index("well_id")
+    assert set(gdf.index) == {"RUBI0087H", "CHUC0001"}
+
+    rub = gdf.loc["RUBI0087H"]
+    assert rub.geometry.geom_type == "Point"
+    assert not rub.geometry.has_z
+    assert rub["well_name"] == "RUBIALES-87H"
+    assert rub["field_id"] == "RUBIALES"
+    assert rub["basin"] == "Llanos Orientales"
+    assert rub["region"] == "Meta"
+    assert rub["environment"] == "onshore"
+    assert rub["operator"] == "ECOPETROL S.A."
+    assert rub["status"] == "Productor Activo"
+    assert pd.isna(rub["spud_date"])
+    assert rub["completion_date"] == "2008-03-25"
+
+    chu = gdf.loc["CHUC0001"]
+    assert chu["basin"] == "Guajira Offshore"
+    assert chu["region"] == "Guajira"
+    assert chu["environment"] == "offshore"
+    assert chu["operator"] == "CHEVRON"
+    assert pd.isna(chu["status"])
+    assert chu["spud_date"] == "2008-03-15"
 
 
 @given(

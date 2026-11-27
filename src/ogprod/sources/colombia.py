@@ -17,10 +17,17 @@ covering January 2014 to present:
   ``geometry = NULL`` metadata rows (preserving basin, region, operator, and
   searchability without rendering point circles on the map).
 
-Production is field-level (``entity_type = "field"``, ``web_wells = False`` per
-ADR 0011). Rows spanning multiple municipalities for the same field and month
-(including ``MunicipiosNN`` unallocated rows) are summed to a single canonical
-``(field_id, period)`` row.
+- Wells (`geo/wells`): official Colombian Petroleum Information Bank (BIP / SGC —
+  Servicio Geológico Colombiano, ``EPIS/EPIS_V2/MapServer/0``) hydrocarbon wellbores
+  (~27.5k wells, ``EPSG:4326``) with UWI, well name, field, basin, department,
+  operator, status, and spud/completion dates.
+
+Production is field-level (``entity_type = "field"``). Per ADR 0011, Colombia's
+~27.5k wells sit below the 30k map-tile threshold so ``web_wells = True`` (wells
+appear on the map) while ``search_all_wells = False`` (wells stay out of
+``search/index.json``). Rows spanning multiple municipalities for the same field
+and month (including ``MunicipiosNN`` unallocated rows) are summed to a single
+canonical ``(field_id, period)`` row.
 """
 
 from __future__ import annotations
@@ -57,6 +64,14 @@ _BASINS_QUERY_URL = (
 _YACIMIENTOS_WFS_URL = (
     "https://geovisor.anh.gov.co/server/services/Yacimientos/Yacimientos/MapServer/WFSServer"
 )
+_SGC_WELLS_QUERY_URL = (
+    "https://srvags.sgc.gov.co/arcgis/rest/services/EPIS/EPIS_V2/MapServer/0/query"
+)
+_SGC_WELLS_OUT_FIELDS = (
+    "UWI,WELL_NAME,WELL_COUNT,DEPARTAMEN,FIELD_ABRE,GEOLOGIC_P,"
+    "OPERATOR_W,COMPANY_CO,WELL_STA_1,WELL_SPUD_,WELL_COMPL,VISIBLE"
+)
+_SGC_WELLS_CHUNK_SIZE = 5_000
 _COLOMBIA_METRIC_CRS = "EPSG:9377"
 
 FIRST_YEAR = 2014
@@ -69,6 +84,10 @@ _COLOMBIA_LON_MIN = -85.0
 _COLOMBIA_LON_MAX = -65.0
 _COLOMBIA_LAT_MIN = -5.0
 _COLOMBIA_LAT_MAX = 16.0
+
+# SGC BIP encodes unknown dates as 1900-01-01 (-2208970800000 ms in UTC-5).
+_MIN_VALID_EPOCH_MS = -2_208_800_000_000  # 1900-01-03T00:00:00Z
+_MAX_VALID_EPOCH_MS = 4_102_444_800_000  # 2100-01-01T00:00:00Z
 
 _DEPT_LABELS: dict[str, str] = {
     "AMAZONAS": "Amazonas",
@@ -87,6 +106,7 @@ _DEPT_LABELS: dict[str, str] = {
     "CUNDINAMARCA": "Cundinamarca",
     "GUAJIRA": "Guajira",
     "HUILA": "Huila",
+    "LA GUAJIRA": "Guajira",
     "MAGDALENA": "Magdalena",
     "META": "Meta",
     "NARINO": "Nariño",
@@ -125,7 +145,12 @@ _BASIN_LABELS: dict[str, str] = {
     "VALLE SUPERIOR DEL MAGDALENA": "Valle Superior del Magdalena",
     "VAUPES-AMAZONAS": "Vaupés-Amazonas",
 }
-_IGNORED_BASINS = frozenset({"", "AREA NO PROSPECTIVA"})
+_IGNORED_BASINS = frozenset({"", "AREA NO PROSPECTIVA", "EXTRANJERO"})
+_OFFSHORE_BASIN_TOKENS = ("OFFSHORE", "LOS CAYOS", "PACIFICO PROFUNDO")
+_IGNORED_WELL_STATUS = frozenset(
+    {"", "SIN ESTADO", "NO APLICA", "NO_APLICA", "N/A", "SIN INFORMACION", "0"}
+)
+_IGNORED_WELL_OPERATORS = frozenset({"", "PENDIENTE", "SIN INFORMACION", "NO APLICA", "N/A"})
 
 _LOWERCASE_WORDS = frozenset({"de", "del", "la", "las", "los", "y"})
 
@@ -154,7 +179,11 @@ def _clean_basin(value: Any) -> str | None:
     norm = schema.normalize_key(str(value))
     if norm in _IGNORED_BASINS:
         return None
-    return _BASIN_LABELS.get(norm) or _title_case_es(str(value))
+    return (
+        _BASIN_LABELS.get(norm)
+        or _BASIN_LABELS.get(norm.replace("-", " "))
+        or _title_case_es(str(value))
+    )
 
 
 def _clean_text(value: Any) -> str | None:
@@ -826,6 +855,158 @@ def _parse_fields_geo(paths: list[Path]) -> gpd.GeoDataFrame:
     return geo.prepare_geo(enriched, schema.GeoKind.FIELDS)
 
 
+def _epoch_ms_to_iso_date(value: Any) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        ms = float(value)
+    except TypeError, ValueError:
+        return None
+    if not np.isfinite(ms) or ms < _MIN_VALID_EPOCH_MS or ms > _MAX_VALID_EPOCH_MS:
+        return None
+    return datetime.fromtimestamp(ms / 1000.0, tz=UTC).date().isoformat()
+
+
+def _clean_well_operator(operator_w: Any, company_co: Any) -> str | None:
+    for candidate in (operator_w, company_co):
+        text = _clean_text(candidate)
+        if text is not None and schema.normalize_key(text) not in _IGNORED_WELL_OPERATORS:
+            return text
+    return None
+
+
+def _clean_well_status(value: Any) -> str | None:
+    text = _clean_text(value)
+    if text is None or schema.normalize_key(text) in _IGNORED_WELL_STATUS:
+        return None
+    return _title_case_es(text)
+
+
+def _well_environment(basin: str | None) -> str | None:
+    if basin is None:
+        return None
+    norm = schema.normalize_key(basin)
+    if any(tok in norm for tok in _OFFSHORE_BASIN_TOKENS):
+        return "offshore"
+    return "onshore"
+
+
+def _extract_well_point(geom: Any) -> shapely.Point | None:
+    if not isinstance(geom, dict) or geom.get("type") != "Point":
+        return None
+    coords = geom.get("coordinates")
+    if not isinstance(coords, list) or len(coords) < 2:
+        return None
+    try:
+        lon = float(coords[0])
+        lat = float(coords[1])
+    except TypeError, ValueError:
+        return None
+    return _valid_colombia_point(lon, lat)
+
+
+def _well_record_from_feature(feat: dict[str, Any]) -> dict[str, Any] | None:
+    props = feat.get("properties")
+    if not isinstance(props, dict):
+        return None
+    if schema.normalize_key(_clean_text(props.get("VISIBLE"))) == "NO":
+        return None
+    country = schema.normalize_key(_clean_text(props.get("WELL_COUNT")))
+    if country and country != "COLOMBIA":
+        return None
+
+    uwi = _clean_text(props.get("UWI"))
+    well_name = _clean_text(props.get("WELL_NAME"))
+    well_id = schema.normalize_key(uwi or well_name)
+    if not well_id:
+        return None
+
+    field_name = _clean_text(props.get("FIELD_ABRE"))
+    field_id = schema.normalize_key(field_name) or None
+    basin = _clean_basin(props.get("GEOLOGIC_P"))
+    return {
+        "source": "colombia",
+        "well_id": well_id,
+        "well_name": well_name or uwi,
+        "field_id": field_id,
+        "field_name": field_name,
+        "basin": basin,
+        "region": _clean_department(props.get("DEPARTAMEN")),
+        "environment": _well_environment(basin),
+        "operator": _clean_well_operator(props.get("OPERATOR_W"), props.get("COMPANY_CO")),
+        "status": _clean_well_status(props.get("WELL_STA_1")),
+        "spud_date": _epoch_ms_to_iso_date(props.get("WELL_SPUD_")),
+        "completion_date": _epoch_ms_to_iso_date(props.get("WELL_COMPL")),
+        "geometry": _extract_well_point(feat.get("geometry")),
+    }
+
+
+def _fetch_sgc_wells_geojson(http: httpx2.Client, dest: Path) -> base.DownloadResult:
+    """Download all SGC BIP wells via OBJECTID-range chunking into one GeoJSON file."""
+    ids_params = urlencode({"where": "1=1", "returnIdsOnly": "true", "f": "json"})
+    ids_url = f"{_SGC_WELLS_QUERY_URL}?{ids_params}"
+    ids_payload = base.get_with_retry(http, ids_url).json()
+    raw_ids = ids_payload.get("objectIds") or []
+    oids = sorted(int(oid) for oid in raw_ids)
+
+    features: list[dict[str, Any]] = []
+    for start in range(0, len(oids), _SGC_WELLS_CHUNK_SIZE):
+        chunk = oids[start : start + _SGC_WELLS_CHUNK_SIZE]
+        params = urlencode(
+            {
+                "where": f"OBJECTID>={chunk[0]} AND OBJECTID<={chunk[-1]}",
+                "outFields": _SGC_WELLS_OUT_FIELDS,
+                "outSR": "4326",
+                "f": "geojson",
+            }
+        )
+        page = base.get_with_retry(http, f"{_SGC_WELLS_QUERY_URL}?{params}").json()
+        page_feats = page.get("features")
+        if isinstance(page_feats, list):
+            features.extend(page_feats)
+
+    merged = {"type": "FeatureCollection", "features": features}
+    payload = json.dumps(merged, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(f"{dest.name}.part")
+    part.write_bytes(payload)
+    part.replace(dest)
+    return base.DownloadResult(
+        path=dest,
+        url=ids_url,
+        sha256=hashlib.sha256(payload).hexdigest(),
+        size_bytes=len(payload),
+    )
+
+
+def _parse_wells_geo(paths: list[Path]) -> gpd.GeoDataFrame:
+    records: list[dict[str, Any]] = []
+    for path in paths:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        for feat in payload.get("features") or []:
+            if isinstance(feat, dict):
+                rec = _well_record_from_feature(feat)
+                if rec is not None:
+                    records.append(rec)
+    if not records:
+        return schema.empty_geo(schema.GeoKind.WELLS)
+
+    df = pd.DataFrame(records)
+    df["_has_geom"] = df["geometry"].notna()
+    df["_has_field"] = df["field_id"].notna()
+    df["_has_op"] = df["operator"].notna()
+    df = df.sort_values(
+        ["_has_geom", "_has_field", "_has_op"],
+        ascending=[False, False, False],
+        kind="mergesort",
+    )
+    dedup = df.drop_duplicates(subset=["well_id"], keep="first").drop(
+        columns=["_has_geom", "_has_field", "_has_op"]
+    )
+    gdf = gpd.GeoDataFrame(dedup, geometry="geometry", crs=schema.GEO_CRS)
+    return geo.prepare_geo(gdf, schema.GeoKind.WELLS)
+
+
 @base.register
 class Colombia(base.Source):
     """Colombia Agencia Nacional de Hidrocarburos (ANH) via ``datos.gov.co``."""
@@ -838,7 +1019,7 @@ class Colombia(base.Source):
     docs_url = _DOCS_URL
     licence = "CC BY-SA 4.0"
     licence_url = _LICENCE_URL
-    web_wells = False
+    web_wells = True
     search_all_wells = False
 
     def discover_production(
@@ -913,7 +1094,10 @@ class Colombia(base.Source):
         *,
         client: httpx2.Client | None = None,
     ) -> list[base.DownloadResult]:
-        """Download ANH RUTY field polygons, Socrata field points, and sedimentary basins."""
+        """Download ANH RUTY field polygons/basins or SGC BIP wellbores."""
+        if kind is schema.GeoKind.WELLS:
+            with base.open_client(client) as http:
+                return [_fetch_sgc_wells_geojson(http, dest_dir / "colombia_wells.geojson")]
         if kind is not schema.GeoKind.FIELDS:
             return super().fetch_geo(kind, dest_dir, client=client)
 
@@ -959,7 +1143,9 @@ class Colombia(base.Source):
             ]
 
     def parse_geo(self, kind: schema.GeoKind, paths: list[Path]) -> gpd.GeoDataFrame:
-        """Parse Colombia field polygons/points enriched with ANH sedimentary basins."""
+        """Parse Colombia field polygons/basins or SGC BIP wellbores."""
         if kind is schema.GeoKind.FIELDS:
             return _parse_fields_geo(paths)
+        if kind is schema.GeoKind.WELLS:
+            return _parse_wells_geo(paths)
         return super().parse_geo(kind, paths)

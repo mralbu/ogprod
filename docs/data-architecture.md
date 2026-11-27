@@ -177,11 +177,12 @@ ANP's [**Fase de Desenvolvimento e Produção**](https://www.gov.br/anp/pt-br/ce
 ### 3.7 Priority 7 — Colombia (ANH / `datos.gov.co`)
 
 - **Production (`datos.gov.co` Socrata Open Data API, 2014–present, CC BY-SA 4.0):**
-  - Field-level monthly volumes (`entity_type = "field"`, `web_wells = False` per [ADR 0011](adr/0011-multi-country-scaling-and-overview.md)): crude oil (`fdvb-hsrf`, `produccion_bls` in barrels → `bbl/d`) and natural gas (`5dux-bfvx`, `produccionkpc` in thousand cubic feet / Mcf → `e3m3/d`).
+  - Field-level monthly volumes (`entity_type = "field"`, `web_wells = True`, `search_all_wells = False` per [ADR 0011](adr/0011-multi-country-scaling-and-overview.md)): crude oil (`fdvb-hsrf`, `produccion_bls` in barrels → `bbl/d`) and natural gas (`5dux-bfvx`, `produccionkpc` in thousand cubic feet / Mcf → `e3m3/d`).
   - Rows spanning multiple municipalities for the same `(field_id, period)` (including `MunicipiosNN`) are summed; blank-`campo` placeholder rows are dropped; `departamento` is normalized into `region` (`DEPARTAMENTO NN` → `NULL`).
   - Historical years are fetched in 5-year chunks (`2014–2018`, …) with individual yearly bundles for the last two years so incremental `--recent` refreshes only re-fetch recent data.
-- **Geo (`EPSG:4326`, polygon-only `geo/fields`):**
+- **Geo (`EPSG:4326`, `geo/fields` + `geo/wells`):**
   - `geo/fields`: official ANH RUTY reservoir ring-fence polygons (`Yacimientos:Yacimientos` OGC WFS, 892 reservoirs dissolved by `field_id`, with `area_km2` computed in `EPSG:9377`), reconciled against Socrata field names via exact, loose normalized key (`UNIFICADO`/articles/plurals/abbreviations), unambiguous point-in-polygon, and unique `UNIFICADO` token matching (~99.2% of 2024 oil and ~97.8% of 2024 gas). Unreconciled fields keep `geometry = NULL` metadata rows (retaining `basin`, `region`, `operator`, and searchability without rendering point circles on the map). All geolocated fields are enriched with `basin` and `environment` from ANH Geovisor's `Cuenca Sedimentaria` polygons (`GEOVISOR_v32/ANH_InsGDB/MapServer/4`, `maxAllowableOffset=0.001`).
+  - `geo/wells`: Servicio Geológico Colombiano (SGC) Banco de Información Petrolera (`EPIS/EPIS_V2/MapServer/0`, ~27.5k Colombian hydrocarbon wellbores fetched via `OBJECTID`-range chunking, 4D PointZM stripped to 2D `EPSG:4326`, `1900-01-01` sentinel dates filtered). Exported to `ogprod.pmtiles` map tiles (`web_wells = True`) and excluded from `search/index.json` (`search_all_wells = False`).
 
 ### 3.8 Priority 8 — USA Federal Offshore Gulf of Mexico (BSEE / BOEM *OGOR-A*)
 

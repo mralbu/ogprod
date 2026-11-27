@@ -24,7 +24,7 @@ Last reviewed: November 2026.
 | **Built (v2)** | USA — Federal Offshore | `us-gom` | BSEE / BOEM (*OGOR-A*) | Well | Monthly, 1996–present | O, G, W | F (block-dissolved), Fac, W | Direct HTTPS ZIPs + BOEM/BSEE SHP/ASCII (NAD 27); CI-friendly |
 | **Built (v2)** | Netherlands | `netherlands` | NLOG (TNO) | Well | Monthly, 2003–present | O, C, G, W, WI, GI | F, Fac, W | Datacenter REST API + OGC WFS (ED50/UTM31N); CI-friendly |
 | **Tier 1 (blocked in CI)** | USA — Alaska | `us-ak` | AOGCC (+ ADNR GIS) | Well | Monthly, all history (pre/post-2000) | O, NGL, G, W, Inj | F (ADNR Unit/PA), Fac, W | `DataMinerAll.zip` (~30 MB) gated by **DataDome** anti-bot on `alaska.gov` (local-only refresh); ADNR ArcGIS polygons are open |
-| **Built (v2)** | Colombia | `colombia` | ANH (`datos.gov.co`) | Field | Monthly, 2014–present | O, G | F (RUTY WFS, reconciled) + basins | Socrata API (CC BY-SA 4.0) + ANH Geovisor WFS; CI-friendly |
+| **Built (v2)** | Colombia | `colombia` | ANH (`datos.gov.co`) + SGC BIP | Field | Monthly, 2014–present | O, G | F (RUTY WFS, reconciled) + basins, W (SGC BIP) | Socrata API (CC BY-SA 4.0) + ANH Geovisor WFS + SGC BIP ArcGIS REST; CI-friendly |
 | **Tier 2** | Denmark | `denmark` | Danish Energy Agency (ENS) | Field | Monthly 2018+ (yearly 1972+) | O, G, W, WI, GI | F, Fac, W | Excel spreadsheets + SHP/WFS (ED50/UTM32N) |
 | **Tier 2** | Canada — Offshore NL | `canada-nl` | C-NLOER (ex-C-NLOPB) | Well & Field | Monthly, 1997–present | O, G, W | Licences, W (5 fields, 4 hubs) | HTML/tables + Data Hub SHP; small high-value offshore set |
 | **Tier 2** | Italy | `italy` | MASE / UNMIG | Concession | Monthly, 2004–present | O (`kg`), C (`kg`), G | Conc, Fac, W | Single CSV (CC BY 4.0) + ArcGIS Online WebGIS |

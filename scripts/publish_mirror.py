@@ -107,12 +107,13 @@ complete terms.
   - Terms: [NLOG Disclaimer][nl-terms] (free reuse and redistribution with source attribution)
   - Attribution: Credit NLOG.NL (TNO - Geological Survey of the Netherlands / Ministry of
     Climate Policy and Green Growth).
-- **`colombia` — Agencia Nacional de Hidrocarburos (ANH):**
+- **`colombia` — Agencia Nacional de Hidrocarburos (ANH) & SGC (BIP):**
   - Portal: [Crudo Consolidada (`fdvb-hsrf`)][co-oil], [Gas Consolidada (`5dux-bfvx`)][co-gas],
-    & [ANH Geovisor][co-geo]
+    [ANH Geovisor][co-geo], & [SGC BIP (`EPIS_V2`)][co-sgc]
   - License: [Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)][cc-by-sa-4]
-  - Attribution: Credit Agencia Nacional de Hidrocarburos (ANH) / `datos.gov.co`, normalized
-    to calendar-day rates and enriched with ANH sedimentary basins by `ogprod`.
+  - Attribution: Credit Agencia Nacional de Hidrocarburos (ANH) / `datos.gov.co` and
+    Servicio Geológico Colombiano (SGC — Banco de Información Petrolera), normalized to
+    calendar-day rates and enriched with ANH sedimentary basins by `ogprod`.
 
 [anp-portal]: https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/fase-de-desenvolvimento-e-producao
 [br-decree]: https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm
@@ -133,6 +134,7 @@ complete terms.
 [co-oil]: https://www.datos.gov.co/Minas-y-Energ-a/Produccion-Fiscalizada-Crudo-Consolidada/fdvb-hsrf
 [co-gas]: https://www.datos.gov.co/Minas-y-Energ-a/Produccion-Fiscalizada-Gas-Consolidada/5dux-bfvx
 [co-geo]: https://geovisor.anh.gov.co/tierras/
+[co-sgc]: https://srvags.sgc.gov.co/arcgis/rest/services/EPIS/EPIS_V2/MapServer/0
 [cc-by-sa-4]: https://creativecommons.org/licenses/by-sa/4.0/
 
 ### Modifications Made by `ogprod`
@@ -265,21 +267,25 @@ the upstream terms for each source partition they use:
                  WELL_NAME, and reprojected ED50 / UTM 31N (EPSG:23031) geometries to
                  GeoParquet 1.1 (EPSG:4326).
 
-* source=colombia (production/source=colombia/**, geo/fields/colombia.parquet)
-  Publisher: Agencia Nacional de Hidrocarburos (ANH) via datos.gov.co
+* source=colombia (production/source=colombia/**, geo/{fields,wells}/colombia.parquet)
+  Publisher: Agencia Nacional de Hidrocarburos (ANH) via datos.gov.co &
+             Servicio Geológico Colombiano (SGC — Banco de Información Petrolera)
   Source: https://www.datos.gov.co/Minas-y-Energ-a/Produccion-Fiscalizada-Crudo-Consolidada/fdvb-hsrf
           https://www.datos.gov.co/Minas-y-Energ-a/Produccion-Fiscalizada-Gas-Consolidada/5dux-bfvx
           https://geovisor.anh.gov.co/server/services/Yacimientos/Yacimientos/MapServer/WFSServer
           https://geovisor.anh.gov.co/server/rest/services/GEOVISOR_v32/ANH_InsGDB/MapServer/4
+          https://srvags.sgc.gov.co/arcgis/rest/services/EPIS/EPIS_V2/MapServer/0
   License: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
            https://creativecommons.org/licenses/by-sa/4.0/
-  Attribution: Credit Agencia Nacional de Hidrocarburos (ANH) / datos.gov.co.
+  Attribution: Credit Agencia Nacional de Hidrocarburos (ANH) / datos.gov.co and
+               Servicio Geológico Colombiano (SGC — Banco de Información Petrolera).
   Modifications: ogprod summed multi-municipality rows to field-month grain, converted
                  monthly barrels and thousand cubic feet (kpc) to calendar-day average
                  rates (bbl/d, e3m3/d), dissolved and reconciled ANH RUTY reservoir
                  polygons to Socrata field IDs (retaining geometry=NULL metadata rows
-                 for unreconciled fields), and enriched fields with ANH sedimentary
-                 basin and onshore/offshore attributes in GeoParquet 1.1 (EPSG:4326).
+                 for unreconciled fields), enriched fields with ANH sedimentary basin
+                 and onshore/offshore attributes, and normalized SGC BIP wellbores to
+                 2D GeoParquet 1.1 (EPSG:4326).
 
 3. Disclaimer
 -------------
