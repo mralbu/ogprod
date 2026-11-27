@@ -1,6 +1,10 @@
 import * as echarts from "echarts";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import {
+  createLegendDoubleClickDetector,
+  legendSelectionAfterDoubleClick,
+} from "../lib/legendIsolation";
+import {
   buildSourceComparisonOption,
   buildTimeSeriesOption,
   type SourceComparisonTable,
@@ -75,6 +79,24 @@ export const TimeSeriesChart = forwardRef<TimeSeriesChartHandle, TimeSeriesChart
         : buildTimeSeriesOption({ rows, activeProducts, unitSystem, oilCapacityBpd, knownGaps });
       chart.setOption(option, true);
     }, [rows, activeProducts, unitSystem, oilCapacityBpd, knownGaps, comparisonTable]);
+
+    useEffect(() => {
+      const chart = chartRef.current;
+      if (!chart || !comparisonTable) return;
+      const names = comparisonTable.series.map((s) => s.label);
+      const isDoubleClick = createLegendDoubleClickDetector();
+      const onLegendChange = (event: unknown) => {
+        const { name, selected } = event as { name: string; selected: Record<string, boolean> };
+        if (!isDoubleClick(name, performance.now())) return;
+        // Both clicks already toggled `name`, so `selected` is the state before the double click.
+        const next = legendSelectionAfterDoubleClick(names, name, selected);
+        chart.setOption({ legend: { selected: next } });
+      };
+      chart.on("legendselectchanged", onLegendChange);
+      return () => {
+        chart.off("legendselectchanged", onLegendChange);
+      };
+    }, [comparisonTable]);
 
     return <div ref={containerRef} style={{ height }} className="w-full" />;
   },
