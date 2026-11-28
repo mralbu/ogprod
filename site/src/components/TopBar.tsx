@@ -238,6 +238,7 @@ export function TopBar({
           <span className="hidden md:inline">Units</span>
           <select
             id="unit-system-select"
+            aria-label="Units"
             value={unitSystem}
             onChange={(e) => onChangeUnits(e.target.value as UnitSystem)}
             className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-cyan-700 focus:outline-none"

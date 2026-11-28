@@ -6,7 +6,7 @@
     <title>ogprod — Public Oil &amp; Gas Production Explorer</title>
     <meta
       name="description"
-      content="Interactive map and production analytics for public oil, gas, injection, field, FPSO, and well data across Brazil (ANP), Norway (Sodir), and Mexico (SENER/CNIH)."
+      content="Interactive map and production analytics for public oil, gas, injection, field, FPSO, and well data across Brazil, Norway, Mexico, and more."
     />
     <link
       rel="alternate"
@@ -14,12 +14,29 @@
       href="./llms.txt"
       title="LLM Data &amp; Query Guide (llms.txt)"
     />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
+    <!-- Deep links (?entity=…) are views of this one page, so they all canonicalize to the root. -->
+    <link rel="canonical" href="https://mralbu.github.io/ogprod/" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="theme-color" content="#0f172a" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ogprod" />
+    <meta property="og:url" content="https://mralbu.github.io/ogprod/" />
+    <meta property="og:title" content="ogprod — Public Oil &amp; Gas Production Explorer" />
+    <meta
+      property="og:description"
+      content="Interactive map and production analytics for public oil, gas, injection, field, FPSO, and well data across Brazil, Norway, Mexico, and more."
     />
+    <!-- Absolute URL: social crawlers do not resolve relative og:image paths. -->
+    <meta property="og:image" content="https://mralbu.github.io/ogprod/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="ogprod explorer: map of oil and gas fields with a production time-series chart"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
   </head>
   <body class="bg-[#f4f5f7] text-[#0f172a] antialiased">
     <div id="root"></div>

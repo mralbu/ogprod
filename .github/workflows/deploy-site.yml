@@ -106,6 +106,8 @@ jobs:
         working-directory: site
         env:
           VITE_BASE_PATH: /ogprod/
+          # Repository variable, e.g. https://ogprod.goatcounter.com/count; unset disables analytics.
+          VITE_GOATCOUNTER_URL: ${{ vars.GOATCOUNTER_URL }}
         run: npm run build
 
       - uses: actions/configure-pages@v5

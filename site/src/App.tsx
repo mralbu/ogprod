@@ -1,8 +1,9 @@
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardPane } from "./components/DashboardPane";
 import { MapPane } from "./components/MapPane";
 import { TopBar } from "./components/TopBar";
+import { selectionToPath, trackPageview } from "./lib/analytics";
 import {
   loadFacilityMonthlyShard,
   loadFieldMonthlyShard,
@@ -21,6 +22,8 @@ import type {
   SourceFilter,
   UnitSystem,
 } from "./types/data";
+
+const PAGEVIEW_DEBOUNCE_MS = 1500;
 
 export function App() {
   const initial = useMemo(() => parseUrlState(window.location.search), []);
@@ -78,6 +81,19 @@ export function App() {
       window.history.replaceState(null, "", nextUrl);
     }
   }, [activeSource, selection, activeProducts, unitSystem]);
+
+  const pagePath = selectionToPath(selection, activeSource);
+  const hasTrackedInitialRef = useRef(false);
+  useEffect(() => {
+    if (!hasTrackedInitialRef.current) {
+      hasTrackedInitialRef.current = true;
+      trackPageview(pagePath);
+      return;
+    }
+    // Debounced so rapid clicking through the map counts only where the user settles.
+    const timer = window.setTimeout(() => trackPageview(pagePath), PAGEVIEW_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [pagePath]);
 
   useEffect(() => {
     if (!meta) return;
