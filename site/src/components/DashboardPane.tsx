@@ -1,5 +1,6 @@
 import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { useMemo, useRef } from "react";
+import { trackEvent } from "../lib/analytics";
 import { buildComparisonCsv, buildSeriesCsv, downloadCsv } from "../lib/csvExport";
 import { llmsTxtUrl } from "../lib/dataClient";
 import { type ScopedKnownGap, selectApplicableGaps } from "../lib/knownGaps";
@@ -241,6 +242,7 @@ export function DashboardPane({
       .replace(/^-|-$/g, "") || "ogprod";
 
   const handleExportCsv = () => {
+    trackEvent("export/csv");
     if (comparisonTable) {
       const csv = buildComparisonCsv(comparisonTable);
       downloadCsv(`${exportSlug}-${comparisonTable.product}.csv`, csv);
@@ -253,6 +255,7 @@ export function DashboardPane({
   };
 
   const handleExportPng = () => {
+    trackEvent("export/png");
     chartRef.current?.exportPng(`${exportSlug}-chart.png`);
   };
 

@@ -51,7 +51,7 @@ export function KpiStrip({
         <div className="font-tabular mt-1 text-base font-semibold text-slate-900">
           {formatCompactNumber(latestOilConverted)}
         </div>
-        <div className="text-[10px] text-slate-400">
+        <div className="text-[10px] text-slate-500">
           {unitLabelFor("oil_prod", unitSystem)}
           {allSourcesOverview ? " · sum of latest" : ""}
         </div>
@@ -62,7 +62,7 @@ export function KpiStrip({
         <div className="font-tabular mt-1 text-base font-semibold text-slate-900">
           {formatCompactNumber(latestGasConverted)}
         </div>
-        <div className="text-[10px] text-slate-400">
+        <div className="text-[10px] text-slate-500">
           {unitLabelFor("gas_prod", unitSystem)}
           {allSourcesOverview ? " · sum of latest" : ""}
         </div>
@@ -79,7 +79,7 @@ export function KpiStrip({
               ? `${rangeStart.slice(0, 4)}–${rangeEnd.slice(0, 4)}`
               : "—"}
         </div>
-        <div className="text-[10px] text-slate-400">
+        <div className="text-[10px] text-slate-500">
           {selection.kind === "facility"
             ? selectedFacility?.oil_capacity_bpd
               ? `Cap ${formatCompactNumber(convertRate(selectedFacility.oil_capacity_bpd, "oil_prod", unitSystem))} ${unitLabelFor("oil_prod", unitSystem)}`
@@ -113,7 +113,7 @@ export function KpiStrip({
                 ? allSourcesOverview.sourceCount.toLocaleString()
                 : seriesLength.toLocaleString()}
         </div>
-        <div className="text-[10px] text-slate-400">
+        <div className="text-[10px] text-slate-500">
           {selection.kind === "field"
             ? "cumulative crude"
             : selection.kind === "facility"

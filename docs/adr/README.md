@@ -16,3 +16,4 @@ Context, Decision, Consequences.
 | [0009](0009-anp-gas-gap-handling.md) | ANP 2003–2005 gas gap: Layer-1 faithful, Layer-2 country backfill & basin mask |
 | [0010](0010-basin-and-region-enrichment.md) | Keep `basin` and `region` distinct; enrich Mexico via `geo_petro_prov`, fall back in Layer 2 |
 | [0011](0011-multi-country-scaling-and-overview.md) | Multi-country scaling: tiered well granularity and split-line All Sources overview |
+| [0012](0012-cookieless-analytics-goatcounter.md) | Cookieless GoatCounter analytics, opt-in at build time, virtual paths per selection |
