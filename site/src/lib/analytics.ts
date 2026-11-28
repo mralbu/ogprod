@@ -83,6 +83,7 @@ export function trackEvent(name: string): void {
 function onDocumentClick(e: MouseEvent): void {
   const target = e.target instanceof Element ? e.target.closest("a[href]") : null;
   if (!(target instanceof HTMLAnchorElement)) return;
+  if (target.closest(".maplibregl-ctrl-attrib")) return;
   const name = outboundEventName(target.href, window.location.origin);
   if (name) trackEvent(name);
 }
@@ -104,6 +105,12 @@ export function initAnalytics(endpoint: string | undefined): void {
     const queued = pending;
     pending = [];
     queued.forEach(send);
+  });
+  script.addEventListener("error", () => {
+    // Blocked by an ad-blocker or offline: stop queuing hits for the rest of the session.
+    enabled = false;
+    pending = [];
+    document.removeEventListener("click", onDocumentClick, { capture: true });
   });
   document.head.appendChild(script);
   document.addEventListener("click", onDocumentClick, { capture: true });
