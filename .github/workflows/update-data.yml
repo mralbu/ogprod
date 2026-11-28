@@ -2,10 +2,10 @@ name: Update Mirror Data
 
 on:
   schedule:
-    # Weekly Monday 06:00 UTC rolling refresh for CI-reachable regulators (Norway, Mexico, UK, Netherlands, Colombia, US GOM).
+    # Twice-monthly (1st and 15th, 06:00 UTC) rolling refresh for CI-reachable regulators (Norway, Mexico, UK, Netherlands, Colombia, US GOM).
     # Brazil (www.gov.br) and Argentina (datos.energia.gob.ar) time out from cloud/non-AR IPs
     # and are updated locally via scripts/publish_mirror.py (or manually via workflow_dispatch).
-    - cron: "0 6 * * 1"
+    - cron: "0 6 1,15 * *"
   workflow_dispatch:
     inputs:
       sources:

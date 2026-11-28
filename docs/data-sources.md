@@ -4,7 +4,7 @@ Research survey and technical evaluation of public oil & gas production, injecti
 
 - **Layer 1 production (`store/production/`):** monthly calendar-day average rates in `float32` (`oil_prod`, `condensate_prod`, `ngl_prod`, `gas_prod`, `water_prod`, `water_inj`, `gas_inj`, `co2_inj`), wide Parquet keyed on `(source, entity_type, entity_id, field_id, facility_id, period)`.
 - **Layer 1 geospatial (`store/geo/`):** Hilbert-sorted GeoParquet 1.1 (`EPSG:4326`) across three tables: `fields` (polygons), `facilities` (points — platforms/FPSOs/installations), and `wells` (points).
-- **Distribution:** anonymous Hugging Face mirror (`mralbu/ogprod`), weekly GitHub Actions refresh (ADR 0002), and Layer 2 static web explorer (`ogprod export-web`).
+- **Distribution:** anonymous Hugging Face mirror (`mralbu/ogprod`), twice-monthly GitHub Actions refresh (ADR 0002), and Layer 2 static web explorer (`ogprod export-web`).
 
 Restored from v1 history (`395cf68:docs/data-sources.md`) and expanded with live portal verification, geospatial inventory, CRS/unit quirks, and licensing checks.
 
@@ -55,7 +55,7 @@ Before adding a new connector to `ogprod`, evaluate it on five axes that matter 
 3. **Credential-free bulk access & CI reliability:**
    - Ideal sources expose stable HTTPS bulk files (CSV/ZIP) or open geospatial APIs (OGC WFS, ArcGIS FeatureServer, CKAN, Socrata) with no login, no CAPTCHA, and no cloud-IP blocks (unlike `gov.br`, see [ADR 0002](adr/0002-brazil-not-refreshed-in-ci.md)).
 4. **Restatement & mirror footprint:**
-   - Most regulators restate recent months (and some, like BSEE and Petrinex, restate years back). Small-to-medium archives (< 200 MB compressed Parquet) fit easily in the single public Hugging Face mirror (`mralbu/ogprod`) and weekly GitHub Actions jobs; massive onshore shale archives (Alberta Petrinex, Texas RRC) need careful partitioning and selective refresh.
+   - Most regulators restate recent months (and some, like BSEE and Petrinex, restate years back). Small-to-medium archives (< 200 MB compressed Parquet) fit easily in the single public Hugging Face mirror (`mralbu/ogprod`) and twice-monthly GitHub Actions jobs; massive onshore shale archives (Alberta Petrinex, Texas RRC) need careful partitioning and selective refresh.
 5. **Licensing & mirror redistribution:**
    - Because `ogprod` publishes normalized Parquet/GeoParquet to the public Hugging Face mirror, redistribution terms matter (US federal/state public domain, CC BY 4.0, CC BY-SA 4.0, UK NSTA User Agreement, vs restrictive terms such as Alberta AER reproduction rules).
 
@@ -66,11 +66,11 @@ Before adding a new connector to `ogprod`, evaluate it on five axes that matter 
 Already implemented in `src/ogprod/sources/` and documented in [data-architecture.md](data-architecture.md):
 
 - **`brazil` (ANP):** 1941–present well-level oil, condensate, gas, water production + water/gas/CO₂ injection; field polygons (WFS + relinquished CSVs), platforms/FPSOs with oil & gas capacities (`lpo`), well points (`situacao-pocos`). Refreshed locally (not in GitHub Actions) due to `gov.br` blocking Azure IP ranges.
-- **`norway` (Sodir):** 1971–present field-level oil, condensate, NGL, gas, water production (single ~2 MB CSV); field polygons, facilities, and wellbores via FactMaps ArcGIS REST. Refreshed weekly in CI.
-- **`mexico` (SENER / ex-CNH SIH):** 1960–present field-level production (default, ~18 MB CSV) plus optional well-level parser (`PRODUCCION_POZOS.zip`, 1930–present); field polygons, installations, and regional well shapefiles via `mapa-hidrocarburos.energia.gob.mx`. Refreshed weekly in CI.
-- **`uk` (NSTA):** 1975–present field/reporting-unit monthly oil, condensate, associated + dry gas, produced water, and water/gas injection via NSTA's hosted PPRS ArcGIS FeatureServer (offshore + onshore); offshore & onshore field polygons, offshore surface facilities, and offshore & onshore wellbore top holes (WGS84). Refreshed weekly in CI under the NSTA User Agreement (non-commercial reuse with attribution).
+- **`norway` (Sodir):** 1971–present field-level oil, condensate, NGL, gas, water production (single ~2 MB CSV); field polygons, facilities, and wellbores via FactMaps ArcGIS REST. Refreshed twice-monthly in CI.
+- **`mexico` (SENER / ex-CNH SIH):** 1960–present field-level production (default, ~18 MB CSV) plus optional well-level parser (`PRODUCCION_POZOS.zip`, 1930–present); field polygons, installations, and regional well shapefiles via `mapa-hidrocarburos.energia.gob.mx`. Refreshed twice-monthly in CI.
+- **`uk` (NSTA):** 1975–present field/reporting-unit monthly oil, condensate, associated + dry gas, produced water, and water/gas injection via NSTA's hosted PPRS ArcGIS FeatureServer (offshore + onshore); offshore & onshore field polygons, offshore surface facilities, and offshore & onshore wellbore top holes (WGS84). Refreshed twice-monthly in CI under the NSTA User Agreement (non-commercial reuse with attribution).
 - **`argentina` (Secretaría de Energía — *Capítulo IV*):** 2006–present monthly oil, gas, water production + water/gas/CO₂ injection from yearly Res. 319/93 Capítulo IV CSVs (covering conventional + Vaca Muerta unconventional), aggregated to field (*yacimiento*) grain by default per [ADR 0011](adr/0011-multi-country-scaling-and-overview.md) (`web_wells = False`) with local Python well-level opt-in (`granularity="well"` / `parse_well_production`); field polygons (*Yacimientos*) and well points (*Capítulo IV - Pozos*). Published under **CC BY 4.0** (`datos.gob.ar` CKAN catalog).
-- **`netherlands` (NLOG / TNO):** 2003–present well-level onshore + Dutch North Sea oil, condensate, gas, produced water, and water/gas injection via the NLOG Datacenter REST API (`nlog-mapviewer-api/rest/prodfigures/well`); field polygons, hydrocarbon mining facilities, and hydrocarbon/storage wells via GDN GeoServices OGC WFS (reprojected from ED50 / UTM 31N `EPSG:23031` to `EPSG:4326`). Refreshed weekly in CI; free reuse and redistribution with attribution to NLOG.NL.
+- **`netherlands` (NLOG / TNO):** 2003–present well-level onshore + Dutch North Sea oil, condensate, gas, produced water, and water/gas injection via the NLOG Datacenter REST API (`nlog-mapviewer-api/rest/prodfigures/well`); field polygons, hydrocarbon mining facilities, and hydrocarbon/storage wells via GDN GeoServices OGC WFS (reprojected from ED50 / UTM 31N `EPSG:23031` to `EPSG:4326`). Refreshed twice-monthly in CI; free reuse and redistribution with attribution to NLOG.NL.
 
 ---
 
@@ -111,7 +111,7 @@ Already implemented in `src/ogprod/sources/` and documented in [data-architectur
   - `geo/facilities`: `UKCS offshore infrastructure surface points` (active + removed surface installations & subsea structures, updated semi-annually in April/October; prefer GeoJSON/FeatureServer over Shapefile due to 254-char attribute truncation).
   - `geo/wells`: NSTA wellbore surface points (WGS84) via Open Data Hub.
 - **Units & quirks:** Verify PPRS unit columns on live download (oil/water in `m³` / tonnes / `bpd`, gas in `kSm³` / `MMscf/d` depending on column). Some datasets are published in both WGS84 and ED50 — always pick the `(WGS84)` service.
-- **Scale & CI:** Compact (a few hundred UKCS fields, ~150k monthly rows — similar in scale to Norway Sodir). Ideal for weekly GitHub Actions refresh.
+- **Scale & CI:** Compact (a few hundred UKCS fields, ~150k monthly rows — similar in scale to Norway Sodir). Ideal for twice-monthly GitHub Actions refresh.
 - **Licence:** **NSTA User Agreement** (replaced OGA User Licence in April 2026; verify redistribution terms for the Hugging Face mirror).
 - **Links:**
   - [NSTA Production Data](https://www.nstauthority.co.uk/data-and-insights/data/themes/production/)
@@ -157,7 +157,7 @@ Already implemented in `src/ogprod/sources/` and documented in [data-architectur
   - `geo/fields`: `nlog:gdw_ng_field_utm` (567 hydrocarbon fields; `area_km2` computed in `EPSG:23031` before reprojection).
   - `geo/facilities`: `nlog:GDW_NG_FACILITY_UTM` (hydrocarbon mining installations; geothermal `GTI` installations excluded).
   - `geo/wells`: `nlog:gdw_ng_wll_all_utm` (hydrocarbon/storage/observation boreholes deduplicated to canonical `WELL_NAME`).
-- **Scale & CI:** Compact (567 fields, 614 facilities, ~4.9k hydrocarbon wells, ~1,550 producing wells). Refreshed weekly in GitHub Actions.
+- **Scale & CI:** Compact (567 fields, 614 facilities, ~4.9k hydrocarbon wells, ~1,550 producing wells). Refreshed twice-monthly in GitHub Actions.
 - **Licence:** Dutch public subsurface register (TNO / Ministry of Climate Policy and Green Growth; [NLOG Disclaimer](https://www.nlog.nl/en/disclaimer) grants free reuse and redistribution with attribution to NLOG.NL).
 - **Links:**
   - [NLOG Production and Injection Data](https://www.nlog.nl/en/production-and-injection-data)
